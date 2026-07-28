@@ -48,7 +48,7 @@ Any family member should be able to answer “Do we have this?” and “Where i
 ### Business and product goals
 
 - Deliver a small, trustworthy first release centered on finding items.
-- Establish a data model that can later support photos, receipts, warranties, and other item details.
+- Establish a data model that can later support receipts, warranties, and other item details.
 
 ## Non-goals for v1
 
@@ -91,11 +91,14 @@ A family member who mainly searches for items but occasionally adds, edits, or m
 
 ### Add an item
 
-1. A member selects **Add item**.
-2. They enter an item name.
-3. They choose a parent Item.
-4. They optionally add a photo, description, and tags.
-5. They save the Item and see it beneath the selected parent Item.
+1. A Member selects **Add item**.
+2. The app immediately opens the camera.
+3. The Member takes a photo of the Item or opts out of taking photo.
+4. The app presents the captured photo for cropping, and the Member confirms the crop.
+5. The app presents the Item details form.
+6. The Member enters a required name and may enter an optional description and optional Tags.
+7. The Member confirms or changes the Parent Item.
+8. The Member saves the Item and sees it beneath the selected Parent Item.
 
 Target: a basic item can be added in under 30 seconds.
 
@@ -136,38 +139,39 @@ Priorities use:
 
 ### Account and household
 
-| ID     | Priority | Requirement                                                                                                                |
-| ------ | -------- | -------------------------------------------------------------------------------------------------------------------------- |
-| ACC-01 | P0       | A person can sign in and sign out using their Google Account; no other authentication method is supported.                 |
-| ACC-02 | P0       | A signed-in Member can create a named Household root Item and becomes its owner.                                           |
-| ACC-03 | P0       | The Household Owner can invite a family member using a shareable invitation.                                               |
-| ACC-04 | P0       | An invited person can join the Household using their own Google Account.                                                   |
-| ACC-05 | P0       | All Household Members can view, add, edit, move, and delete Items.                                                         |
-| ACC-06 | P0       | The Household Owner can view and remove Household Members.                                                                |
-| ACC-07 | P1       | A Member can leave a Household, provided ownership is transferred first when applicable.                                  |
-| ACC-08 | P0       | A Member can belong to multiple Households using the same Google Account.                                                  |
-| ACC-09 | P0       | After sign-in, a Member with multiple available Households must select a Household before its Inventory is shown.          |
-| ACC-10 | P0       | After sign-in, a Member with exactly one available Household is taken directly to that Household.                         |
+| ID     | Priority | Requirement                                                                                                       |
+| ------ | -------- | ----------------------------------------------------------------------------------------------------------------- |
+| ACC-01 | P0       | A person can sign in and sign out using their Google Account; no other authentication method is supported.        |
+| ACC-02 | P0       | A signed-in Member can create a named Household root Item and becomes its owner.                                  |
+| ACC-03 | P0       | The Household Owner can invite a family member using a shareable invitation.                                      |
+| ACC-04 | P0       | An invited person can join the Household using their own Google Account.                                          |
+| ACC-05 | P0       | All Household Members can view, add, edit, move, and delete Items.                                                |
+| ACC-06 | P0       | The Household Owner can view and remove Household Members.                                                        |
+| ACC-07 | P1       | A Member can leave a Household, provided ownership is transferred first when applicable.                          |
+| ACC-08 | P0       | A Member can belong to multiple Households using the same Google Account.                                         |
+| ACC-09 | P0       | After sign-in, a Member with multiple available Households must select a Household before its Inventory is shown. |
+| ACC-10 | P0       | After sign-in, a Member with exactly one available Household is taken directly to that Household.                 |
 
 ### Items
 
-| ID     | Priority | Requirement                                                                                   |
-| ------ | -------- | --------------------------------------------------------------------------------------------- |
-| ITM-01 | P0       | Creating a Household creates its root Item with the Household's name.                         |
-| ITM-02 | P0       | A member can create a named Item beneath any existing Item.                                   |
-| ITM-03 | P0       | Every Item except the Household root stores exactly one current Parent Item and no Parent Item history. |
-| ITM-04 | P0       | Any Item can have zero or more child Items.                                                   |
-| ITM-05 | P0       | A member can view an Item's immediate children and full path from the Household root.         |
-| ITM-06 | P0       | The Household root has no parent and cannot be moved or deleted using the Item delete action. |
-| ITM-07 | P0       | An Item has a name and can have at most one optional photo, plus an optional description and Tags. Items do not have Categories or quantities. |
-| ITM-09 | P0       | A member can view and edit an Item's details.                                                 |
-| ITM-10 | P0       | A member can move an Item and all its descendants beneath a different parent Item.            |
-| ITM-11 | P0       | The app prevents an Item from being moved beneath itself or any of its descendants.           |
-| ITM-12 | P0       | Any Member can permanently delete an Item that has no Child Items.                            |
-| ITM-13 | P0       | Any Member can permanently delete an Item and its entire subtree after an enhanced warning.   |
-| ITM-14 | P0       | Deleting an Item requires confirmation and removes the Item and any deleted descendants from the Inventory and search results. |
-| ITM-15 | P1       | A member can duplicate an Item without duplicating its descendants.                           |
-| ITM-16 | P1       | A member can reorder or favorite commonly used child Items.                                   |
+| ID     | Priority | Requirement                                                                                                                                             |
+| ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ITM-01 | P0       | Creating a Household creates its root Item with the Household's name.                                                                                   |
+| ITM-02 | P0       | A Member can create a named Item beneath any existing Item.                                                                                             |
+| ITM-03 | P0       | Every Item except the Household root stores exactly one current Parent Item and no Parent Item history.                                                 |
+| ITM-04 | P0       | Any Item can have zero or more child Items.                                                                                                             |
+| ITM-05 | P0       | A member can view an Item's immediate children and full path from the Household root.                                                                   |
+| ITM-06 | P0       | The Household root has no parent and cannot be moved or deleted using the Item delete action.                                                           |
+| ITM-07 | P0       | A non-root Item has a required name and one optional photo, plus an optional description and optional Tags. Items do not have Categories or quantities. |
+| ITM-08 | P0       | Selecting **Add item** opens the camera; after capture, the Member crops the photo before the Item details form is shown.                               |
+| ITM-09 | P0       | A member can view and edit an Item's details.                                                                                                           |
+| ITM-10 | P0       | A member can move an Item and all its descendants beneath a different parent Item.                                                                      |
+| ITM-11 | P0       | The app prevents an Item from being moved beneath itself or any of its descendants.                                                                     |
+| ITM-12 | P0       | Any Member can permanently delete an Item that has no Child Items.                                                                                      |
+| ITM-13 | P0       | Any Member can permanently delete an Item and its entire subtree after an enhanced warning.                                                             |
+| ITM-14 | P0       | Deleting an Item requires confirmation and removes the Item and any deleted descendants from the Inventory and search results.                          |
+| ITM-15 | P1       | A member can duplicate an Item without duplicating its descendants.                                                                                     |
+| ITM-16 | P1       | A member can reorder or favorite commonly used child Items.                                                                                             |
 
 ### Search and discovery
 
@@ -213,7 +217,7 @@ It has no parent and there is exactly one Household root in each inventory.
 - Name
 - Parent Item, required except for the Household root
 - No previous Parent Item or Parent Item history
-- At most one optional photo
+- One optional photo, except for the Household root
 - Optional description
 - Optional tags
 - Created and last-updated dates
@@ -234,7 +238,10 @@ The Item relationships form one tree:
 - After sign-in, show a Household selector when the Member has access to multiple Households.
 - Clearly show which Household is currently open and provide a way to switch to another available Household.
 - The home screen prioritizes global search and the immediate children of the Household root.
-- The primary **Add item** action is reachable from the home, search, and Item detail screens.
+- The primary **Add item** action is reachable from the home, search, and Item detail screens and opens the camera directly.
+- After a photo is taken, present an accessible crop screen before showing the Item details form.
+- User can opt out of taking the photo.
+- The Item details form requires a name, allows an optional description and optional Tags, and identifies the selected Parent Item.
 - An Item path uses breadcrumbs or another compact visual treatment that remains understandable when deeply nested.
 - An Item detail screen clearly distinguishes the selected Item from its child Items.
 - Empty states explain the next useful action, such as adding a first child Item.
@@ -257,7 +264,7 @@ The Item relationships form one tree:
 - Authentication credentials and session tokens are stored using Android-recommended secure storage.
 - Invitation links are time-limited and cannot be reused after acceptance or revocation.
 - Removed members lose access to household data.
-- The app requests only permissions necessary for a user-initiated feature, such as camera or photo access when adding a photo.
+- The app requests camera permission only when needed for the user-initiated **Add item** flow.
 - A user can request deletion of their account. Household ownership must be transferred or the household explicitly deleted first.
 - The app does not need to collect product analytics or success metrics.
 
@@ -281,6 +288,7 @@ The first public release is ready when:
 - Members can sign in with their Google Account through Firebase Authentication, and no other authentication method is offered.
 - A Member can belong to multiple Households and must select one after sign-in when multiple Households are available.
 - A new user can create a Household root and build a multi-level Item tree beneath it.
+- Selecting **Add item** opens the camera, then presents photo cropping, followed by the details form for a required name, optional description, optional Tags, and Parent Item.
 - The owner can invite another account, and both members see the same inventory.
 - Either member can search for and move an Item beneath a different parent, with the entire subtree and changed paths appearing on the other device.
 - Loss of connectivity does not prevent a member from viewing previously loaded inventory.
@@ -294,14 +302,14 @@ The first public release is ready when:
 
 ## Risks and mitigations
 
-| Risk                                                         | Impact                                        | Mitigation                                                                                                                |
-| ------------------------------------------------------------ | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| Initial data entry feels like too much work                  | Families abandon setup                        | Make Item creation fast, preserve the most recently selected parent, and allow photos and optional details to be skipped. |
-| The Item tree becomes too complicated                        | Members cannot predict where Items belong     | Show full paths consistently and test tree-building with families who organize differently.                               |
-| Inventory becomes stale                                      | Search results lose trust                     | Make moving and editing fast and make stale information easy for Members to correct.                                      |
-| A Member deletes an Item or subtree accidentally             | Inventory data is permanently lost            | Require confirmation for deletion and an enhanced warning that clearly identifies all descendants as permanently deleted. |
-| Simultaneous edits overwrite information                     | Members lose changes                          | Define conflict behavior before implementation and make unresolved synchronization failures visible.                      |
-| Sensitive household details are exposed                      | Privacy and physical-security harm            | Keep Households private by default, avoid product analytics, secure invitations, and test authorization boundaries.        |
+| Risk                                             | Impact                                    | Mitigation                                                                                                                    |
+| ------------------------------------------------ | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Initial data entry feels like too much work      | Families abandon setup                    | Make the camera-to-save flow fast, preserve the most recently selected Parent Item, and allow optional details to be skipped. |
+| The Item tree becomes too complicated            | Members cannot predict where Items belong | Show full paths consistently and test tree-building with families who organize differently.                                   |
+| Inventory becomes stale                          | Search results lose trust                 | Make moving and editing fast and make stale information easy for Members to correct.                                          |
+| A Member deletes an Item or subtree accidentally | Inventory data is permanently lost        | Require confirmation for deletion and an enhanced warning that clearly identifies all descendants as permanently deleted.     |
+| Simultaneous edits overwrite information         | Members lose changes                      | Define conflict behavior before implementation and make unresolved synchronization failures visible.                          |
+| Sensitive household details are exposed          | Privacy and physical-security harm        | Keep Households private by default, avoid product analytics, secure invitations, and test authorization boundaries.           |
 
 ## Future opportunities
 

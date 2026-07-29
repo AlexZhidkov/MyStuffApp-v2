@@ -1,8 +1,10 @@
 # 01 — Member signs in and out with Google
 
-**What to build:** A runnable Android app where a person can authenticate with their Google Account, sign out, and reach the appropriate Household entry state.
+**What to build:** A runnable Android app where a person can authenticate with their Google Account using Firebase Authentication, sign out, and reach the appropriate Household entry state.
 
-**Blocked by:** None — can start immediately.
+**What to use:** Google Material Design specification, Firebase `mystuff-ai-app` project for the backend.
+
+**Device to target:** Google Pixel 8 Pro running Android 17
 
 **Status:** ready-for-agent
 

@@ -81,6 +81,16 @@ The equivalent command-line workflow is:
 
 On Windows, use `gradlew.bat` instead of `./gradlew`.
 
+## Run from the terminal
+
+```bash
+cd /home/alex/Source/MyStuffApp-v2
+
+/home/alex/Android/Sdk/platform-tools/adb devices
+
+JAVA_HOME=/opt/android-studio/jbr ./gradlew installDebug
+```
+
 ## Tests
 
 Run the local unit tests with:

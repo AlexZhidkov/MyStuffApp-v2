@@ -1,7 +1,7 @@
 # Household Inventory Android Prototype
 
 Status: Draft
-Last updated: 2026-07-28
+Last updated: 2026-07-29
 
 ## Product summary
 
@@ -44,6 +44,7 @@ V1 includes:
 - A Member leaving a Household without being removed by the Household Owner
 - App-account deletion and data export
 - Offline guarantees or custom offline behavior beyond Firebase defaults
+- Custom concurrent-change detection or conflict handling beyond Firebase defaults
 - Accessibility requirements or accessibility certification
 - Public-store distribution or production-readiness review
 - Production-scale performance targets
@@ -152,7 +153,6 @@ V1 does not guarantee a particular ordering for Child Items.
 3. The app states that the selected Item, its descendants, and their photos will be permanently deleted.
 4. The Member types the selected Item's name exactly as displayed.
 5. Deletion becomes available only after the entered name matches.
-6. If anything in the subtree changed after confirmation began, deletion is cancelled and the Member must review the updated warning and confirm again.
 
 ## Functional requirements
 
@@ -223,26 +223,16 @@ V1 does not guarantee a particular ordering for Child Items.
 | MOV-05 | The app prevents an Item from being moved beneath itself or any of its descendants.                                   |
 | MOV-06 | The app rejects a move if the Item or chosen Parent Item no longer exists or no longer belongs to the same Household. |
 
-### Concurrent changes
-
-| ID     | Requirement                                                                                                                                                                                                  |
-| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| CON-01 | Each mutable Item has a revision used for optimistic concurrency.                                                                                                                                            |
-| CON-02 | Saving a stale Item edit is rejected rather than silently overwriting a newer revision.                                                                                                                      |
-| CON-03 | When a stale edit is rejected, the app preserves the Member's input while the edit screen remains open, shows that the Item changed elsewhere, and allows the Member to review the latest version and retry. |
-| CON-04 | Move and deletion validation use current revisions and preserve all tree invariants.                                                                                                                         |
-
 ### Deletion
 
-| ID     | Requirement                                                                                                                                                                                                                                      |
-| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| DEL-01 | Any Member can permanently delete a childless non-root Item after confirmation.                                                                                                                                                                  |
-| DEL-02 | Any Member can permanently delete a non-root Item and all its descendants after the enhanced subtree confirmation.                                                                                                                               |
-| DEL-03 | Enhanced subtree confirmation names the selected Item, presents its Item Path, shows the exact descendant count, states that deletion is permanent, and requires the Member to type the selected Item's displayed name.                          |
-| DEL-04 | Subtree deletion is revision-checked as one operation. If any Item is added, edited, moved into, moved out of, or deleted from the subtree after confirmation begins, nothing is deleted and confirmation must restart with current information. |
-| DEL-05 | Deleted Items disappear from the Inventory and search results.                                                                                                                                                                                   |
-| DEL-06 | Deleting an Item, subtree, or Household also permanently deletes every associated photo.                                                                                                                                                         |
-| DEL-07 | V1 has no trash, undo, restore, or Parent Item history.                                                                                                                                                                                          |
+| ID     | Requirement                                                                                                                                                                                                            |
+| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| DEL-01 | Any Member can permanently delete a childless non-root Item after confirmation.                                                                                                                                        |
+| DEL-02 | Any Member can permanently delete a non-root Item and all its descendants after the enhanced subtree confirmation.                                                                                                     |
+| DEL-03 | Enhanced subtree confirmation names the selected Item, presents its Item Path, shows the exact descendant count, states that deletion is permanent, and requires the Member to type the selected Item's displayed name. |
+| DEL-04 | Deleted Items disappear from the Inventory and search results.                                                                                                                                                         |
+| DEL-05 | Deleting an Item, subtree, or Household also permanently deletes every associated photo.                                                                                                                               |
+| DEL-06 | V1 has no trash, undo, restore, or Parent Item history.                                                                                                                                                                |
 
 ### Search
 
@@ -278,7 +268,6 @@ The Household is the root Item and boundary of one shared Inventory.
 - Current Members
 - Pending invitations
 - Created timestamp
-- Revision
 
 There is exactly one Household root in each Inventory.
 
@@ -311,7 +300,6 @@ An invitation expires seven days after creation and can be accepted only once.
 - Optional Tags
 - Created and last-updated timestamps
 - Creating and last-updating Member display-name snapshots
-- Revision
 
 The model must preserve these invariants:
 
@@ -381,10 +369,8 @@ Automated tests cover correctness, including:
 - Tree connectivity and cycle prevention
 - Root movement and Item-delete prevention
 - Item creation and validation
-- Concurrent-edit rejection
 - Subtree movement
 - Childless and subtree deletion
-- Subtree revision-change rejection
 - Photo cleanup after deletion
 - Search normalization, field priority, and match ranking
 
@@ -402,10 +388,8 @@ The private prototype is ready for evaluation when:
 - **Add item** opens the camera first and still works when a photo is skipped, permission is denied, or the camera is unavailable.
 - A Member can search names, Tags, and descriptions from one input and see each result's Item Path.
 - A Member can edit an Item and move its complete subtree without violating tree invariants.
-- Stale Item edits are rejected without silently overwriting a newer revision.
 - Any Member can permanently delete a childless Item.
 - Any Member can permanently delete a subtree after typing the Item name and reviewing the exact descendant count.
-- A subtree change during confirmation cancels deletion and requires fresh confirmation.
 - Item, subtree, and Household deletion also removes associated photos.
 - The Household Owner can remove another Member and can delete the Household through Owner-only settings.
 - Automated correctness tests pass.
@@ -418,7 +402,7 @@ The private prototype is ready for evaluation when:
 | Camera-first capture may slow structural Item creation                   | Keep camera-first because it is part of the hypothesis; observe Member feedback.                                                                    |
 | A generic tree may not match how every Household thinks about belongings | Preserve one Item model and observe where Members become confused.                                                                                  |
 | Duplicate sibling names can produce visually identical Item Paths        | Use immutable identities internally and show available context such as photo and description; observe whether Members need stronger disambiguation. |
-| Any Member can permanently delete a large subtree                        | Require exact-count, typed-name, revision-checked confirmation; no restore exists in v1.                                                            |
+| Any Member can permanently delete a large subtree                        | Require exact-count and typed-name confirmation; no restore exists in v1.                                                                            |
 | Very large or deep trees may exceed a simple prototype implementation    | Do not add an artificial depth cap or production-scale acceptance target in v1.                                                                     |
 | Firebase default offline behavior may expose incomplete or stale data    | Make no offline guarantee and defer custom caching and revocation behavior.                                                                         |
 | Unsaved form data may be lost when the active flow is interrupted        | Accept this limitation for v1 and keep only an in-place retry while the form remains open.                                                          |

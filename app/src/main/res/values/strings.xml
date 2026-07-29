@@ -1,0 +1,17 @@
+<resources>
+    <string name="app_name">MyStuff</string>
+    <string name="sign_in_title">Know where everything lives.</string>
+    <string name="sign_in_supporting_text">Sign in to open your shared Household Inventory and keep every Item easy to find.</string>
+    <string name="sign_in_with_google">Sign in with Google</string>
+    <string name="retry_google_sign_in">Try Google sign-in again</string>
+    <string name="signing_in">Signing in…</string>
+    <string name="google_only_provider">MyStuff uses your Google Account only to identify you and protect your Household.</string>
+    <string name="sign_out">Sign out</string>
+    <string name="welcome_person">Welcome, %1$s</string>
+    <string name="household_entry_title">How will you join MyStuff?</string>
+    <string name="household_entry_supporting_text">A Household is the private root of one shared Inventory. Start yours or use an invitation from its Household Owner.</string>
+    <string name="create_household">Create a Household</string>
+    <string name="create_household_supporting_text">Name a new shared Inventory and become its Household Owner.</string>
+    <string name="accept_invitation">Accept an invitation</string>
+    <string name="accept_invitation_supporting_text">Join an existing Household with an invitation sent to this Google Account.</string>
+</resources>

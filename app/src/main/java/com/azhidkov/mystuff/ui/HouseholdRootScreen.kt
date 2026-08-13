@@ -42,8 +42,8 @@ import com.azhidkov.mystuff.HouseholdInvitation
 import com.azhidkov.mystuff.InvitationStatus
 import com.azhidkov.mystuff.InvitationUiState
 import com.azhidkov.mystuff.R
-import java.time.Instant
 import java.time.Duration
+import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
@@ -195,11 +195,12 @@ private fun InvitationCard(
 ) {
     val status by currentInvitationStatus(invitation)
     LaunchedEffect(status, invitation.storedStatus) {
-        if (
+        while (
             status == InvitationStatus.Expired &&
             invitation.storedStatus == InvitationStatus.Pending
         ) {
             onExpire()
+            delay(EXPIRY_PERSISTENCE_RETRY_MILLIS)
         }
     }
     val presentation = invitationStatusPresentation(invitation, status)
@@ -327,6 +328,8 @@ private data class InvitationStatusPresentation(
     val label: String,
     val detail: String,
 )
+
+private const val EXPIRY_PERSISTENCE_RETRY_MILLIS = 30_000L
 
 private fun Instant.formattedDate(): String = DateTimeFormatter
     .ofLocalizedDate(FormatStyle.MEDIUM)

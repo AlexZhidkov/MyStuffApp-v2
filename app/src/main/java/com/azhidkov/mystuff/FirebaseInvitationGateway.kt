@@ -1,7 +1,9 @@
 package com.azhidkov.mystuff
 
 import com.google.firebase.Timestamp
+import com.google.firebase.firestore.DocumentReference
 import com.google.firebase.firestore.DocumentSnapshot
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import java.time.Instant
 
@@ -18,7 +20,7 @@ class FirebaseInvitationGateway(
             .addOnSuccessListener { snapshot ->
                 onResult(
                     runCatching {
-                        snapshot.documents.map(DocumentSnapshot::toInvitation)
+                        snapshot.documents.mapNotNull(DocumentSnapshot::toInvitationOrNull)
                     },
                 )
             }
@@ -31,13 +33,14 @@ class FirebaseInvitationGateway(
         onResult: (Result<HouseholdInvitation>) -> Unit,
     ) {
         val reference = firestore.collection(INVITATIONS).document()
-        val invitation = newInvitation(
-            id = reference.id,
-            householdId = householdId,
-            intendedEmail = intendedEmail,
-        )
-        reference.set(invitation.toDocument())
-            .addOnSuccessListener { onResult(Result.success(invitation)) }
+        reference.set(
+            initializingInvitationDocument(
+                householdId = householdId,
+                intendedEmail = intendedEmail,
+            ),
+        ).addOnSuccessListener {
+            finalizeInvitation(reference, onResult)
+        }
             .addOnFailureListener { failure -> onResult(Result.failure(failure)) }
     }
 
@@ -76,77 +79,123 @@ class FirebaseInvitationGateway(
     ) {
         val previousReference = firestore.collection(INVITATIONS).document(invitation.id)
         val replacementReference = firestore.collection(INVITATIONS).document()
-        val replacement = newInvitation(
-            id = replacementReference.id,
-            householdId = invitation.householdId,
-            intendedEmail = intendedEmail,
-            replacesInvitationId = invitation.id,
-        )
-        val previous = invitation.copy(
-            storedStatus = InvitationStatus.Replaced,
-            replacedByInvitationId = replacement.id,
-        )
-
-        firestore.batch()
-            .update(
-                previousReference,
-                mapOf(
-                    STATUS to REPLACED,
-                    REPLACED_BY_INVITATION_ID to replacement.id,
-                ),
-            )
-            .set(replacementReference, replacement.toDocument())
-            .commit()
-            .addOnSuccessListener {
-                onResult(Result.success(InvitationReplacement(previous, replacement)))
+        replacementReference.set(
+            initializingInvitationDocument(
+                householdId = invitation.householdId,
+                intendedEmail = intendedEmail,
+                replacesInvitationId = invitation.id,
+            ),
+        ).addOnSuccessListener {
+            replacementReference.get()
+                .addOnSuccessListener { snapshot ->
+                    val replacement = runCatching {
+                        snapshot.toPendingInvitation()
+                    }.getOrElse { failure ->
+                        onResult(Result.failure(failure))
+                        return@addOnSuccessListener
+                    }
+                    val previous = invitation.copy(
+                        storedStatus = InvitationStatus.Replaced,
+                        replacedByInvitationId = replacement.id,
+                    )
+                    firestore.batch()
+                        .update(
+                            previousReference,
+                            mapOf(
+                                STATUS to REPLACED,
+                                REPLACED_BY_INVITATION_ID to replacement.id,
+                            ),
+                        )
+                        .update(
+                            replacementReference,
+                            mapOf(
+                                STATUS to PENDING,
+                                EXPIRES_AT to replacement.expiresAt.toTimestamp(),
+                            ),
+                        )
+                        .commit()
+                        .addOnSuccessListener {
+                            onResult(
+                                Result.success(InvitationReplacement(previous, replacement)),
+                            )
+                        }
+                        .addOnFailureListener { failure ->
+                            onResult(Result.failure(failure))
+                        }
+                }
+                .addOnFailureListener { failure -> onResult(Result.failure(failure)) }
             }
             .addOnFailureListener { failure -> onResult(Result.failure(failure)) }
     }
 }
 
-private fun newInvitation(
-    id: String,
+private fun initializingInvitationDocument(
     householdId: String,
     intendedEmail: String,
     replacesInvitationId: String? = null,
-): HouseholdInvitation {
-    val createdAt = Timestamp.now()
-    val expiresAt = Timestamp(
-        createdAt.seconds + SEVEN_DAYS_SECONDS,
-        createdAt.nanoseconds,
-    )
+): Map<String, Any?> = mapOf(
+    HOUSEHOLD_ID to householdId,
+    INTENDED_EMAIL to intendedEmail,
+    CREATED_AT to FieldValue.serverTimestamp(),
+    EXPIRES_AT to null,
+    STATUS to INITIALIZING,
+    REPLACES_INVITATION_ID to replacesInvitationId,
+    REPLACED_BY_INVITATION_ID to null,
+)
+
+private fun finalizeInvitation(
+    reference: DocumentReference,
+    onResult: (Result<HouseholdInvitation>) -> Unit,
+) {
+    reference.get()
+        .addOnSuccessListener { snapshot ->
+            val invitation = runCatching {
+                snapshot.toPendingInvitation()
+            }.getOrElse { failure ->
+                onResult(Result.failure(failure))
+                return@addOnSuccessListener
+            }
+            reference.update(
+                mapOf(
+                    STATUS to PENDING,
+                    EXPIRES_AT to invitation.expiresAt.toTimestamp(),
+                ),
+            ).addOnSuccessListener { onResult(Result.success(invitation)) }
+                .addOnFailureListener { failure -> onResult(Result.failure(failure)) }
+        }
+        .addOnFailureListener { failure -> onResult(Result.failure(failure)) }
+}
+
+private fun DocumentSnapshot.toPendingInvitation(): HouseholdInvitation {
+    val createdAt = requiredTimestamp(CREATED_AT)
     return HouseholdInvitation(
         id = id,
-        householdId = householdId,
-        intendedEmail = intendedEmail,
+        householdId = requiredString(HOUSEHOLD_ID),
+        intendedEmail = requiredString(INTENDED_EMAIL),
         createdAt = createdAt.toInstant(),
-        expiresAt = expiresAt.toInstant(),
+        expiresAt = Timestamp(
+            createdAt.seconds + SEVEN_DAYS_SECONDS,
+            createdAt.nanoseconds,
+        ).toInstant(),
         storedStatus = InvitationStatus.Pending,
-        replacesInvitationId = replacesInvitationId,
+        replacesInvitationId = optionalString(REPLACES_INVITATION_ID),
         replacedByInvitationId = null,
     )
 }
 
-private fun HouseholdInvitation.toDocument(): Map<String, Any?> = mapOf(
-    HOUSEHOLD_ID to householdId,
-    INTENDED_EMAIL to intendedEmail,
-    CREATED_AT to createdAt.toTimestamp(),
-    EXPIRES_AT to expiresAt.toTimestamp(),
-    STATUS to storedStatus.toDocumentValue(),
-    REPLACES_INVITATION_ID to replacesInvitationId,
-    REPLACED_BY_INVITATION_ID to replacedByInvitationId,
-)
-
-private fun DocumentSnapshot.toInvitation(): HouseholdInvitation = HouseholdInvitation(
-    id = id,
-    householdId = requiredString(HOUSEHOLD_ID),
-    intendedEmail = requiredString(INTENDED_EMAIL),
-    createdAt = requiredTimestamp(CREATED_AT).toInstant(),
-    expiresAt = requiredTimestamp(EXPIRES_AT).toInstant(),
-    storedStatus = requiredString(STATUS).toInvitationStatus(),
-    replacesInvitationId = optionalString(REPLACES_INVITATION_ID),
-    replacedByInvitationId = optionalString(REPLACED_BY_INVITATION_ID),
-)
+private fun DocumentSnapshot.toInvitationOrNull(): HouseholdInvitation? {
+    if (getString(STATUS) == INITIALIZING) return null
+    return HouseholdInvitation(
+        id = id,
+        householdId = requiredString(HOUSEHOLD_ID),
+        intendedEmail = requiredString(INTENDED_EMAIL),
+        createdAt = requiredTimestamp(CREATED_AT).toInstant(),
+        expiresAt = requiredTimestamp(EXPIRES_AT).toInstant(),
+        storedStatus = requiredString(STATUS).toInvitationStatus(),
+        replacesInvitationId = optionalString(REPLACES_INVITATION_ID),
+        replacedByInvitationId = optionalString(REPLACED_BY_INVITATION_ID),
+    )
+}
 
 private fun DocumentSnapshot.requiredString(field: String): String =
     getString(field) ?: throw InvitationDataException()
@@ -161,14 +210,6 @@ private fun DocumentSnapshot.optionalString(field: String): String? {
 }
 
 private fun Instant.toTimestamp(): Timestamp = Timestamp(epochSecond, nano)
-
-private fun InvitationStatus.toDocumentValue(): String = when (this) {
-    InvitationStatus.Pending -> PENDING
-    InvitationStatus.Accepted -> ACCEPTED
-    InvitationStatus.Revoked -> REVOKED
-    InvitationStatus.Replaced -> REPLACED
-    InvitationStatus.Expired -> EXPIRED
-}
 
 private fun String.toInvitationStatus(): InvitationStatus = when (this) {
     PENDING -> InvitationStatus.Pending
@@ -188,6 +229,7 @@ private const val STATUS = "status"
 private const val REPLACES_INVITATION_ID = "replacesInvitationId"
 private const val REPLACED_BY_INVITATION_ID = "replacedByInvitationId"
 private const val PENDING = "pending"
+private const val INITIALIZING = "initializing"
 private const val ACCEPTED = "accepted"
 private const val REVOKED = "revoked"
 private const val REPLACED = "replaced"

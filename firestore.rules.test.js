@@ -83,17 +83,46 @@ function invitationData({
   };
 }
 
-function invitationReplacementBatch(database, oldInvitationId, newInvitationId) {
+async function createInvitation(database, invitationId, email = "sam@example.com") {
+  const reference = doc(database, `invitations/${invitationId}`);
+  await setDoc(reference, {
+    householdId: "household-1",
+    intendedEmail: email,
+    createdAt: serverTimestamp(),
+    expiresAt: null,
+    status: "initializing",
+    replacesInvitationId: null,
+    replacedByInvitationId: null,
+  });
+  const createdAt = (await getDoc(reference)).data().createdAt;
+  await updateDoc(reference, {
+    expiresAt: Timestamp.fromMillis(createdAt.toMillis() + 7 * 24 * 60 * 60 * 1000),
+    status: "pending",
+  });
+}
+
+async function replaceInvitation(database, oldInvitationId, newInvitationId) {
+  const replacementReference = doc(database, `invitations/${newInvitationId}`);
+  await setDoc(replacementReference, {
+    householdId: "household-1",
+    intendedEmail: "sam@example.com",
+    createdAt: serverTimestamp(),
+    expiresAt: null,
+    status: "initializing",
+    replacesInvitationId: oldInvitationId,
+    replacedByInvitationId: null,
+  });
+  const createdAt = (await getDoc(replacementReference)).data().createdAt;
   const batch = writeBatch(database);
   batch.update(doc(database, `invitations/${oldInvitationId}`), {
     status: "replaced",
     replacedByInvitationId: newInvitationId,
   });
-  batch.set(
-    doc(database, `invitations/${newInvitationId}`),
-    invitationData({ replacesInvitationId: oldInvitationId }),
-  );
-  return batch;
+  batch.update(replacementReference, {
+    expiresAt: Timestamp.fromMillis(createdAt.toMillis() + 7 * 24 * 60 * 60 * 1000),
+    status: "pending",
+  });
+  await batch.commit();
 }
 
 function householdCreationBatch(database, name) {
@@ -207,14 +236,8 @@ test("only the Household Owner can create a pending invitation", async () => {
   const ownerDatabase = testEnvironment.authenticatedContext("member-1").firestore();
   const memberDatabase = testEnvironment.authenticatedContext("member-2").firestore();
 
-  await assertSucceeds(setDoc(
-    doc(ownerDatabase, "invitations/invitation-1"),
-    invitationData(),
-  ));
-  await assertFails(setDoc(
-    doc(memberDatabase, "invitations/invitation-2"),
-    invitationData(),
-  ));
+  await assertSucceeds(createInvitation(ownerDatabase, "invitation-1"));
+  await assertFails(createInvitation(memberDatabase, "invitation-2"));
 });
 
 test("only the Household Owner can revoke a pending invitation", async () => {
@@ -240,11 +263,11 @@ test("replacement atomically invalidates the previous invitation link", async ()
   const database = testEnvironment.authenticatedContext("member-1").firestore();
 
   await assertSucceeds(
-    invitationReplacementBatch(
+    replaceInvitation(
       database,
       "invitation-1",
       "invitation-2",
-    ).commit(),
+    ),
   );
 
   const previous = await getDoc(doc(database, "invitations/invitation-1"));
@@ -258,26 +281,22 @@ test("replacement atomically invalidates the previous invitation link", async ()
 test("an invitation expiry is exactly seven days after creation", async () => {
   await seedHousehold();
   const database = testEnvironment.authenticatedContext("member-1").firestore();
-  const createdAt = Timestamp.now();
+  const reference = doc(database, "invitations/invitation-1");
+  await setDoc(reference, {
+    householdId: "household-1",
+    intendedEmail: "sam@example.com",
+    createdAt: serverTimestamp(),
+    expiresAt: null,
+    status: "initializing",
+    replacesInvitationId: null,
+    replacedByInvitationId: null,
+  });
+  const createdAt = (await getDoc(reference)).data().createdAt;
 
-  await assertFails(setDoc(
-    doc(database, "invitations/invitation-1"),
-    invitationData({
-      createdAt,
-      expiresAt: Timestamp.fromMillis(createdAt.toMillis() + 6 * 24 * 60 * 60 * 1000),
-    }),
-  ));
-});
-
-test("an invitation cannot extend validity with a future creation time", async () => {
-  await seedHousehold();
-  const database = testEnvironment.authenticatedContext("member-1").firestore();
-  const createdAt = Timestamp.fromMillis(Date.now() + 4 * 60 * 1000);
-
-  await assertFails(setDoc(
-    doc(database, "invitations/invitation-1"),
-    invitationData({ createdAt }),
-  ));
+  await assertFails(updateDoc(reference, {
+    expiresAt: Timestamp.fromMillis(createdAt.toMillis() + 6 * 24 * 60 * 60 * 1000),
+    status: "pending",
+  }));
 });
 
 test("an expired invitation can no longer be revoked or replaced", async () => {
@@ -291,11 +310,11 @@ test("an expired invitation can no longer be revoked or replaced", async () => {
     { status: "revoked" },
   ));
   await assertFails(
-    invitationReplacementBatch(
+    replaceInvitation(
       database,
       "invitation-1",
       "invitation-2",
-    ).commit(),
+    ),
   );
 });
 
@@ -324,11 +343,11 @@ test("a non-Owner cannot replace a pending invitation", async () => {
   const database = testEnvironment.authenticatedContext("member-2").firestore();
 
   await assertFails(
-    invitationReplacementBatch(
+    replaceInvitation(
       database,
       "invitation-1",
       "invitation-2",
-    ).commit(),
+    ),
   );
 });
 

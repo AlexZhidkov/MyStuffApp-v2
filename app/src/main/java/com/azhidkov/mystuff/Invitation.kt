@@ -149,7 +149,7 @@ class InvitationController(
     }
 
     fun expire(invitationId: String) {
-        if (!state.canManage || state.operationInProgress) return
+        if (!state.canManage) return
         val invitation = state.invitations.singleOrNull { it.id == invitationId } ?: return
         if (
             invitation.storedStatus != InvitationStatus.Pending ||
@@ -158,19 +158,16 @@ class InvitationController(
             return
         }
 
-        updateState(state.copy(operationInProgress = true, errorMessage = null))
         gateway.expire(invitation) { result ->
             result.onSuccess { expired ->
                 updateState(
                     state.copy(
                         invitations = state.invitations.replace(expired),
-                        operationInProgress = false,
                     ),
                 )
             }.onFailure { failure ->
                 updateState(
                     state.copy(
-                        operationInProgress = false,
                         errorMessage = failure.message ?: "Couldn't update the invitation status.",
                     ),
                 )

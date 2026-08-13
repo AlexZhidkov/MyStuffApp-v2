@@ -20,7 +20,7 @@ class FirebaseInvitationGateway(
             .addOnSuccessListener { snapshot ->
                 onResult(
                     runCatching {
-                        snapshot.documents.mapNotNull(DocumentSnapshot::toInvitationOrNull)
+                        snapshot.documents.map(DocumentSnapshot::toInvitation)
                     },
                 )
             }
@@ -32,16 +32,25 @@ class FirebaseInvitationGateway(
         intendedEmail: String,
         onResult: (Result<HouseholdInvitation>) -> Unit,
     ) {
-        val reference = firestore.collection(INVITATIONS).document()
-        reference.set(
-            initializingInvitationDocument(
-                householdId = householdId,
-                intendedEmail = intendedEmail,
-            ),
-        ).addOnSuccessListener {
-            finalizeInvitation(reference, onResult)
-        }
-            .addOnFailureListener { failure -> onResult(Result.failure(failure)) }
+        val invitationReference = firestore.collection(INVITATIONS).document()
+        val draftReference = firestore.collection(INVITATION_DRAFTS)
+            .document(invitationReference.id)
+        beginInvitationDraft(
+            draftReference = draftReference,
+            householdId = householdId,
+            intendedEmail = intendedEmail,
+            onReady = { invitation ->
+                firestore.batch()
+                    .set(invitationReference, invitation.toDocument())
+                    .delete(draftReference)
+                    .commit()
+                    .addOnSuccessListener { onResult(Result.success(invitation)) }
+                    .addOnFailureListener { failure ->
+                        discardDraft(draftReference, failure, onResult)
+                    }
+            },
+            onFailure = { failure -> onResult(Result.failure(failure)) },
+        )
     }
 
     override fun revoke(
@@ -79,57 +88,42 @@ class FirebaseInvitationGateway(
     ) {
         val previousReference = firestore.collection(INVITATIONS).document(invitation.id)
         val replacementReference = firestore.collection(INVITATIONS).document()
-        replacementReference.set(
-            initializingInvitationDocument(
-                householdId = invitation.householdId,
-                intendedEmail = intendedEmail,
-                replacesInvitationId = invitation.id,
-            ),
-        ).addOnSuccessListener {
-            replacementReference.get()
-                .addOnSuccessListener { snapshot ->
-                    val replacement = runCatching {
-                        snapshot.toPendingInvitation()
-                    }.getOrElse { failure ->
-                        onResult(Result.failure(failure))
-                        return@addOnSuccessListener
-                    }
-                    val previous = invitation.copy(
-                        storedStatus = InvitationStatus.Replaced,
-                        replacedByInvitationId = replacement.id,
+        val draftReference = firestore.collection(INVITATION_DRAFTS)
+            .document(replacementReference.id)
+        beginInvitationDraft(
+            draftReference = draftReference,
+            householdId = invitation.householdId,
+            intendedEmail = intendedEmail,
+            replacesInvitationId = invitation.id,
+            onReady = { replacement ->
+                val previous = invitation.copy(
+                    storedStatus = InvitationStatus.Replaced,
+                    replacedByInvitationId = replacement.id,
+                )
+                firestore.batch()
+                    .update(
+                        previousReference,
+                        mapOf(
+                            STATUS to REPLACED,
+                            REPLACED_BY_INVITATION_ID to replacement.id,
+                        ),
                     )
-                    firestore.batch()
-                        .update(
-                            previousReference,
-                            mapOf(
-                                STATUS to REPLACED,
-                                REPLACED_BY_INVITATION_ID to replacement.id,
-                            ),
-                        )
-                        .update(
-                            replacementReference,
-                            mapOf(
-                                STATUS to PENDING,
-                                EXPIRES_AT to replacement.expiresAt.toTimestamp(),
-                            ),
-                        )
-                        .commit()
-                        .addOnSuccessListener {
-                            onResult(
-                                Result.success(InvitationReplacement(previous, replacement)),
-                            )
-                        }
-                        .addOnFailureListener { failure ->
-                            onResult(Result.failure(failure))
-                        }
-                }
-                .addOnFailureListener { failure -> onResult(Result.failure(failure)) }
-            }
-            .addOnFailureListener { failure -> onResult(Result.failure(failure)) }
+                    .set(replacementReference, replacement.toDocument())
+                    .delete(draftReference)
+                    .commit()
+                    .addOnSuccessListener {
+                        onResult(Result.success(InvitationReplacement(previous, replacement)))
+                    }
+                    .addOnFailureListener { failure ->
+                        discardDraft(draftReference, failure, onResult)
+                    }
+            },
+            onFailure = { failure -> onResult(Result.failure(failure)) },
+        )
     }
 }
 
-private fun initializingInvitationDocument(
+private fun invitationDraftDocument(
     householdId: String,
     intendedEmail: String,
     replacesInvitationId: String? = null,
@@ -137,33 +131,48 @@ private fun initializingInvitationDocument(
     HOUSEHOLD_ID to householdId,
     INTENDED_EMAIL to intendedEmail,
     CREATED_AT to FieldValue.serverTimestamp(),
-    EXPIRES_AT to null,
-    STATUS to INITIALIZING,
     REPLACES_INVITATION_ID to replacesInvitationId,
-    REPLACED_BY_INVITATION_ID to null,
 )
 
-private fun finalizeInvitation(
-    reference: DocumentReference,
-    onResult: (Result<HouseholdInvitation>) -> Unit,
+private fun beginInvitationDraft(
+    draftReference: DocumentReference,
+    householdId: String,
+    intendedEmail: String,
+    replacesInvitationId: String? = null,
+    onReady: (HouseholdInvitation) -> Unit,
+    onFailure: (Throwable) -> Unit,
 ) {
-    reference.get()
-        .addOnSuccessListener { snapshot ->
-            val invitation = runCatching {
-                snapshot.toPendingInvitation()
-            }.getOrElse { failure ->
-                onResult(Result.failure(failure))
-                return@addOnSuccessListener
+    draftReference.set(
+        invitationDraftDocument(
+            householdId = householdId,
+            intendedEmail = intendedEmail,
+            replacesInvitationId = replacesInvitationId,
+        ),
+    ).addOnSuccessListener {
+        draftReference.get()
+            .addOnSuccessListener { snapshot ->
+                runCatching(snapshot::toPendingInvitation)
+                    .onSuccess(onReady)
+                    .onFailure { failure ->
+                        draftReference.delete()
+                        onFailure(failure)
+                    }
             }
-            reference.update(
-                mapOf(
-                    STATUS to PENDING,
-                    EXPIRES_AT to invitation.expiresAt.toTimestamp(),
-                ),
-            ).addOnSuccessListener { onResult(Result.success(invitation)) }
-                .addOnFailureListener { failure -> onResult(Result.failure(failure)) }
-        }
-        .addOnFailureListener { failure -> onResult(Result.failure(failure)) }
+            .addOnFailureListener { failure ->
+                draftReference.delete()
+                onFailure(failure)
+            }
+    }.addOnFailureListener(onFailure)
+}
+
+private fun <T> discardDraft(
+    draftReference: DocumentReference,
+    failure: Throwable,
+    onResult: (Result<T>) -> Unit,
+) {
+    draftReference.delete().addOnCompleteListener {
+        onResult(Result.failure(failure))
+    }
 }
 
 private fun DocumentSnapshot.toPendingInvitation(): HouseholdInvitation {
@@ -183,9 +192,17 @@ private fun DocumentSnapshot.toPendingInvitation(): HouseholdInvitation {
     )
 }
 
-private fun DocumentSnapshot.toInvitationOrNull(): HouseholdInvitation? {
-    if (getString(STATUS) == INITIALIZING) return null
-    return HouseholdInvitation(
+private fun HouseholdInvitation.toDocument(): Map<String, Any?> = mapOf(
+    HOUSEHOLD_ID to householdId,
+    INTENDED_EMAIL to intendedEmail,
+    CREATED_AT to createdAt.toTimestamp(),
+    EXPIRES_AT to expiresAt.toTimestamp(),
+    STATUS to PENDING,
+    REPLACES_INVITATION_ID to replacesInvitationId,
+    REPLACED_BY_INVITATION_ID to null,
+)
+
+private fun DocumentSnapshot.toInvitation(): HouseholdInvitation = HouseholdInvitation(
         id = id,
         householdId = requiredString(HOUSEHOLD_ID),
         intendedEmail = requiredString(INTENDED_EMAIL),
@@ -194,8 +211,7 @@ private fun DocumentSnapshot.toInvitationOrNull(): HouseholdInvitation? {
         storedStatus = requiredString(STATUS).toInvitationStatus(),
         replacesInvitationId = optionalString(REPLACES_INVITATION_ID),
         replacedByInvitationId = optionalString(REPLACED_BY_INVITATION_ID),
-    )
-}
+)
 
 private fun DocumentSnapshot.requiredString(field: String): String =
     getString(field) ?: throw InvitationDataException()
@@ -221,6 +237,7 @@ private fun String.toInvitationStatus(): InvitationStatus = when (this) {
 }
 
 private const val INVITATIONS = "invitations"
+private const val INVITATION_DRAFTS = "invitationDrafts"
 private const val HOUSEHOLD_ID = "householdId"
 private const val INTENDED_EMAIL = "intendedEmail"
 private const val CREATED_AT = "createdAt"
@@ -229,7 +246,6 @@ private const val STATUS = "status"
 private const val REPLACES_INVITATION_ID = "replacesInvitationId"
 private const val REPLACED_BY_INVITATION_ID = "replacedByInvitationId"
 private const val PENDING = "pending"
-private const val INITIALIZING = "initializing"
 private const val ACCEPTED = "accepted"
 private const val REVOKED = "revoked"
 private const val REPLACED = "replaced"

@@ -84,44 +84,58 @@ function invitationData({
 }
 
 async function createInvitation(database, invitationId, email = "sam@example.com") {
-  const reference = doc(database, `invitations/${invitationId}`);
-  await setDoc(reference, {
+  const invitationReference = doc(database, `invitations/${invitationId}`);
+  const draftReference = doc(database, `invitationDrafts/${invitationId}`);
+  await setDoc(draftReference, {
     householdId: "household-1",
     intendedEmail: email,
     createdAt: serverTimestamp(),
-    expiresAt: null,
-    status: "initializing",
     replacesInvitationId: null,
-    replacedByInvitationId: null,
   });
-  const createdAt = (await getDoc(reference)).data().createdAt;
-  await updateDoc(reference, {
-    expiresAt: Timestamp.fromMillis(createdAt.toMillis() + 7 * 24 * 60 * 60 * 1000),
+  const createdAt = (await getDoc(draftReference)).data().createdAt;
+  const batch = writeBatch(database);
+  batch.set(invitationReference, invitationData({ createdAt }));
+  batch.delete(draftReference);
+  await batch.commit();
+}
+
+async function createInvitationDraft(database, invitationId, oldInvitationId = null) {
+  const reference = doc(database, `invitationDrafts/${invitationId}`);
+  await setDoc(reference, {
+    householdId: "household-1",
+    intendedEmail: "sam@example.com",
+    createdAt: serverTimestamp(),
+    replacesInvitationId: oldInvitationId,
+  });
+  return (await getDoc(reference)).data().createdAt;
+}
+
+function pendingInvitationFromDraft(createdAt, replacesInvitationId = null) {
+  return invitationData({
+    createdAt,
+    replacesInvitationId,
     status: "pending",
   });
 }
 
 async function replaceInvitation(database, oldInvitationId, newInvitationId) {
   const replacementReference = doc(database, `invitations/${newInvitationId}`);
-  await setDoc(replacementReference, {
-    householdId: "household-1",
-    intendedEmail: "sam@example.com",
-    createdAt: serverTimestamp(),
-    expiresAt: null,
-    status: "initializing",
-    replacesInvitationId: oldInvitationId,
-    replacedByInvitationId: null,
-  });
-  const createdAt = (await getDoc(replacementReference)).data().createdAt;
+  const draftReference = doc(database, `invitationDrafts/${newInvitationId}`);
+  const createdAt = await createInvitationDraft(
+    database,
+    newInvitationId,
+    oldInvitationId,
+  );
   const batch = writeBatch(database);
   batch.update(doc(database, `invitations/${oldInvitationId}`), {
     status: "replaced",
     replacedByInvitationId: newInvitationId,
   });
-  batch.update(replacementReference, {
-    expiresAt: Timestamp.fromMillis(createdAt.toMillis() + 7 * 24 * 60 * 60 * 1000),
-    status: "pending",
-  });
+  batch.set(
+    replacementReference,
+    pendingInvitationFromDraft(createdAt, oldInvitationId),
+  );
+  batch.delete(draftReference);
   await batch.commit();
 }
 
@@ -281,22 +295,20 @@ test("replacement atomically invalidates the previous invitation link", async ()
 test("an invitation expiry is exactly seven days after creation", async () => {
   await seedHousehold();
   const database = testEnvironment.authenticatedContext("member-1").firestore();
-  const reference = doc(database, "invitations/invitation-1");
-  await setDoc(reference, {
-    householdId: "household-1",
-    intendedEmail: "sam@example.com",
-    createdAt: serverTimestamp(),
-    expiresAt: null,
-    status: "initializing",
-    replacesInvitationId: null,
-    replacedByInvitationId: null,
-  });
-  const createdAt = (await getDoc(reference)).data().createdAt;
+  const createdAt = await createInvitationDraft(database, "invitation-1");
+  const invitationReference = doc(database, "invitations/invitation-1");
+  const draftReference = doc(database, "invitationDrafts/invitation-1");
+  const batch = writeBatch(database);
+  batch.set(
+    invitationReference,
+    invitationData({
+      createdAt,
+      expiresAt: Timestamp.fromMillis(createdAt.toMillis() + 6 * 24 * 60 * 60 * 1000),
+    }),
+  );
+  batch.delete(draftReference);
 
-  await assertFails(updateDoc(reference, {
-    expiresAt: Timestamp.fromMillis(createdAt.toMillis() + 6 * 24 * 60 * 60 * 1000),
-    status: "pending",
-  }));
+  await assertFails(batch.commit());
 });
 
 test("an expired invitation can no longer be revoked or replaced", async () => {

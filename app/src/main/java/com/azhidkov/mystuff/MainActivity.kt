@@ -28,6 +28,7 @@ class MainActivity : ComponentActivity() {
             authenticationGateway = FirebaseAuthenticationGateway(this),
             householdGateway = FirebaseHouseholdGateway(),
         )
+        val invitationGateway = FirebaseInvitationGateway()
         setContent {
             var sessionState by remember { mutableStateOf(sessionController.state) }
             DisposableEffect(sessionController) {
@@ -44,6 +45,7 @@ class MainActivity : ComponentActivity() {
                     onSignIn = sessionController::signIn,
                     onSignOut = sessionController::signOut,
                     onCreateHousehold = sessionController::createHousehold,
+                    invitationGateway = invitationGateway,
                 )
             }
         }
@@ -55,6 +57,7 @@ private fun MyStuffApp(
     onSignIn: () -> Unit,
     onSignOut: () -> Unit,
     onCreateHousehold: (String) -> Unit,
+    invitationGateway: InvitationGateway,
 ) {
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -75,11 +78,37 @@ private fun MyStuffApp(
                 onSignOut = onSignOut,
             )
 
-            AppDestination.HouseholdRoot -> HouseholdRootScreen(
-                household = requireNotNull(state.household),
-                signOutInProgress = state.operationInProgress,
-                onSignOut = onSignOut,
-            )
+            AppDestination.HouseholdRoot -> {
+                val household = requireNotNull(state.household)
+                val identity = requireNotNull(state.identity)
+                val invitationController = remember(household.id, identity.id) {
+                    InvitationController(
+                        household = household,
+                        currentMemberId = identity.id,
+                        gateway = invitationGateway,
+                    )
+                }
+                var invitationState by remember(invitationController) {
+                    mutableStateOf(invitationController.state)
+                }
+                DisposableEffect(invitationController) {
+                    invitationController.onStateChanged = { invitationState = it }
+                    invitationState = invitationController.state
+                    onDispose { invitationController.onStateChanged = {} }
+                }
+
+                HouseholdRootScreen(
+                    household = household,
+                    invitationState = invitationState,
+                    signOutInProgress = state.operationInProgress,
+                    onCreateInvitation = invitationController::create,
+                    onRevokeInvitation = invitationController::revoke,
+                    onReplaceInvitation = { invitationId, email ->
+                        invitationController.replace(invitationId, email)
+                    },
+                    onSignOut = onSignOut,
+                )
+            }
         }
     }
 }

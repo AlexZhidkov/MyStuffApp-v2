@@ -17,4 +17,21 @@
     <string name="accept_invitation_coming_soon">Have an invitation? Invitation acceptance is coming next.</string>
     <string name="household_root_label">Household Inventory</string>
     <string name="empty_household_body">This is your Household’s root Item. Child Items will appear here.</string>
+    <string name="household_invitations">Household invitations</string>
+    <string name="household_invitations_body">Invite one person at a time using the email address for their Google Account. Each link expires after seven days.</string>
+    <string name="google_email_address">Google email address</string>
+    <string name="create_invitation">Create invitation</string>
+    <string name="revoke_invitation">Revoke</string>
+    <string name="replace_invitation">Replace link</string>
+    <string name="invitation_link">Invitation link — press and hold to copy</string>
+    <string name="invitation_pending">Pending</string>
+    <string name="invitation_accepted">Accepted</string>
+    <string name="invitation_revoked">Revoked</string>
+    <string name="invitation_replaced">Replaced</string>
+    <string name="invitation_expired">Expired</string>
+    <string name="invitation_expires_on">Expires %1$s</string>
+    <string name="invitation_link_accepted">This invitation link has been accepted and cannot be used again.</string>
+    <string name="invitation_link_revoked">This invitation link was revoked and can no longer be used.</string>
+    <string name="invitation_link_replaced">This invitation link was replaced and can no longer be used.</string>
+    <string name="invitation_link_expired">This invitation link expired and can no longer be used.</string>
 </resources>

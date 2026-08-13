@@ -1,32 +1,59 @@
 package com.azhidkov.mystuff.ui
 
-import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.azhidkov.mystuff.Household
+import com.azhidkov.mystuff.HouseholdInvitation
+import com.azhidkov.mystuff.InvitationStatus
+import com.azhidkov.mystuff.InvitationUiState
 import com.azhidkov.mystuff.R
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HouseholdRootScreen(
     household: Household,
+    invitationState: InvitationUiState,
     signOutInProgress: Boolean,
+    onCreateInvitation: (String) -> Unit,
+    onRevokeInvitation: (String) -> Unit,
+    onReplaceInvitation: (String, String) -> Unit,
     onSignOut: () -> Unit,
 ) {
     Scaffold(
@@ -50,31 +77,214 @@ fun HouseholdRootScreen(
             )
         },
     ) { padding ->
-        Column(
+        LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
                 .padding(horizontal = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Spacer(Modifier.height(36.dp))
-            Text(
-                text = stringResource(R.string.household_root_label),
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = household.rootItem.name,
-                style = MaterialTheme.typography.headlineLarge,
-                fontWeight = FontWeight.Bold,
-            )
-            Spacer(Modifier.height(12.dp))
-            Text(
-                text = stringResource(R.string.empty_household_body),
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            item { Spacer(Modifier.height(24.dp)) }
+            item {
+                Text(
+                    text = stringResource(R.string.household_root_label),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            item {
+                Text(
+                    text = household.rootItem.name,
+                    style = MaterialTheme.typography.headlineLarge,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            item {
+                Text(
+                    text = stringResource(R.string.empty_household_body),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (invitationState.canManage) {
+                item { Spacer(Modifier.height(16.dp)) }
+                item {
+                    InvitationComposer(
+                        state = invitationState,
+                        onCreateInvitation = onCreateInvitation,
+                    )
+                }
+                items(
+                    items = invitationState.invitations,
+                    key = HouseholdInvitation::id,
+                ) { invitation ->
+                    InvitationCard(
+                        invitation = invitation,
+                        operationInProgress = invitationState.operationInProgress,
+                        onRevoke = { onRevokeInvitation(invitation.id) },
+                        onReplace = {
+                            onReplaceInvitation(invitation.id, invitation.intendedEmail)
+                        },
+                    )
+                }
+            }
+            item { Spacer(Modifier.height(24.dp)) }
         }
     }
 }
+
+@Composable
+private fun InvitationComposer(
+    state: InvitationUiState,
+    onCreateInvitation: (String) -> Unit,
+) {
+    var email by remember { mutableStateOf("") }
+    Text(
+        text = stringResource(R.string.household_invitations),
+        style = MaterialTheme.typography.titleLarge,
+        fontWeight = FontWeight.Bold,
+    )
+    Text(
+        text = stringResource(R.string.household_invitations_body),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Spacer(Modifier.height(8.dp))
+    OutlinedTextField(
+        value = email,
+        onValueChange = { email = it },
+        modifier = Modifier.fillMaxWidth(),
+        enabled = !state.operationInProgress,
+        singleLine = true,
+        label = { Text(stringResource(R.string.google_email_address)) },
+        isError = state.emailError != null,
+        supportingText = { state.emailError?.let { error -> Text(error) } },
+    )
+    Spacer(Modifier.height(8.dp))
+    Button(
+        onClick = { onCreateInvitation(email) },
+        enabled = !state.operationInProgress,
+    ) {
+        Text(stringResource(R.string.create_invitation))
+    }
+    state.errorMessage?.let { error ->
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = error,
+            color = MaterialTheme.colorScheme.error,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+    }
+}
+
+@Composable
+private fun InvitationCard(
+    invitation: HouseholdInvitation,
+    operationInProgress: Boolean,
+    onRevoke: () -> Unit,
+    onReplace: () -> Unit,
+) {
+    val status = invitation.statusAt(Instant.now())
+    val containerColor = when (status) {
+        InvitationStatus.Pending -> MaterialTheme.colorScheme.primaryContainer
+        InvitationStatus.Revoked -> MaterialTheme.colorScheme.errorContainer
+        InvitationStatus.Replaced -> MaterialTheme.colorScheme.secondaryContainer
+        InvitationStatus.Expired -> MaterialTheme.colorScheme.surfaceVariant
+        InvitationStatus.Accepted -> MaterialTheme.colorScheme.tertiaryContainer
+    }
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = containerColor),
+    ) {
+        androidx.compose.foundation.layout.Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = invitation.intendedEmail,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                InvitationStatusLabel(status)
+            }
+            Text(
+                text = invitationStatusDetail(invitation, status),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (status == InvitationStatus.Pending) {
+                Text(
+                    text = stringResource(R.string.invitation_link),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                SelectionContainer {
+                    Text(
+                        text = invitation.link,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+            if (status == InvitationStatus.Pending) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = onRevoke, enabled = !operationInProgress) {
+                        Text(stringResource(R.string.revoke_invitation))
+                    }
+                    TextButton(onClick = onReplace, enabled = !operationInProgress) {
+                        Text(stringResource(R.string.replace_invitation))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun InvitationStatusLabel(status: InvitationStatus) {
+    Surface(
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
+    ) {
+        Text(
+            text = when (status) {
+                InvitationStatus.Pending -> stringResource(R.string.invitation_pending)
+                InvitationStatus.Accepted -> stringResource(R.string.invitation_accepted)
+                InvitationStatus.Revoked -> stringResource(R.string.invitation_revoked)
+                InvitationStatus.Replaced -> stringResource(R.string.invitation_replaced)
+                InvitationStatus.Expired -> stringResource(R.string.invitation_expired)
+            },
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+        )
+    }
+}
+
+@Composable
+private fun invitationStatusDetail(
+    invitation: HouseholdInvitation,
+    status: InvitationStatus,
+): String = when (status) {
+    InvitationStatus.Pending -> stringResource(
+        R.string.invitation_expires_on,
+        invitation.expiresAt.formattedDate(),
+    )
+    InvitationStatus.Accepted -> stringResource(R.string.invitation_link_accepted)
+    InvitationStatus.Revoked -> stringResource(R.string.invitation_link_revoked)
+    InvitationStatus.Replaced -> stringResource(R.string.invitation_link_replaced)
+    InvitationStatus.Expired -> stringResource(R.string.invitation_link_expired)
+}
+
+private fun Instant.formattedDate(): String = DateTimeFormatter
+    .ofLocalizedDate(FormatStyle.MEDIUM)
+    .withLocale(Locale.getDefault())
+    .withZone(ZoneId.systemDefault())
+    .format(this)

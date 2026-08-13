@@ -18,6 +18,10 @@ service cloud.firestore {
       return /databases/$(database)/documents/households/$(householdId)/items/$(householdId);
     }
 
+    function invitationPath(invitationId) {
+      return /databases/$(database)/documents/invitations/$(invitationId);
+    }
+
     function isMember(householdId) {
       return signedIn()
         && get(membershipPath(request.auth.uid)).data.householdId == householdId;
@@ -26,6 +30,73 @@ service cloud.firestore {
     function isMemberAfter(householdId) {
       return signedIn()
         && getAfter(membershipPath(request.auth.uid)).data.householdId == householdId;
+    }
+
+    function isOwner(householdId) {
+      return isMember(householdId)
+        && get(householdPath(householdId)).data.ownerMemberId == request.auth.uid;
+    }
+
+    function validInvitationCreate(invitationId) {
+      return request.resource.data.keys().hasOnly([
+          'householdId', 'intendedEmail', 'createdAt', 'expiresAt', 'status',
+          'replacesInvitationId', 'replacedByInvitationId'
+        ])
+        && request.resource.data.householdId is string
+        && request.resource.data.intendedEmail is string
+        && request.resource.data.intendedEmail.matches(
+          '^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$'
+        )
+        && request.resource.data.createdAt is timestamp
+        && request.resource.data.createdAt
+          <= request.time + duration.value(5, 'm')
+        && request.resource.data.createdAt
+          >= request.time - duration.value(5, 'm')
+        && request.resource.data.expiresAt
+          == request.resource.data.createdAt + duration.value(7, 'd')
+        && request.resource.data.status == 'pending'
+        && request.resource.data.replacedByInvitationId == null
+        && (
+          request.resource.data.replacesInvitationId == null
+          || validReplacementCreate(invitationId)
+        )
+        && isOwner(request.resource.data.householdId);
+    }
+
+    function validReplacementCreate(invitationId) {
+      let previousId = request.resource.data.replacesInvitationId;
+      let previous = get(invitationPath(previousId)).data;
+      let previousAfter = getAfter(invitationPath(previousId)).data;
+      return previousId is string
+        && previous.status == 'pending'
+        && previous.expiresAt > request.time
+        && previous.householdId == request.resource.data.householdId
+        && previousAfter.status == 'replaced'
+        && previousAfter.replacedByInvitationId == invitationId;
+    }
+
+    function validInvitationRevoke() {
+      return resource.data.status == 'pending'
+        && resource.data.expiresAt > request.time
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['status'])
+        && request.resource.data.status == 'revoked'
+        && isOwner(resource.data.householdId);
+    }
+
+    function validInvitationReplace(invitationId) {
+      let replacementId = request.resource.data.replacedByInvitationId;
+      let replacement = getAfter(invitationPath(replacementId)).data;
+      return resource.data.status == 'pending'
+        && resource.data.expiresAt > request.time
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['status', 'replacedByInvitationId'])
+        && request.resource.data.status == 'replaced'
+        && replacementId is string
+        && replacement.status == 'pending'
+        && replacement.replacesInvitationId == invitationId
+        && replacement.householdId == resource.data.householdId
+        && isOwner(resource.data.householdId);
     }
 
     function validName(name) {
@@ -81,6 +152,14 @@ service cloud.firestore {
           .data.ownerMemberId == memberId
         && existsAfter(rootItemPath(request.resource.data.householdId));
       allow update, delete: if false;
+    }
+
+    match /invitations/{invitationId} {
+      allow read: if isOwner(resource.data.householdId);
+      allow create: if signedIn() && validInvitationCreate(invitationId);
+      allow update: if signedIn()
+        && (validInvitationRevoke() || validInvitationReplace(invitationId));
+      allow delete: if false;
     }
 
     match /households/{householdId} {

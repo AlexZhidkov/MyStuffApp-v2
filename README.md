@@ -26,10 +26,11 @@ Currently implemented:
 - A signed-in Household entry screen
 - Transactional Household creation with one root Item and an Owner membership
 - Automatic reopening of an existing Household after sign-in
-- Firestore rules and emulator tests for the Household membership boundary
+- Owner-only, seven-day Household invitations with revocation and link replacement
+- Firestore rules and emulator tests for Household and invitation authorization
 - Unit-tested session state transitions
 
-Household invitations, child Items, camera-first Item capture, search, editing,
+Invitation acceptance, child Items, camera-first Item capture, search, editing,
 moving, deletion, and connected synchronization are planned in the
 [prototype specification](.scratch/household-inventory/spec.md).
 

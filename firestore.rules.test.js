@@ -1,4 +1,5 @@
 const { readFileSync } = require("node:fs");
+const assert = require("node:assert/strict");
 const { after, before, beforeEach, test } = require("node:test");
 const {
   assertFails,
@@ -6,9 +7,16 @@ const {
   initializeTestEnvironment,
 } = require("@firebase/rules-unit-testing");
 const {
+  collection,
   doc,
   getDoc,
+  getDocs,
+  query,
   serverTimestamp,
+  setDoc,
+  Timestamp,
+  updateDoc,
+  where,
   writeBatch,
 } = require("firebase/firestore");
 
@@ -36,6 +44,56 @@ async function seedHousehold() {
     const database = context.firestore();
     await householdCreationBatch(database, "Our Home").commit();
   });
+}
+
+async function seedHouseholdMember() {
+  await testEnvironment.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), "memberships/member-2"), {
+      householdId: "household-1",
+      role: "member",
+    });
+  });
+}
+
+async function seedInvitation(
+  invitationId = "invitation-1",
+  data = invitationData(),
+) {
+  await testEnvironment.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), `invitations/${invitationId}`), data);
+  });
+}
+
+function invitationData({
+  email = "sam@example.com",
+  createdAt = Timestamp.now(),
+  expiresAt = Timestamp.fromMillis(createdAt.toMillis() + 7 * 24 * 60 * 60 * 1000),
+  status = "pending",
+  replacesInvitationId = null,
+  replacedByInvitationId = null,
+} = {}) {
+  return {
+    householdId: "household-1",
+    intendedEmail: email,
+    createdAt,
+    expiresAt,
+    status,
+    replacesInvitationId,
+    replacedByInvitationId,
+  };
+}
+
+function invitationReplacementBatch(database, oldInvitationId, newInvitationId) {
+  const batch = writeBatch(database);
+  batch.update(doc(database, `invitations/${oldInvitationId}`), {
+    status: "replaced",
+    replacedByInvitationId: newInvitationId,
+  });
+  batch.set(
+    doc(database, `invitations/${newInvitationId}`),
+    invitationData({ replacesInvitationId: oldInvitationId }),
+  );
+  return batch;
 }
 
 function householdCreationBatch(database, name) {
@@ -141,4 +199,121 @@ test("Household name accepts 100 Unicode characters and rejects 101", async () =
 
   await testEnvironment.clearFirestore();
   await assertFails(householdCreationBatch(database, "🏠".repeat(101)).commit());
+});
+
+test("only the Household Owner can create a pending invitation", async () => {
+  await seedHousehold();
+  await seedHouseholdMember();
+  const ownerDatabase = testEnvironment.authenticatedContext("member-1").firestore();
+  const memberDatabase = testEnvironment.authenticatedContext("member-2").firestore();
+
+  await assertSucceeds(setDoc(
+    doc(ownerDatabase, "invitations/invitation-1"),
+    invitationData(),
+  ));
+  await assertFails(setDoc(
+    doc(memberDatabase, "invitations/invitation-2"),
+    invitationData(),
+  ));
+});
+
+test("only the Household Owner can revoke a pending invitation", async () => {
+  await seedHousehold();
+  await seedHouseholdMember();
+  await seedInvitation();
+  const ownerDatabase = testEnvironment.authenticatedContext("member-1").firestore();
+  const memberDatabase = testEnvironment.authenticatedContext("member-2").firestore();
+
+  await assertFails(updateDoc(
+    doc(memberDatabase, "invitations/invitation-1"),
+    { status: "revoked" },
+  ));
+  await assertSucceeds(updateDoc(
+    doc(ownerDatabase, "invitations/invitation-1"),
+    { status: "revoked" },
+  ));
+});
+
+test("replacement atomically invalidates the previous invitation link", async () => {
+  await seedHousehold();
+  await seedInvitation();
+  const database = testEnvironment.authenticatedContext("member-1").firestore();
+
+  await assertSucceeds(
+    invitationReplacementBatch(
+      database,
+      "invitation-1",
+      "invitation-2",
+    ).commit(),
+  );
+
+  const previous = await getDoc(doc(database, "invitations/invitation-1"));
+  const replacement = await getDoc(doc(database, "invitations/invitation-2"));
+  assert.equal(previous.data().status, "replaced");
+  assert.equal(previous.data().replacedByInvitationId, "invitation-2");
+  assert.equal(replacement.data().status, "pending");
+  assert.equal(replacement.data().replacesInvitationId, "invitation-1");
+});
+
+test("an invitation expiry is exactly seven days after creation", async () => {
+  await seedHousehold();
+  const database = testEnvironment.authenticatedContext("member-1").firestore();
+  const createdAt = Timestamp.now();
+
+  await assertFails(setDoc(
+    doc(database, "invitations/invitation-1"),
+    invitationData({
+      createdAt,
+      expiresAt: Timestamp.fromMillis(createdAt.toMillis() + 6 * 24 * 60 * 60 * 1000),
+    }),
+  ));
+});
+
+test("an expired invitation can no longer be revoked or replaced", async () => {
+  await seedHousehold();
+  const createdAt = Timestamp.fromMillis(Date.now() - 8 * 24 * 60 * 60 * 1000);
+  await seedInvitation("invitation-1", invitationData({ createdAt }));
+  const database = testEnvironment.authenticatedContext("member-1").firestore();
+
+  await assertFails(updateDoc(
+    doc(database, "invitations/invitation-1"),
+    { status: "revoked" },
+  ));
+  await assertFails(
+    invitationReplacementBatch(
+      database,
+      "invitation-1",
+      "invitation-2",
+    ).commit(),
+  );
+});
+
+test("a non-Owner cannot replace a pending invitation", async () => {
+  await seedHousehold();
+  await seedHouseholdMember();
+  await seedInvitation();
+  const database = testEnvironment.authenticatedContext("member-2").firestore();
+
+  await assertFails(
+    invitationReplacementBatch(
+      database,
+      "invitation-1",
+      "invitation-2",
+    ).commit(),
+  );
+});
+
+test("only the Household Owner can list Household invitations", async () => {
+  await seedHousehold();
+  await seedHouseholdMember();
+  await seedInvitation();
+  const ownerDatabase = testEnvironment.authenticatedContext("member-1").firestore();
+  const memberDatabase = testEnvironment.authenticatedContext("member-2").firestore();
+  const householdInvitations = (database) => query(
+    collection(database, "invitations"),
+    where("householdId", "==", "household-1"),
+  );
+
+  await assertSucceeds(getDocs(householdInvitations(ownerDatabase)));
+  await assertFails(getDocs(householdInvitations(memberDatabase)));
 });

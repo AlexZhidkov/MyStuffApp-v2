@@ -269,6 +269,17 @@ test("an invitation expiry is exactly seven days after creation", async () => {
   ));
 });
 
+test("an invitation cannot extend validity with a future creation time", async () => {
+  await seedHousehold();
+  const database = testEnvironment.authenticatedContext("member-1").firestore();
+  const createdAt = Timestamp.fromMillis(Date.now() + 4 * 60 * 1000);
+
+  await assertFails(setDoc(
+    doc(database, "invitations/invitation-1"),
+    invitationData({ createdAt }),
+  ));
+});
+
 test("an expired invitation can no longer be revoked or replaced", async () => {
   await seedHousehold();
   const createdAt = Timestamp.fromMillis(Date.now() - 8 * 24 * 60 * 60 * 1000);
@@ -286,6 +297,24 @@ test("an expired invitation can no longer be revoked or replaced", async () => {
       "invitation-2",
     ).commit(),
   );
+});
+
+test("only the Household Owner can record that a pending invitation expired", async () => {
+  await seedHousehold();
+  await seedHouseholdMember();
+  const createdAt = Timestamp.fromMillis(Date.now() - 8 * 24 * 60 * 60 * 1000);
+  await seedInvitation("invitation-1", invitationData({ createdAt }));
+  const ownerDatabase = testEnvironment.authenticatedContext("member-1").firestore();
+  const memberDatabase = testEnvironment.authenticatedContext("member-2").firestore();
+
+  await assertFails(updateDoc(
+    doc(memberDatabase, "invitations/invitation-1"),
+    { status: "expired" },
+  ));
+  await assertSucceeds(updateDoc(
+    doc(ownerDatabase, "invitations/invitation-1"),
+    { status: "expired" },
+  ));
 });
 
 test("a non-Owner cannot replace a pending invitation", async () => {

@@ -103,6 +103,7 @@ private fun MyStuffApp(
                     signOutInProgress = state.operationInProgress,
                     onCreateInvitation = invitationController::create,
                     onRevokeInvitation = invitationController::revoke,
+                    onExpireInvitation = invitationController::expire,
                     onReplaceInvitation = { invitationId, email ->
                         invitationController.replace(invitationId, email)
                     },

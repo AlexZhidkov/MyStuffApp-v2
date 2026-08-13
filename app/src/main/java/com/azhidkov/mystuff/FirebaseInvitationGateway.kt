@@ -55,6 +55,20 @@ class FirebaseInvitationGateway(
             .addOnFailureListener { failure -> onResult(Result.failure(failure)) }
     }
 
+    override fun expire(
+        invitation: HouseholdInvitation,
+        onResult: (Result<HouseholdInvitation>) -> Unit,
+    ) {
+        firestore.collection(INVITATIONS).document(invitation.id)
+            .update(STATUS, EXPIRED)
+            .addOnSuccessListener {
+                onResult(
+                    Result.success(invitation.copy(storedStatus = InvitationStatus.Expired)),
+                )
+            }
+            .addOnFailureListener { failure -> onResult(Result.failure(failure)) }
+    }
+
     override fun replace(
         invitation: HouseholdInvitation,
         intendedEmail: String,

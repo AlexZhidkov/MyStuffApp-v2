@@ -48,8 +48,7 @@ service cloud.firestore {
           '^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$'
         )
         && request.resource.data.createdAt is timestamp
-        && request.resource.data.createdAt
-          <= request.time + duration.value(5, 'm')
+        && request.resource.data.createdAt <= request.time
         && request.resource.data.createdAt
           >= request.time - duration.value(5, 'm')
         && request.resource.data.expiresAt
@@ -81,6 +80,15 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys()
           .hasOnly(['status'])
         && request.resource.data.status == 'revoked'
+        && isOwner(resource.data.householdId);
+    }
+
+    function validInvitationExpire() {
+      return resource.data.status == 'pending'
+        && resource.data.expiresAt <= request.time
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['status'])
+        && request.resource.data.status == 'expired'
         && isOwner(resource.data.householdId);
     }
 
@@ -158,7 +166,11 @@ service cloud.firestore {
       allow read: if isOwner(resource.data.householdId);
       allow create: if signedIn() && validInvitationCreate(invitationId);
       allow update: if signedIn()
-        && (validInvitationRevoke() || validInvitationReplace(invitationId));
+        && (
+          validInvitationRevoke()
+          || validInvitationExpire()
+          || validInvitationReplace(invitationId)
+        );
       allow delete: if false;
     }
 

@@ -25,12 +25,15 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -40,10 +43,12 @@ import com.azhidkov.mystuff.InvitationStatus
 import com.azhidkov.mystuff.InvitationUiState
 import com.azhidkov.mystuff.R
 import java.time.Instant
+import java.time.Duration
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.util.Locale
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -53,6 +58,7 @@ fun HouseholdRootScreen(
     signOutInProgress: Boolean,
     onCreateInvitation: (String) -> Unit,
     onRevokeInvitation: (String) -> Unit,
+    onExpireInvitation: (String) -> Unit,
     onReplaceInvitation: (String, String) -> Unit,
     onSignOut: () -> Unit,
 ) {
@@ -123,6 +129,7 @@ fun HouseholdRootScreen(
                         invitation = invitation,
                         operationInProgress = invitationState.operationInProgress,
                         onRevoke = { onRevokeInvitation(invitation.id) },
+                        onExpire = { onExpireInvitation(invitation.id) },
                         onReplace = {
                             onReplaceInvitation(invitation.id, invitation.intendedEmail)
                         },
@@ -183,19 +190,22 @@ private fun InvitationCard(
     invitation: HouseholdInvitation,
     operationInProgress: Boolean,
     onRevoke: () -> Unit,
+    onExpire: () -> Unit,
     onReplace: () -> Unit,
 ) {
-    val status = invitation.statusAt(Instant.now())
-    val containerColor = when (status) {
-        InvitationStatus.Pending -> MaterialTheme.colorScheme.primaryContainer
-        InvitationStatus.Revoked -> MaterialTheme.colorScheme.errorContainer
-        InvitationStatus.Replaced -> MaterialTheme.colorScheme.secondaryContainer
-        InvitationStatus.Expired -> MaterialTheme.colorScheme.surfaceVariant
-        InvitationStatus.Accepted -> MaterialTheme.colorScheme.tertiaryContainer
+    val status by currentInvitationStatus(invitation)
+    LaunchedEffect(status, invitation.storedStatus) {
+        if (
+            status == InvitationStatus.Expired &&
+            invitation.storedStatus == InvitationStatus.Pending
+        ) {
+            onExpire()
+        }
     }
+    val presentation = invitationStatusPresentation(invitation, status)
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = containerColor),
+        colors = CardDefaults.cardColors(containerColor = presentation.containerColor),
     ) {
         androidx.compose.foundation.layout.Column(
             modifier = Modifier.padding(16.dp),
@@ -212,10 +222,10 @@ private fun InvitationCard(
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
-                InvitationStatusLabel(status)
+                InvitationStatusLabel(presentation.label)
             }
             Text(
-                text = invitationStatusDetail(invitation, status),
+                text = presentation.detail,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -248,19 +258,28 @@ private fun InvitationCard(
 }
 
 @Composable
-private fun InvitationStatusLabel(status: InvitationStatus) {
+private fun currentInvitationStatus(
+    invitation: HouseholdInvitation,
+) = produceState(
+    initialValue = invitation.statusAt(Instant.now()),
+    key1 = invitation.id,
+    key2 = invitation.expiresAt,
+    key3 = invitation.storedStatus,
+) {
+    if (invitation.storedStatus != InvitationStatus.Pending) return@produceState
+    val remaining = Duration.between(Instant.now(), invitation.expiresAt).toMillis()
+    if (remaining > 0) delay(remaining)
+    value = invitation.statusAt(Instant.now())
+}
+
+@Composable
+private fun InvitationStatusLabel(label: String) {
     Surface(
         shape = MaterialTheme.shapes.small,
         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
     ) {
         Text(
-            text = when (status) {
-                InvitationStatus.Pending -> stringResource(R.string.invitation_pending)
-                InvitationStatus.Accepted -> stringResource(R.string.invitation_accepted)
-                InvitationStatus.Revoked -> stringResource(R.string.invitation_revoked)
-                InvitationStatus.Replaced -> stringResource(R.string.invitation_replaced)
-                InvitationStatus.Expired -> stringResource(R.string.invitation_expired)
-            },
+            text = label,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.Bold,
@@ -269,19 +288,45 @@ private fun InvitationStatusLabel(status: InvitationStatus) {
 }
 
 @Composable
-private fun invitationStatusDetail(
+private fun invitationStatusPresentation(
     invitation: HouseholdInvitation,
     status: InvitationStatus,
-): String = when (status) {
-    InvitationStatus.Pending -> stringResource(
-        R.string.invitation_expires_on,
-        invitation.expiresAt.formattedDate(),
+): InvitationStatusPresentation = when (status) {
+    InvitationStatus.Pending -> InvitationStatusPresentation(
+        containerColor = MaterialTheme.colorScheme.primaryContainer,
+        label = stringResource(R.string.invitation_pending),
+        detail = stringResource(
+            R.string.invitation_expires_on,
+            invitation.expiresAt.formattedDate(),
+        ),
     )
-    InvitationStatus.Accepted -> stringResource(R.string.invitation_link_accepted)
-    InvitationStatus.Revoked -> stringResource(R.string.invitation_link_revoked)
-    InvitationStatus.Replaced -> stringResource(R.string.invitation_link_replaced)
-    InvitationStatus.Expired -> stringResource(R.string.invitation_link_expired)
+    InvitationStatus.Accepted -> InvitationStatusPresentation(
+        containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+        label = stringResource(R.string.invitation_accepted),
+        detail = stringResource(R.string.invitation_link_accepted),
+    )
+    InvitationStatus.Revoked -> InvitationStatusPresentation(
+        containerColor = MaterialTheme.colorScheme.errorContainer,
+        label = stringResource(R.string.invitation_revoked),
+        detail = stringResource(R.string.invitation_link_revoked),
+    )
+    InvitationStatus.Replaced -> InvitationStatusPresentation(
+        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+        label = stringResource(R.string.invitation_replaced),
+        detail = stringResource(R.string.invitation_link_replaced),
+    )
+    InvitationStatus.Expired -> InvitationStatusPresentation(
+        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        label = stringResource(R.string.invitation_expired),
+        detail = stringResource(R.string.invitation_link_expired),
+    )
 }
+
+private data class InvitationStatusPresentation(
+    val containerColor: Color,
+    val label: String,
+    val detail: String,
+)
 
 private fun Instant.formattedDate(): String = DateTimeFormatter
     .ofLocalizedDate(FormatStyle.MEDIUM)

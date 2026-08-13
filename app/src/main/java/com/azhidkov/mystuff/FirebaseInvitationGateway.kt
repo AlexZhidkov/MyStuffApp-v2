@@ -67,20 +67,6 @@ class FirebaseInvitationGateway(
             .addOnFailureListener { failure -> onResult(Result.failure(failure)) }
     }
 
-    override fun expire(
-        invitation: HouseholdInvitation,
-        onResult: (Result<HouseholdInvitation>) -> Unit,
-    ) {
-        firestore.collection(INVITATIONS).document(invitation.id)
-            .update(STATUS, EXPIRED)
-            .addOnSuccessListener {
-                onResult(
-                    Result.success(invitation.copy(storedStatus = InvitationStatus.Expired)),
-                )
-            }
-            .addOnFailureListener { failure -> onResult(Result.failure(failure)) }
-    }
-
     override fun replace(
         invitation: HouseholdInvitation,
         intendedEmail: String,
@@ -203,14 +189,14 @@ private fun HouseholdInvitation.toDocument(): Map<String, Any?> = mapOf(
 )
 
 private fun DocumentSnapshot.toInvitation(): HouseholdInvitation = HouseholdInvitation(
-        id = id,
-        householdId = requiredString(HOUSEHOLD_ID),
-        intendedEmail = requiredString(INTENDED_EMAIL),
-        createdAt = requiredTimestamp(CREATED_AT).toInstant(),
-        expiresAt = requiredTimestamp(EXPIRES_AT).toInstant(),
-        storedStatus = requiredString(STATUS).toInvitationStatus(),
-        replacesInvitationId = optionalString(REPLACES_INVITATION_ID),
-        replacedByInvitationId = optionalString(REPLACED_BY_INVITATION_ID),
+    id = id,
+    householdId = requiredString(HOUSEHOLD_ID),
+    intendedEmail = requiredString(INTENDED_EMAIL),
+    createdAt = requiredTimestamp(CREATED_AT).toInstant(),
+    expiresAt = requiredTimestamp(EXPIRES_AT).toInstant(),
+    storedStatus = requiredString(STATUS).toInvitationStatus(),
+    replacesInvitationId = optionalString(REPLACES_INVITATION_ID),
+    replacedByInvitationId = optionalString(REPLACED_BY_INVITATION_ID),
 )
 
 private fun DocumentSnapshot.requiredString(field: String): String =

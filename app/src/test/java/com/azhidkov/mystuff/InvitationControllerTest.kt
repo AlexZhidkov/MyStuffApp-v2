@@ -97,26 +97,6 @@ class InvitationControllerTest {
         assertEquals(InvitationStatus.Expired, invitation.statusAt(invitation.expiresAt.plusSeconds(1)))
     }
 
-    @Test
-    fun `Household Owner records an elapsed invitation as expired`() {
-        val pending = invitation(
-            id = "invitation-1",
-            createdAt = NOW.minusSeconds(SEVEN_DAYS_SECONDS + 1),
-            expiresAt = NOW.minusSeconds(1),
-        )
-        val gateway = FakeInvitationGateway(initialInvitations = listOf(pending))
-        val controller = InvitationController(
-            household = household(ownerMemberId = "member-1"),
-            currentMemberId = "member-1",
-            gateway = gateway,
-            now = { NOW },
-        )
-
-        controller.expire("invitation-1")
-
-        assertEquals("invitation-1", gateway.expiredInvitationId)
-        assertEquals(InvitationStatus.Expired, controller.state.invitations.single().storedStatus)
-    }
 }
 
 private class FakeInvitationGateway(
@@ -133,8 +113,6 @@ private class FakeInvitationGateway(
     var replacedInvitationId: String? = null
         private set
     var replacementEmail: String? = null
-        private set
-    var expiredInvitationId: String? = null
         private set
 
     override fun load(
@@ -168,14 +146,6 @@ private class FakeInvitationGateway(
     ) {
         revokedInvitationId = invitation.id
         onResult(Result.success(invitation.copy(storedStatus = InvitationStatus.Revoked)))
-    }
-
-    override fun expire(
-        invitation: HouseholdInvitation,
-        onResult: (Result<HouseholdInvitation>) -> Unit,
-    ) {
-        expiredInvitationId = invitation.id
-        onResult(Result.success(invitation.copy(storedStatus = InvitationStatus.Expired)))
     }
 
     override fun replace(

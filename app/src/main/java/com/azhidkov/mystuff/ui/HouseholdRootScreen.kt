@@ -25,7 +25,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -58,7 +57,6 @@ fun HouseholdRootScreen(
     signOutInProgress: Boolean,
     onCreateInvitation: (String) -> Unit,
     onRevokeInvitation: (String) -> Unit,
-    onExpireInvitation: (String) -> Unit,
     onReplaceInvitation: (String, String) -> Unit,
     onSignOut: () -> Unit,
 ) {
@@ -129,7 +127,6 @@ fun HouseholdRootScreen(
                         invitation = invitation,
                         operationInProgress = invitationState.operationInProgress,
                         onRevoke = { onRevokeInvitation(invitation.id) },
-                        onExpire = { onExpireInvitation(invitation.id) },
                         onReplace = {
                             onReplaceInvitation(invitation.id, invitation.intendedEmail)
                         },
@@ -190,19 +187,9 @@ private fun InvitationCard(
     invitation: HouseholdInvitation,
     operationInProgress: Boolean,
     onRevoke: () -> Unit,
-    onExpire: () -> Unit,
     onReplace: () -> Unit,
 ) {
     val status by currentInvitationStatus(invitation)
-    LaunchedEffect(status, invitation.storedStatus) {
-        while (
-            status == InvitationStatus.Expired &&
-            invitation.storedStatus == InvitationStatus.Pending
-        ) {
-            onExpire()
-            delay(EXPIRY_PERSISTENCE_RETRY_MILLIS)
-        }
-    }
     val presentation = invitationStatusPresentation(invitation, status)
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -328,8 +315,6 @@ private data class InvitationStatusPresentation(
     val label: String,
     val detail: String,
 )
-
-private const val EXPIRY_PERSISTENCE_RETRY_MILLIS = 30_000L
 
 private fun Instant.formattedDate(): String = DateTimeFormatter
     .ofLocalizedDate(FormatStyle.MEDIUM)

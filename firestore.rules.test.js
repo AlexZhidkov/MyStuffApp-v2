@@ -330,24 +330,6 @@ test("an expired invitation can no longer be revoked or replaced", async () => {
   );
 });
 
-test("only the Household Owner can record that a pending invitation expired", async () => {
-  await seedHousehold();
-  await seedHouseholdMember();
-  const createdAt = Timestamp.fromMillis(Date.now() - 8 * 24 * 60 * 60 * 1000);
-  await seedInvitation("invitation-1", invitationData({ createdAt }));
-  const ownerDatabase = testEnvironment.authenticatedContext("member-1").firestore();
-  const memberDatabase = testEnvironment.authenticatedContext("member-2").firestore();
-
-  await assertFails(updateDoc(
-    doc(memberDatabase, "invitations/invitation-1"),
-    { status: "expired" },
-  ));
-  await assertSucceeds(updateDoc(
-    doc(ownerDatabase, "invitations/invitation-1"),
-    { status: "expired" },
-  ));
-});
-
 test("a non-Owner cannot replace a pending invitation", async () => {
   await seedHousehold();
   await seedHouseholdMember();

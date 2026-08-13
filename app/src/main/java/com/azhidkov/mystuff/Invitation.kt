@@ -54,11 +54,6 @@ interface InvitationGateway {
         onResult: (Result<HouseholdInvitation>) -> Unit,
     )
 
-    fun expire(
-        invitation: HouseholdInvitation,
-        onResult: (Result<HouseholdInvitation>) -> Unit,
-    )
-
     fun replace(
         invitation: HouseholdInvitation,
         intendedEmail: String,
@@ -142,33 +137,6 @@ class InvitationController(
                     state.copy(
                         operationInProgress = false,
                         errorMessage = failure.message ?: "Couldn't revoke the invitation.",
-                    ),
-                )
-            }
-        }
-    }
-
-    fun expire(invitationId: String) {
-        if (!state.canManage) return
-        val invitation = state.invitations.singleOrNull { it.id == invitationId } ?: return
-        if (
-            invitation.storedStatus != InvitationStatus.Pending ||
-            invitation.statusAt(now()) != InvitationStatus.Expired
-        ) {
-            return
-        }
-
-        gateway.expire(invitation) { result ->
-            result.onSuccess { expired ->
-                updateState(
-                    state.copy(
-                        invitations = state.invitations.replace(expired),
-                    ),
-                )
-            }.onFailure { failure ->
-                updateState(
-                    state.copy(
-                        errorMessage = failure.message ?: "Couldn't update the invitation status.",
                     ),
                 )
             }

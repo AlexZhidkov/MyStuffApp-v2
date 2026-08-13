@@ -110,15 +110,6 @@ service cloud.firestore {
         && isOwner(resource.data.householdId);
     }
 
-    function validInvitationExpire() {
-      return resource.data.status == 'pending'
-        && resource.data.expiresAt <= request.time
-        && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['status'])
-        && request.resource.data.status == 'expired'
-        && isOwner(resource.data.householdId);
-    }
-
     function validInvitationReplace(invitationId) {
       let replacementId = request.resource.data.replacedByInvitationId;
       let replacement = getAfter(invitationPath(replacementId)).data;
@@ -195,7 +186,6 @@ service cloud.firestore {
       allow update: if signedIn()
         && (
           validInvitationRevoke()
-          || validInvitationExpire()
           || validInvitationReplace(invitationId)
         );
       allow delete: if false;

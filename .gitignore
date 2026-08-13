@@ -2,6 +2,9 @@
 /build/
 /app/build/
 /local.properties
+node_modules/
+firebase-debug.log
+firestore-debug.log
 *.iml
 .idea/caches/
 .idea/libraries/

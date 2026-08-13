@@ -6,10 +6,10 @@
 
 **Status:** ready-for-agent
 
-- [ ] A signed-in person without a Household can create one using a name trimmed to 1–100 Unicode characters.
-- [ ] Creating a Household creates exactly one root Item with the same name and makes the creator its Household Owner.
-- [ ] The Household is the only Item without a Parent Item and has no photo, description, or Tags.
-- [ ] A returning Member is routed directly into their existing Household after sign-in.
-- [ ] A Member who already belongs to a Household cannot create another Household.
-- [ ] Firebase authorization allows current Members to access the Household and rejects authenticated non-Members.
-- [ ] Automated checks cover creation, reopening, name validation, the one-Household limit, and the Household authorization boundary.
+- [x] A signed-in person without a Household can create one using a name trimmed to 1–100 Unicode characters.
+- [x] Creating a Household creates exactly one root Item with the same name and makes the creator its Household Owner.
+- [x] The Household is the only Item without a Parent Item and has no photo, description, or Tags.
+- [x] A returning Member is routed directly into their existing Household after sign-in.
+- [x] A Member who already belongs to a Household cannot create another Household.
+- [x] Firebase authorization allows current Members to access the Household and rejects authenticated non-Members.
+- [x] Automated checks cover creation, reopening, name validation, the one-Household limit, and the Household authorization boundary.

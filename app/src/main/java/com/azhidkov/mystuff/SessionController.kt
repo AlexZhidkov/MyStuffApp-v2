@@ -17,22 +17,30 @@ interface AuthenticationGateway {
 enum class AppDestination {
     SignIn,
     HouseholdEntry,
+    HouseholdRoot,
 }
 
 data class SessionUiState(
     val destination: AppDestination,
     val identity: AuthenticatedIdentity? = null,
+    val household: Household? = null,
+    val householdNameError: String? = null,
     val operationInProgress: Boolean = false,
     val errorMessage: String? = null,
 )
 
 class SessionController(
     private val authenticationGateway: AuthenticationGateway,
+    private val householdGateway: HouseholdGateway = NoHouseholdGateway,
 ) {
     var state: SessionUiState = stateFor(authenticationGateway.currentIdentity)
         private set
 
     var onStateChanged: (SessionUiState) -> Unit = {}
+
+    init {
+        state.identity?.let(::openHouseholdFor)
+    }
 
     fun signIn() {
         if (state.operationInProgress) return
@@ -45,7 +53,7 @@ class SessionController(
         )
         authenticationGateway.signIn { result ->
             result.onSuccess { identity ->
-                updateState(stateFor(identity))
+                openHouseholdFor(identity)
             }.onFailure { failure ->
                 authenticationGateway.signOut {
                     updateState(
@@ -55,6 +63,39 @@ class SessionController(
                         ),
                     )
                 }
+            }
+        }
+    }
+
+    private fun openHouseholdFor(identity: AuthenticatedIdentity) {
+        updateState(
+            SessionUiState(
+                destination = AppDestination.HouseholdEntry,
+                identity = identity,
+                operationInProgress = true,
+            ),
+        )
+        householdGateway.findForMember(identity.id) { result ->
+            result.onSuccess { household ->
+                updateState(
+                    SessionUiState(
+                        destination = if (household == null) {
+                            AppDestination.HouseholdEntry
+                        } else {
+                            AppDestination.HouseholdRoot
+                        },
+                        identity = identity,
+                        household = household,
+                    ),
+                )
+            }.onFailure { failure ->
+                updateState(
+                    SessionUiState(
+                        destination = AppDestination.HouseholdEntry,
+                        identity = identity,
+                        errorMessage = failure.message ?: "Couldn't open your Household.",
+                    ),
+                )
             }
         }
     }
@@ -75,6 +116,49 @@ class SessionController(
                     errorMessage = result.exceptionOrNull()?.let(::buildSignOutError),
                 ),
             )
+        }
+    }
+
+    fun createHousehold(rawName: String) {
+        val identity = state.identity ?: return
+        if (state.operationInProgress || state.household != null) return
+
+        val name = rawName.trim(Char::isWhitespace)
+        val nameError = when {
+            name.isEmpty() -> "Enter a Household name."
+            name.codePointCount(0, name.length) > 100 ->
+                "Household names can contain at most 100 characters."
+            else -> null
+        }
+        if (nameError != null) {
+            updateState(state.copy(householdNameError = nameError))
+            return
+        }
+
+        updateState(
+            state.copy(
+                operationInProgress = true,
+                errorMessage = null,
+                householdNameError = null,
+            ),
+        )
+        householdGateway.create(identity, name) { result ->
+            result.onSuccess { household ->
+                updateState(
+                    SessionUiState(
+                        destination = AppDestination.HouseholdRoot,
+                        identity = identity,
+                        household = household,
+                    ),
+                )
+            }.onFailure { failure ->
+                updateState(
+                    state.copy(
+                        operationInProgress = false,
+                        errorMessage = failure.message ?: "Couldn't create your Household.",
+                    ),
+                )
+            }
         }
     }
 

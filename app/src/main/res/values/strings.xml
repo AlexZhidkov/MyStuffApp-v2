@@ -8,10 +8,13 @@
     <string name="google_only_provider">MyStuff uses your Google Account only to identify you and protect your Household.</string>
     <string name="sign_out">Sign out</string>
     <string name="welcome_person">Welcome, %1$s</string>
-    <string name="household_entry_title">How will you join MyStuff?</string>
-    <string name="household_entry_supporting_text">A Household is the private root of one shared Inventory. Start yours or use an invitation from its Household Owner.</string>
     <string name="create_household">Create a Household</string>
-    <string name="create_household_supporting_text">Name a new shared Inventory and become its Household Owner.</string>
-    <string name="accept_invitation">Accept an invitation</string>
-    <string name="accept_invitation_supporting_text">Join an existing Household with an invitation sent to this Google Account.</string>
+    <string name="create_household_title">Create your Household</string>
+    <string name="create_household_body">Give the root of your shared Inventory a name. You’ll become its Household Owner.</string>
+    <string name="household_name">Household name</string>
+    <string name="household_name_supporting_text">1–100 characters</string>
+    <string name="creating_household">Creating Household…</string>
+    <string name="accept_invitation_coming_soon">Have an invitation? Invitation acceptance is coming next.</string>
+    <string name="household_root_label">Household Inventory</string>
+    <string name="empty_household_body">This is your Household’s root Item. Child Items will appear here.</string>
 </resources>

@@ -15,6 +15,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.azhidkov.mystuff.ui.HouseholdEntryScreen
+import com.azhidkov.mystuff.ui.HouseholdRootScreen
 import com.azhidkov.mystuff.ui.SignInScreen
 import com.azhidkov.mystuff.ui.theme.MyStuffTheme
 
@@ -24,7 +25,8 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         val sessionController = SessionController(
-            FirebaseAuthenticationGateway(this),
+            authenticationGateway = FirebaseAuthenticationGateway(this),
+            householdGateway = FirebaseHouseholdGateway(),
         )
         setContent {
             var sessionState by remember { mutableStateOf(sessionController.state) }
@@ -41,6 +43,7 @@ class MainActivity : ComponentActivity() {
                     state = sessionState,
                     onSignIn = sessionController::signIn,
                     onSignOut = sessionController::signOut,
+                    onCreateHousehold = sessionController::createHousehold,
                 )
             }
         }
@@ -51,6 +54,7 @@ private fun MyStuffApp(
     state: SessionUiState,
     onSignIn: () -> Unit,
     onSignOut: () -> Unit,
+    onCreateHousehold: (String) -> Unit,
 ) {
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -64,6 +68,15 @@ private fun MyStuffApp(
 
             AppDestination.HouseholdEntry -> HouseholdEntryScreen(
                 identity = requireNotNull(state.identity),
+                operationInProgress = state.operationInProgress,
+                householdNameError = state.householdNameError,
+                errorMessage = state.errorMessage,
+                onCreateHousehold = onCreateHousehold,
+                onSignOut = onSignOut,
+            )
+
+            AppDestination.HouseholdRoot -> HouseholdRootScreen(
+                household = requireNotNull(state.household),
                 signOutInProgress = state.operationInProgress,
                 onSignOut = onSignOut,
             )

@@ -1,0 +1,99 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function membershipPath(memberId) {
+      return /databases/$(database)/documents/memberships/$(memberId);
+    }
+
+    function householdPath(householdId) {
+      return /databases/$(database)/documents/households/$(householdId);
+    }
+
+    function rootItemPath(householdId) {
+      return /databases/$(database)/documents/households/$(householdId)/items/$(householdId);
+    }
+
+    function isMember(householdId) {
+      return signedIn()
+        && get(membershipPath(request.auth.uid)).data.householdId == householdId;
+    }
+
+    function isMemberAfter(householdId) {
+      return signedIn()
+        && getAfter(membershipPath(request.auth.uid)).data.householdId == householdId;
+    }
+
+    function validName(name) {
+      return name is string
+        && name.matches('^[^\\s\\p{Z}](.{0,98}[^\\s\\p{Z}])?$');
+    }
+
+    function validHouseholdCreate(householdId) {
+      return request.resource.data.keys().hasOnly([
+          'name', 'ownerMemberId', 'rootItemId', 'createdAt'
+        ])
+        && validName(request.resource.data.name)
+        && request.resource.data.ownerMemberId == request.auth.uid
+        && request.resource.data.rootItemId == householdId
+        && request.resource.data.createdAt == request.time
+        && isMemberAfter(householdId)
+        && existsAfter(rootItemPath(householdId));
+    }
+
+    function validRootItemCreate(householdId, itemId) {
+      let household = getAfter(householdPath(householdId)).data;
+      return itemId == householdId
+        && request.resource.data.keys().hasOnly([
+          'householdId', 'name', 'parentItemId', 'photoUrl', 'description',
+          'tags', 'createdAt', 'updatedAt', 'createdById',
+          'createdByDisplayName', 'updatedById', 'updatedByDisplayName'
+        ])
+        && request.resource.data.householdId == householdId
+        && request.resource.data.name == household.name
+        && request.resource.data.parentItemId == null
+        && request.resource.data.photoUrl == null
+        && request.resource.data.description == null
+        && request.resource.data.tags is list
+        && request.resource.data.tags.size() == 0
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.createdById == request.auth.uid
+        && request.resource.data.createdByDisplayName is string
+        && request.resource.data.updatedById == request.auth.uid
+        && request.resource.data.updatedByDisplayName
+          == request.resource.data.createdByDisplayName
+        && isMemberAfter(householdId);
+    }
+
+    match /memberships/{memberId} {
+      allow read: if signedIn() && request.auth.uid == memberId;
+      allow create: if signedIn()
+        && request.auth.uid == memberId
+        && request.resource.data.keys().hasOnly(['householdId', 'role'])
+        && request.resource.data.householdId is string
+        && request.resource.data.role == 'owner'
+        && getAfter(householdPath(request.resource.data.householdId))
+          .data.ownerMemberId == memberId
+        && existsAfter(rootItemPath(request.resource.data.householdId));
+      allow update, delete: if false;
+    }
+
+    match /households/{householdId} {
+      allow read: if isMember(householdId);
+      allow create: if signedIn() && validHouseholdCreate(householdId);
+      allow update, delete: if false;
+
+      match /items/{itemId} {
+        allow read: if isMember(householdId);
+        allow create: if signedIn()
+          && validRootItemCreate(householdId, itemId);
+        allow update, delete: if false;
+      }
+    }
+  }
+}

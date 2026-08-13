@@ -1,9 +1,7 @@
 package com.azhidkov.mystuff.ui
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -12,26 +10,28 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ElevatedCard
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedCard
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.azhidkov.mystuff.AuthenticatedIdentity
 import com.azhidkov.mystuff.R
@@ -40,9 +40,14 @@ import com.azhidkov.mystuff.R
 @Composable
 fun HouseholdEntryScreen(
     identity: AuthenticatedIdentity,
-    signOutInProgress: Boolean,
+    operationInProgress: Boolean,
+    householdNameError: String?,
+    errorMessage: String?,
+    onCreateHousehold: (String) -> Unit,
     onSignOut: () -> Unit,
 ) {
+    var householdName by remember { mutableStateOf("") }
+
     Scaffold(
         contentWindowInsets = WindowInsets.safeDrawing,
         topBar = {
@@ -54,10 +59,7 @@ fun HouseholdEntryScreen(
                     )
                 },
                 actions = {
-                    TextButton(
-                        onClick = onSignOut,
-                        enabled = !signOutInProgress,
-                    ) {
+                    TextButton(onClick = onSignOut, enabled = !operationInProgress) {
                         Text(stringResource(R.string.sign_out))
                     }
                 },
@@ -87,98 +89,81 @@ fun HouseholdEntryScreen(
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                text = stringResource(R.string.household_entry_title),
+                text = stringResource(R.string.create_household_title),
                 style = MaterialTheme.typography.headlineLarge,
                 fontWeight = FontWeight.Bold,
             )
             Spacer(Modifier.height(12.dp))
             Text(
-                text = stringResource(R.string.household_entry_supporting_text),
+                text = stringResource(R.string.create_household_body),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Spacer(Modifier.height(32.dp))
-            HouseholdOption(
-                number = "1",
-                title = stringResource(R.string.create_household),
-                body = stringResource(R.string.create_household_supporting_text),
-                emphasized = true,
-            )
-            Spacer(Modifier.height(16.dp))
-            HouseholdOption(
-                number = "2",
-                title = stringResource(R.string.accept_invitation),
-                body = stringResource(R.string.accept_invitation_supporting_text),
-                emphasized = false,
-            )
             Spacer(Modifier.height(28.dp))
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            OutlinedTextField(
+                value = householdName,
+                onValueChange = { householdName = it },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !operationInProgress,
+                label = { Text(stringResource(R.string.household_name)) },
+                supportingText = {
+                    Text(
+                        householdNameError
+                            ?: stringResource(R.string.household_name_supporting_text),
+                    )
+                },
+                isError = householdNameError != null,
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(
+                    onDone = { onCreateHousehold(householdName) },
+                ),
+            )
+            if (errorMessage != null) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = errorMessage,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
             Spacer(Modifier.height(20.dp))
+            Button(
+                onClick = { onCreateHousehold(householdName) },
+                enabled = !operationInProgress,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (operationInProgress) {
+                        CircularProgressIndicator(
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.height(18.dp),
+                        )
+                    }
+                    Text(
+                        stringResource(
+                            if (operationInProgress) {
+                                R.string.creating_household
+                            } else {
+                                R.string.create_household
+                            },
+                        ),
+                    )
+                }
+            }
+            Spacer(Modifier.height(28.dp))
+            Text(
+                text = stringResource(R.string.accept_invitation_coming_soon),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.weight(1f))
             Text(
                 text = identity.email.orEmpty(),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Spacer(Modifier.height(24.dp))
         }
-    }
-}
-
-@Composable
-private fun HouseholdOption(
-    number: String,
-    title: String,
-    body: String,
-    emphasized: Boolean,
-) {
-    val content: @Composable ColumnScope.() -> Unit = {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(20.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            verticalAlignment = Alignment.Top,
-        ) {
-            Surface(
-                modifier = Modifier.size(40.dp),
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Text(
-                        text = number,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
-            }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    text = body,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
-
-    if (emphasized) {
-        ElevatedCard(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.elevatedCardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            ),
-            content = content,
-        )
-    } else {
-        OutlinedCard(
-            modifier = Modifier.fillMaxWidth(),
-            content = content,
-        )
     }
 }

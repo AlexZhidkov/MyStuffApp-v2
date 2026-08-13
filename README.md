@@ -24,10 +24,12 @@ Currently implemented:
 - Retryable sign-in errors and sign-out
 - A Jetpack Compose sign-in experience
 - A signed-in Household entry screen
+- Transactional Household creation with one root Item and an Owner membership
+- Automatic reopening of an existing Household after sign-in
+- Firestore rules and emulator tests for the Household membership boundary
 - Unit-tested session state transitions
 
-The Household entry choices are currently presentational. Household creation,
-invitations, the Inventory tree, camera-first Item capture, search, editing,
+Household invitations, child Items, camera-first Item capture, search, editing,
 moving, deletion, and connected synchronization are planned in the
 [prototype specification](.scratch/household-inventory/spec.md).
 
@@ -37,6 +39,7 @@ moving, deletion, and connected synchronization are planned in the
 - Jetpack Compose and Material 3
 - Android Credential Manager
 - Firebase Authentication
+- Cloud Firestore
 - Gradle Kotlin DSL with a version catalog
 - JUnit 4
 
@@ -99,16 +102,22 @@ Run the local unit tests with:
 ./gradlew test
 ```
 
-The current tests exercise authentication and session navigation independently
-of Firebase by using a fake authentication gateway.
+The local unit tests exercise authentication and Household navigation with fake
+gateways. Firestore authorization tests run against the Firebase emulator:
+
+```bash
+npm install
+npm run test:rules
+```
 
 ## Project structure
 
 ```text
 app/src/main/java/com/azhidkov/mystuff/
 ├── MainActivity.kt                  Compose application entry point
-├── SessionController.kt             Session state and navigation decisions
+├── SessionController.kt             Session and Household navigation decisions
 ├── FirebaseAuthenticationGateway.kt Google and Firebase authentication
+├── FirebaseHouseholdGateway.kt      Household persistence in Cloud Firestore
 └── ui/
     ├── SignInScreen.kt
     ├── HouseholdEntryScreen.kt

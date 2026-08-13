@@ -6,7 +6,7 @@
 
 **Device to target:** Google Pixel 8 Pro running Android 17
 
-**Status:** ready-for-agent
+**Status:** implemented
 
 - [ ] The Android app builds, launches, and connects to the configured Firebase backend.
 - [ ] A person can sign in using Google as the only authentication provider.

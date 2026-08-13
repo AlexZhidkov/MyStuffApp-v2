@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — Member signs in and out with Google.
 
-**Status:** ready-for-agent
+**Status:** implemented
 
 - [x] A signed-in person without a Household can create one using a name trimmed to 1–100 Unicode characters.
 - [x] Creating a Household creates exactly one root Item with the same name and makes the creator its Household Owner.

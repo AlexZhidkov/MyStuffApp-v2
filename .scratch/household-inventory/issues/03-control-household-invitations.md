@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 — Member creates and reopens a Household.
 
-**Status:** ready-for-agent
+**Status:** implemented
 
 - [x] The Household Owner can create a pending invitation for one entered Google email address.
 - [x] An invitation records its Household, intended email address, creation time, seven-day expiry, and current status.

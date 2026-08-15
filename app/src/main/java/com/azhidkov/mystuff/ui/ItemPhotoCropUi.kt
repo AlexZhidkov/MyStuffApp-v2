@@ -11,6 +11,7 @@ import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -77,7 +78,7 @@ internal fun CropPhotoScreen(
             TopAppBar(
                 title = { Text(stringResource(R.string.crop_photo)) },
                 navigationIcon = {
-                    TextButton(onClick = actions::cancelPhotoCrop, enabled = !cropping) {
+                    TextButton(onClick = actions::cancelAddItem, enabled = !cropping) {
                         Text(stringResource(R.string.cancel))
                     }
                 },
@@ -141,7 +142,6 @@ internal fun CropPhotoScreen(
                                 actions.useCroppedPhoto(ItemPhoto(uri.toString()))
                             }.onFailure {
                                 cropping = false
-                                actions.cancelPhotoCrop()
                             }
                         }
                     },
@@ -153,6 +153,17 @@ internal fun CropPhotoScreen(
                             if (cropping) R.string.cropping_photo else R.string.use_photo,
                         ),
                     )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    TextButton(onClick = actions::retakePhoto, enabled = !cropping) {
+                        Text(stringResource(R.string.retake_photo))
+                    }
+                    TextButton(onClick = actions::continueWithoutPhoto, enabled = !cropping) {
+                        Text(stringResource(R.string.continue_without_photo))
+                    }
                 }
             } ?: Box(
                 modifier = Modifier

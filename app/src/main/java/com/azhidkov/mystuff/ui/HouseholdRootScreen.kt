@@ -74,11 +74,6 @@ fun HouseholdRootScreen(
             ItemCreationStage.Camera,
             -> CameraCaptureStep(itemDraft.stage, inventoryActions)
 
-            ItemCreationStage.PhotoReview -> CapturedPhotoScreen(
-                photo = requireNotNull(itemDraft.photo),
-                actions = inventoryActions,
-            )
-
             ItemCreationStage.Crop -> CropPhotoScreen(
                 photo = requireNotNull(itemDraft.photo),
                 actions = inventoryActions,

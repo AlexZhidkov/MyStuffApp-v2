@@ -10,16 +10,12 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -98,62 +94,6 @@ internal fun CameraCaptureStep(
         body = stringResource(R.string.opening_camera_body),
         onCancel = actions::cancelAddItem,
     )
-}
-
-@Composable
-internal fun CapturedPhotoScreen(
-    photo: ItemPhoto,
-    actions: InventoryActions,
-) {
-    Scaffold(
-        contentWindowInsets = WindowInsets.safeDrawing,
-        topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.photo_captured)) },
-                navigationIcon = {
-                    TextButton(onClick = actions::cancelAddItem) {
-                        Text(stringResource(R.string.cancel))
-                    }
-                },
-            )
-        },
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            LocalItemPhoto(
-                photo = photo,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(1f),
-            )
-            Text(
-                text = stringResource(R.string.photo_captured_body),
-                style = MaterialTheme.typography.bodyLarge,
-            )
-            Button(
-                onClick = actions::beginPhotoCrop,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(stringResource(R.string.crop_and_use_photo))
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                TextButton(onClick = actions::retakePhoto) {
-                    Text(stringResource(R.string.retake_photo))
-                }
-                TextButton(onClick = actions::continueWithoutPhoto) {
-                    Text(stringResource(R.string.continue_without_photo))
-                }
-            }
-        }
-    }
 }
 
 @Composable

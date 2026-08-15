@@ -29,8 +29,6 @@ interface InventoryActions {
     fun photoCaptureFailed()
     fun photoCaptured(photo: ItemPhoto)
     fun retakePhoto()
-    fun beginPhotoCrop()
-    fun cancelPhotoCrop()
     fun useCroppedPhoto(photo: ItemPhoto)
     fun continueWithoutPhoto()
     fun cancelAddItem()
@@ -41,7 +39,6 @@ interface InventoryActions {
 enum class ItemCreationStage {
     CameraPermission,
     Camera,
-    PhotoReview,
     Crop,
     Details,
 }
@@ -147,25 +144,13 @@ class InventoryController(
 
     override fun photoCaptured(photo: ItemPhoto) {
         transitionItemDraft(ItemCreationStage.Camera) {
-            it.copy(stage = ItemCreationStage.PhotoReview, photo = photo)
+            it.copy(stage = ItemCreationStage.Crop, photo = photo)
         }
     }
 
     override fun retakePhoto() {
-        transitionItemDraft(ItemCreationStage.PhotoReview) {
-            it.copy(stage = ItemCreationStage.Camera, photo = null)
-        }
-    }
-
-    override fun beginPhotoCrop() {
-        val draft = state.itemDraft ?: return
-        if (draft.stage != ItemCreationStage.PhotoReview || draft.photo == null) return
-        updateState(state.copy(itemDraft = draft.copy(stage = ItemCreationStage.Crop)))
-    }
-
-    override fun cancelPhotoCrop() {
         transitionItemDraft(ItemCreationStage.Crop) {
-            it.copy(stage = ItemCreationStage.PhotoReview)
+            it.copy(stage = ItemCreationStage.Camera, photo = null)
         }
     }
 
@@ -176,7 +161,7 @@ class InventoryController(
     }
 
     override fun continueWithoutPhoto() {
-        transitionItemDraft(ItemCreationStage.PhotoReview) {
+        transitionItemDraft(ItemCreationStage.Crop) {
             it.copy(stage = ItemCreationStage.Details, photo = null)
         }
     }

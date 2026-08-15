@@ -44,14 +44,14 @@ class InventoryControllerTest {
     }
 
     @Test
-    fun `successful capture offers photo choices and retake reopens the camera`() {
+    fun `successful capture opens cropping and retake reopens the camera`() {
         val controller = InventoryController(household(), identity(), FakeInventoryGateway(inventory()))
 
         controller.beginAddItem()
         controller.resolveCameraPermission(granted = true)
         controller.photoCaptured(ItemPhoto("content://mystuff/captured.jpg"))
 
-        assertEquals(ItemCreationStage.PhotoReview, controller.state.itemCreationStage)
+        assertEquals(ItemCreationStage.Crop, controller.state.itemCreationStage)
         assertEquals("content://mystuff/captured.jpg", controller.state.itemDraft?.photo?.uri)
 
         controller.retakePhoto()
@@ -61,28 +61,11 @@ class InventoryControllerTest {
     }
 
     @Test
-    fun `cancelling crop returns to the captured photo choices`() {
-        val controller = InventoryController(household(), identity(), FakeInventoryGateway(inventory()))
-        controller.beginAddItem()
-        controller.resolveCameraPermission(granted = true)
-        controller.photoCaptured(ItemPhoto("content://mystuff/captured.jpg"))
-
-        controller.beginPhotoCrop()
-        assertEquals(ItemCreationStage.Crop, controller.state.itemCreationStage)
-
-        controller.cancelPhotoCrop()
-
-        assertEquals(ItemCreationStage.PhotoReview, controller.state.itemCreationStage)
-        assertEquals("content://mystuff/captured.jpg", controller.state.itemDraft?.photo?.uri)
-    }
-
-    @Test
     fun `using a crop continues to Item details with the cropped photo`() {
         val controller = InventoryController(household(), identity(), FakeInventoryGateway(inventory()))
         controller.beginAddItem()
         controller.resolveCameraPermission(granted = true)
         controller.photoCaptured(ItemPhoto("content://mystuff/captured.jpg"))
-        controller.beginPhotoCrop()
 
         controller.useCroppedPhoto(ItemPhoto("content://mystuff/cropped.jpg"))
 
@@ -110,7 +93,6 @@ class InventoryControllerTest {
         controller.beginAddItem()
         controller.resolveCameraPermission(granted = true)
         controller.photoCaptured(ItemPhoto("content://mystuff/captured.jpg"))
-        controller.beginPhotoCrop()
         controller.useCroppedPhoto(ItemPhoto("content://mystuff/cropped.jpg"))
         controller.changeItemName("Drill")
 

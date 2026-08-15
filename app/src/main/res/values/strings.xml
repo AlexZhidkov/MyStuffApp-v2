@@ -29,10 +29,7 @@
     <string name="saving_item">Saving Item…</string>
     <string name="opening_camera">Opening camera…</string>
     <string name="opening_camera_body">Take an Item photo, or cancel the camera to continue without one.</string>
-    <string name="photo_captured">Use this photo?</string>
-    <string name="photo_captured_body">Crop the photo before adding it, retake it, or continue without it.</string>
     <string name="retake_photo">Retake</string>
-    <string name="crop_and_use_photo">Crop and use</string>
     <string name="continue_without_photo">Continue without photo</string>
     <string name="crop_photo">Crop photo</string>
     <string name="crop_photo_body">Pinch to zoom and drag to choose the square crop.</string>

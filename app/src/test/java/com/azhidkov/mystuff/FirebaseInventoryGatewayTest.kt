@@ -5,26 +5,53 @@ import org.junit.Test
 
 class FirebaseInventoryGatewayTest {
     @Test
-    fun `creating an Item uploads its photo and writes the stored URL`() {
+    fun `creating an Item finishes before its two photo variants upload`() {
         val documents = FakeInventoryDocumentStore()
-        val photos = FakeInventoryPhotoStore("gs://mystuff/households/household-1/items/item-1/photo.jpg")
-        val gateway = FirebaseInventoryGateway(documents, photos)
         var result: Result<Item>? = null
+        val photos = FakeInventoryPhotoStore { result != null }
+        val gateway = FirebaseInventoryGateway(documents, photos)
 
         gateway.createItem(
             householdId = "household-1",
             parentItemId = "garage",
             creator = inventoryIdentity(),
             name = "Drill",
-            photo = ItemPhoto("content://mystuff/cropped.jpg"),
+            photo = ItemPhoto(
+                uri = "content://mystuff/cropped.webp",
+                thumbnailUri = "content://mystuff/cropped-thumb.webp",
+            ),
         ) { result = it }
 
-        assertEquals("household-1", photos.uploadedHouseholdId)
-        assertEquals("item-1", photos.uploadedItemId)
-        assertEquals(ItemPhoto("content://mystuff/cropped.jpg"), photos.uploadedPhoto)
-        val storedLocation = "gs://mystuff/households/household-1/items/item-1/photo.jpg"
-        assertEquals(storedLocation, documents.createdData?.get("photoUrl"))
-        assertEquals(storedLocation, result?.getOrThrow()?.photoUrl)
+        val created = result?.getOrThrow()
+        assertEquals(
+            "gs://mystuff/households/household-1/items/item-1.webp",
+            created?.photoUrl,
+        )
+        assertEquals(
+            "gs://mystuff/households/household-1/items/item-1-thumb.webp",
+            created?.photoThumbnailUrl,
+        )
+        assertEquals(created?.photoUrl, documents.createdData?.get("photoUrl"))
+        assertEquals(
+            created?.photoThumbnailUrl,
+            documents.createdData?.get("photoThumbnailUrl"),
+        )
+        assertEquals(
+            listOf(
+                QueuedPhotoUpload(
+                    ItemPhotoVariant.Full,
+                    "content://mystuff/cropped.webp",
+                    "households/household-1/items/item-1.webp",
+                ),
+                QueuedPhotoUpload(
+                    ItemPhotoVariant.Thumbnail,
+                    "content://mystuff/cropped-thumb.webp",
+                    "households/household-1/items/item-1-thumb.webp",
+                ),
+            ),
+            photos.uploads,
+        )
+        assertEquals(true, photos.creationCompletedWhenUploadsStarted)
     }
 
     @Test
@@ -37,7 +64,7 @@ class FirebaseInventoryGatewayTest {
                 itemDocument("cabinet", "Cabinet", "garage"),
             ),
         )
-        val gateway = FirebaseInventoryGateway(store, FakeInventoryPhotoStore("unused"))
+        val gateway = FirebaseInventoryGateway(store, FakeInventoryPhotoStore())
         var result: Result<Inventory>? = null
 
         gateway.observe(household) { result = it }
@@ -52,7 +79,7 @@ class FirebaseInventoryGatewayTest {
     fun `creating an Item writes its generated identity current Parent Item and attribution`() {
         val timestamp = Any()
         val store = FakeInventoryDocumentStore(serverTimestamp = timestamp)
-        val gateway = FirebaseInventoryGateway(store, FakeInventoryPhotoStore("unused"))
+        val gateway = FirebaseInventoryGateway(store, FakeInventoryPhotoStore())
         var result: Result<Item>? = null
 
         gateway.createItem(
@@ -70,6 +97,7 @@ class FirebaseInventoryGatewayTest {
                 "name" to "Drill",
                 "parentItemId" to "garage",
                 "photoUrl" to null,
+                "photoThumbnailUrl" to null,
                 "description" to null,
                 "tags" to emptyList<String>(),
                 "createdAt" to timestamp,
@@ -88,26 +116,44 @@ class FirebaseInventoryGatewayTest {
     }
 }
 
+private data class QueuedPhotoUpload(
+    val variant: ItemPhotoVariant,
+    val sourceUri: String,
+    val storagePath: String,
+)
+
 private class FakeInventoryPhotoStore(
-    private val storedUrl: String,
+    private val isCreationCompleted: () -> Boolean = { true },
 ) : InventoryPhotoStore {
-    var uploadedHouseholdId: String? = null
-        private set
-    var uploadedItemId: String? = null
-        private set
-    var uploadedPhoto: ItemPhoto? = null
+    val uploads = mutableListOf<QueuedPhotoUpload>()
+    var creationCompletedWhenUploadsStarted: Boolean? = null
         private set
 
-    override fun upload(
+    override fun locations(householdId: String, itemId: String) = ItemPhotoLocations(
+        full = "gs://mystuff/households/$householdId/items/$itemId.webp",
+        thumbnail = "gs://mystuff/households/$householdId/items/$itemId-thumb.webp",
+    )
+
+    override fun uploadInBackground(
         householdId: String,
         itemId: String,
         photo: ItemPhoto,
-        onResult: (Result<String>) -> Unit,
     ) {
-        uploadedHouseholdId = householdId
-        uploadedItemId = itemId
-        uploadedPhoto = photo
-        onResult(Result.success(storedUrl))
+        creationCompletedWhenUploadsStarted = isCreationCompleted()
+        uploads += QueuedPhotoUpload(
+            ItemPhotoVariant.Full,
+            photo.uri,
+            "households/$householdId/items/$itemId.webp",
+        )
+        uploads += QueuedPhotoUpload(
+            ItemPhotoVariant.Thumbnail,
+            photo.thumbnailUri,
+            "households/$householdId/items/$itemId-thumb.webp",
+        )
+    }
+
+    override fun deleteInBackground(householdId: String, itemIds: Collection<String>) {
+        error("Not used")
     }
 }
 
@@ -153,6 +199,7 @@ private fun itemDocument(
         "name" to name,
         "parentItemId" to parentItemId,
         "photoUrl" to null,
+        "photoThumbnailUrl" to null,
         "description" to null,
         "tags" to emptyList<String>(),
     ),
@@ -175,6 +222,7 @@ private fun inventoryItem(id: String, name: String, parentItemId: String?) = Ite
     name = name,
     parentItemId = parentItemId,
     photoUrl = null,
+    photoThumbnailUrl = null,
     description = null,
     tags = emptyList(),
 )

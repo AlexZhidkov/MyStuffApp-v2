@@ -7,10 +7,9 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
@@ -24,6 +23,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
+import com.azhidkov.mystuff.Item
 import com.azhidkov.mystuff.ItemPhoto
 import com.azhidkov.mystuff.R
 import com.google.firebase.storage.FirebaseStorage
@@ -34,7 +34,19 @@ import kotlin.coroutines.suspendCoroutine
 import kotlin.math.max
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+
+internal enum class ItemPhotoPresentation {
+    Detail,
+    Compact,
+}
+
+internal fun storedPhotoLocation(item: Item, presentation: ItemPhotoPresentation): String? =
+    when (presentation) {
+        ItemPhotoPresentation.Detail -> item.photoUrl
+        ItemPhotoPresentation.Compact -> item.photoThumbnailUrl
+    }
 
 @Composable
 internal fun LocalItemPhoto(
@@ -47,10 +59,12 @@ internal fun LocalItemPhoto(
 
 @Composable
 internal fun StoredItemPhoto(
-    location: String,
+    item: Item,
+    presentation: ItemPhotoPresentation,
     modifier: Modifier = Modifier,
 ) {
-    val bitmap by rememberStoredPhotoBitmap(location)
+    val location = requireNotNull(storedPhotoLocation(item, presentation))
+    val bitmap by rememberStoredPhotoBitmap(location, presentation)
     PhotoBitmap(bitmap, modifier)
 }
 
@@ -75,7 +89,11 @@ private fun PhotoBitmap(
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
             )
-        } ?: CircularProgressIndicator(Modifier.size(28.dp))
+        } ?: Text(
+            text = stringResource(R.string.item_photo_unavailable),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -91,11 +109,30 @@ internal fun rememberLocalPhotoBitmap(photo: ItemPhoto): State<Bitmap?> {
 }
 
 @Composable
-private fun rememberStoredPhotoBitmap(location: String): State<Bitmap?> = produceState(
+private fun rememberStoredPhotoBitmap(
+    location: String,
+    presentation: ItemPhotoPresentation,
+): State<Bitmap?> = produceState(
     initialValue = null,
     key1 = location,
+    key2 = presentation,
 ) {
-    value = runCatching { loadStoredPhotoBitmap(location) }.getOrNull()
+    var retryDelayMillis = INITIAL_PHOTO_RETRY_DELAY_MILLIS
+    while (value == null) {
+        value = runCatching {
+            loadStoredPhotoBitmap(
+                location = location,
+                maxBytes = when (presentation) {
+                    ItemPhotoPresentation.Detail -> MAX_FULL_PHOTO_DOWNLOAD_BYTES
+                    ItemPhotoPresentation.Compact -> MAX_THUMBNAIL_DOWNLOAD_BYTES
+                },
+            )
+        }.getOrNull()
+        if (value == null) {
+            delay(retryDelayMillis)
+            retryDelayMillis = (retryDelayMillis * 2).coerceAtMost(MAX_PHOTO_RETRY_DELAY_MILLIS)
+        }
+    }
 }
 
 private suspend fun loadLocalPhotoBitmap(context: Context, photo: ItemPhoto): Bitmap =
@@ -103,11 +140,11 @@ private suspend fun loadLocalPhotoBitmap(context: Context, photo: ItemPhoto): Bi
         decodePhoto(ImageDecoder.createSource(context.contentResolver, photo.uri.toUri()))
     }
 
-private suspend fun loadStoredPhotoBitmap(location: String): Bitmap {
+private suspend fun loadStoredPhotoBitmap(location: String, maxBytes: Long): Bitmap {
     val bytes = suspendCoroutine<ByteArray> { continuation ->
         FirebaseStorage.getInstance()
             .getReferenceFromUrl(location)
-            .getBytes(MAX_PHOTO_DOWNLOAD_BYTES)
+            .getBytes(maxBytes)
             .addOnSuccessListener(continuation::resume)
             .addOnFailureListener(continuation::resumeWithException)
     }
@@ -130,4 +167,7 @@ private fun decodePhoto(source: ImageDecoder.Source): Bitmap =
     }
 
 private const val MAX_DECODED_PHOTO_SIDE = 2_048
-private const val MAX_PHOTO_DOWNLOAD_BYTES = 10L * 1024 * 1024
+private const val MAX_FULL_PHOTO_DOWNLOAD_BYTES = 2L * 1024 * 1024
+private const val MAX_THUMBNAIL_DOWNLOAD_BYTES = 256L * 1024
+private const val INITIAL_PHOTO_RETRY_DELAY_MILLIS = 2_000L
+private const val MAX_PHOTO_RETRY_DELAY_MILLIS = 30_000L

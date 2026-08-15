@@ -1,10 +1,9 @@
 package com.azhidkov.mystuff
 
-import androidx.core.net.toUri
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.FirebaseApp
 import com.google.firebase.storage.FirebaseStorage
-import com.google.firebase.storage.StorageMetadata
 
 class FirebaseInventoryGateway internal constructor(
     private val store: InventoryDocumentStore,
@@ -12,7 +11,7 @@ class FirebaseInventoryGateway internal constructor(
 ) : InventoryGateway {
     constructor() : this(
         store = FirestoreInventoryDocumentStore(),
-        photoStore = FirebaseInventoryPhotoStore(),
+        photoStore = firebaseInventoryPhotoStore(),
     )
 
     override fun observe(
@@ -38,30 +37,23 @@ class FirebaseInventoryGateway internal constructor(
         onResult: (Result<Item>) -> Unit,
     ) {
         val itemId = store.newItemId(householdId)
-        if (photo == null) {
-            createItemDocument(
-                householdId = householdId,
-                parentItemId = parentItemId,
-                creator = creator,
-                itemId = itemId,
-                name = name,
-                photoUrl = null,
-                onResult = onResult,
-            )
-            return
-        }
-        photoStore.upload(householdId, itemId, photo) { uploadResult ->
-            uploadResult.onSuccess { photoLocation ->
-                createItemDocument(
-                    householdId = householdId,
-                    parentItemId = parentItemId,
-                    creator = creator,
-                    itemId = itemId,
-                    name = name,
-                    photoUrl = photoLocation,
-                    onResult = onResult,
-                )
-            }.onFailure { onResult(Result.failure(it)) }
+        val locations = photo?.let { photoStore.locations(householdId, itemId) }
+        createItemDocument(
+            householdId = householdId,
+            parentItemId = parentItemId,
+            creator = creator,
+            itemId = itemId,
+            name = name,
+            photoLocations = locations,
+        ) { result ->
+            onResult(result)
+            result.onSuccess {
+                if (photo != null) {
+                    runCatching {
+                        photoStore.uploadInBackground(householdId, itemId, photo)
+                    }
+                }
+            }
         }
     }
 
@@ -71,16 +63,17 @@ class FirebaseInventoryGateway internal constructor(
         creator: AuthenticatedIdentity,
         itemId: String,
         name: String,
-        photoUrl: String?,
+        photoLocations: ItemPhotoLocations?,
         onResult: (Result<Item>) -> Unit,
     ) {
         val item = Item(
             id = itemId,
             name = name,
             parentItemId = parentItemId,
-            photoUrl = photoUrl,
+            photoUrl = photoLocations?.full,
             description = null,
             tags = emptyList(),
+            photoThumbnailUrl = photoLocations?.thumbnail,
         )
         val displayName = creator.displayName?.takeIf(String::isNotBlank)
             ?: creator.email?.takeIf(String::isNotBlank)
@@ -89,7 +82,8 @@ class FirebaseInventoryGateway internal constructor(
             HOUSEHOLD_ID to householdId,
             NAME to item.name,
             PARENT_ITEM_ID to parentItemId,
-            PHOTO_URL to photoUrl,
+            PHOTO_URL to photoLocations?.full,
+            PHOTO_THUMBNAIL_URL to photoLocations?.thumbnail,
             DESCRIPTION to null,
             TAGS to emptyList<String>(),
             CREATED_AT to store.serverTimestamp,
@@ -106,35 +100,31 @@ class FirebaseInventoryGateway internal constructor(
 }
 
 internal interface InventoryPhotoStore {
-    fun upload(
+    fun locations(householdId: String, itemId: String): ItemPhotoLocations
+
+    fun uploadInBackground(
         householdId: String,
         itemId: String,
         photo: ItemPhoto,
-        onResult: (Result<String>) -> Unit,
+    )
+
+    fun deleteInBackground(householdId: String, itemIds: Collection<String>)
+}
+
+private fun firebaseInventoryPhotoStore(): InventoryPhotoStore {
+    val storage = FirebaseStorage.getInstance()
+    return BackgroundInventoryPhotoStore(
+        bucketUrl = storage.reference.toString(),
+        queue = WorkManagerPhotoTransferQueue(FirebaseApp.getInstance().applicationContext),
     )
 }
 
-private class FirebaseInventoryPhotoStore(
-    private val storage: FirebaseStorage = FirebaseStorage.getInstance(),
-) : InventoryPhotoStore {
-    override fun upload(
-        householdId: String,
-        itemId: String,
-        photo: ItemPhoto,
-        onResult: (Result<String>) -> Unit,
-    ) {
-        val reference = storage.reference
-            .child("households/$householdId/items/$itemId/photo.jpg")
-        val metadata = StorageMetadata.Builder()
-            .setContentType("image/jpeg")
-            .build()
-        reference.putFile(photo.uri.toUri(), metadata)
-            .addOnSuccessListener {
-                onResult(Result.success(reference.toString()))
-            }
-            .addOnFailureListener { failure -> onResult(Result.failure(failure)) }
-    }
-}
+internal fun photoStoragePath(
+    householdId: String,
+    itemId: String,
+    variant: ItemPhotoVariant,
+): String = "households/$householdId/items/$itemId" +
+    if (variant == ItemPhotoVariant.Thumbnail) "-thumb.webp" else ".webp"
 
 internal data class InventoryItemDocument(
     val id: String,
@@ -156,6 +146,7 @@ internal data class InventoryItemDocument(
                         ?.map { it as? String ?: throw InvalidInventoryException() }
                 }
                 ?: throw InvalidInventoryException(),
+            photoThumbnailUrl = data.inventoryNullableString(PHOTO_THUMBNAIL_URL),
         )
     }
 }
@@ -238,6 +229,7 @@ private const val HOUSEHOLD_ID = "householdId"
 private const val NAME = "name"
 private const val PARENT_ITEM_ID = "parentItemId"
 private const val PHOTO_URL = "photoUrl"
+private const val PHOTO_THUMBNAIL_URL = "photoThumbnailUrl"
 private const val DESCRIPTION = "description"
 private const val TAGS = "tags"
 private const val CREATED_AT = "createdAt"

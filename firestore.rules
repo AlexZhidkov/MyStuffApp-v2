@@ -150,8 +150,9 @@ service cloud.firestore {
       let household = getAfter(householdPath(householdId)).data;
       return itemId == householdId
         && request.resource.data.keys().hasOnly([
-          'householdId', 'name', 'parentItemId', 'photoUrl', 'description',
-          'tags', 'createdAt', 'updatedAt', 'createdById',
+          'householdId', 'name', 'parentItemId', 'photoUrl',
+          'photoThumbnailUrl', 'description', 'tags', 'createdAt',
+          'updatedAt', 'createdById',
           'createdByDisplayName', 'updatedById', 'updatedByDisplayName'
         ])
         && request.resource.data.householdId == householdId
@@ -160,6 +161,10 @@ service cloud.firestore {
         && (
           request.resource.data.photoUrl == null
           || request.resource.data.photoUrl is string
+        )
+        && (
+          request.resource.data.get('photoThumbnailUrl', null) == null
+          || request.resource.data.photoThumbnailUrl is string
         )
         && request.resource.data.description == null
         && request.resource.data.tags is list
@@ -177,8 +182,9 @@ service cloud.firestore {
     function validChildItemCreate(householdId, itemId) {
       return itemId != householdId
         && request.resource.data.keys().hasOnly([
-          'householdId', 'name', 'parentItemId', 'photoUrl', 'description',
-          'tags', 'createdAt', 'updatedAt', 'createdById',
+          'householdId', 'name', 'parentItemId', 'photoUrl',
+          'photoThumbnailUrl', 'description', 'tags', 'createdAt',
+          'updatedAt', 'createdById',
           'createdByDisplayName', 'updatedById', 'updatedByDisplayName'
         ])
         && request.resource.data.householdId == householdId
@@ -188,6 +194,10 @@ service cloud.firestore {
         && (
           request.resource.data.photoUrl == null
           || request.resource.data.photoUrl is string
+        )
+        && (
+          request.resource.data.get('photoThumbnailUrl', null) == null
+          || request.resource.data.photoThumbnailUrl is string
         )
         && request.resource.data.description == null
         && request.resource.data.tags is list

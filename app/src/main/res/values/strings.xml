@@ -36,6 +36,7 @@
     <string name="use_photo">Use photo</string>
     <string name="cropping_photo">Cropping…</string>
     <string name="item_photo">Item photo</string>
+    <string name="item_photo_unavailable">Photo unavailable</string>
     <string name="household_invitations">Household invitations</string>
     <string name="household_invitations_body">Invite one person at a time using the email address for their Google Account. Each link expires after seven days.</string>
     <string name="google_email_address">Google email address</string>

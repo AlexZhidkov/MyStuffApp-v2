@@ -7,6 +7,7 @@ data class Item(
     val photoUrl: String?,
     val description: String?,
     val tags: List<String>,
+    val photoThumbnailUrl: String? = null,
 )
 
 data class Household(

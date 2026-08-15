@@ -124,10 +124,14 @@ fun HouseholdRootScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item { Spacer(Modifier.height(24.dp)) }
-            inventoryState.selectedItem.photoUrl?.let { photoUrl ->
+            storedPhotoLocation(
+                inventoryState.selectedItem,
+                ItemPhotoPresentation.Detail,
+            )?.let {
                 item {
                     StoredItemPhoto(
-                        location = photoUrl,
+                        item = inventoryState.selectedItem,
+                        presentation = ItemPhotoPresentation.Detail,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(240.dp),
@@ -200,9 +204,10 @@ fun HouseholdRootScreen(
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            item.photoUrl?.let { photoUrl ->
+                            storedPhotoLocation(item, ItemPhotoPresentation.Compact)?.let {
                                 StoredItemPhoto(
-                                    location = photoUrl,
+                                    item = item,
+                                    presentation = ItemPhotoPresentation.Compact,
                                     modifier = Modifier.size(64.dp),
                                 )
                             }

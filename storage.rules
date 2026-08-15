@@ -12,11 +12,30 @@ service firebase.storage {
         ).data.householdId == householdId;
     }
 
-    match /households/{householdId}/items/{itemId}/photo.jpg {
-      allow read, delete: if isMember(householdId);
+    function isFullItemPhoto(fileName) {
+      return fileName.matches('^[A-Za-z0-9_-]+\\.webp$')
+        && !fileName.matches('^.*-thumb\\.webp$');
+    }
+
+    function isItemPhotoThumbnail(fileName) {
+      return fileName.matches('^[A-Za-z0-9_-]+-thumb\\.webp$');
+    }
+
+    function isItemPhoto(fileName) {
+      return isFullItemPhoto(fileName) || isItemPhotoThumbnail(fileName);
+    }
+
+    match /households/{householdId}/items/{fileName} {
+      allow read, delete: if isMember(householdId) && isItemPhoto(fileName);
       allow create, update: if isMember(householdId)
-        && request.resource.size <= 10 * 1024 * 1024
-        && request.resource.contentType == 'image/jpeg';
+        && request.resource.contentType == 'image/webp'
+        && (
+          (isFullItemPhoto(fileName) && request.resource.size <= 2 * 1024 * 1024)
+          || (
+            isItemPhotoThumbnail(fileName)
+            && request.resource.size <= 256 * 1024
+          )
+        );
     }
   }
 }

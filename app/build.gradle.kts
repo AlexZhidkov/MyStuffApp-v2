@@ -18,6 +18,7 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
@@ -38,6 +39,7 @@ android {
     buildFeatures {
         compose = true
     }
+
 }
 
 dependencies {
@@ -56,8 +58,14 @@ dependencies {
     implementation(libs.firebase.storage)
     implementation(libs.google.id)
     implementation(libs.lifecycle.runtime.ktx)
+    implementation(libs.work.runtime)
 
     testImplementation(libs.junit)
+
+    androidTestImplementation(libs.junit)
+    androidTestImplementation(libs.test.core)
+    androidTestImplementation(libs.test.ext.junit)
+    androidTestImplementation(libs.test.runner)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

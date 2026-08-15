@@ -4,7 +4,6 @@ package com.azhidkov.mystuff.ui
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTransformGestures
@@ -47,12 +46,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
-import androidx.core.graphics.scale
 import com.azhidkov.mystuff.InventoryActions
 import com.azhidkov.mystuff.ItemPhoto
 import com.azhidkov.mystuff.R
 import java.io.File
-import java.util.UUID
 import kotlin.math.max
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
@@ -138,8 +135,8 @@ internal fun CropPhotoScreen(
                         scope.launch {
                             runCatching {
                                 cropAndStorePhoto(context, loadedBitmap, cropSize, zoom, offset)
-                            }.onSuccess { uri ->
-                                actions.useCroppedPhoto(ItemPhoto(uri.toString()))
+                            }.onSuccess { photo ->
+                                actions.useCroppedPhoto(photo)
                             }.onFailure {
                                 cropping = false
                             }
@@ -212,7 +209,7 @@ private suspend fun cropAndStorePhoto(
     size: IntSize,
     zoom: Float,
     offset: Offset,
-): Uri = withContext(Dispatchers.IO) {
+): ItemPhoto = withContext(Dispatchers.IO) {
     require(size != IntSize.Zero)
     val geometry = cropGeometry(bitmap, size, zoom, offset)
     val sourceX = (-geometry.left / geometry.displayedScale)
@@ -226,17 +223,22 @@ private suspend fun cropAndStorePhoto(
     val sourceHeight = (size.height / geometry.displayedScale).roundToInt()
         .coerceIn(1, bitmap.height - sourceY)
     val cropped = Bitmap.createBitmap(bitmap, sourceX, sourceY, sourceWidth, sourceHeight)
-    val output = if (max(cropped.width, cropped.height) > MAX_STORED_PHOTO_SIDE) {
-        cropped.scale(MAX_STORED_PHOTO_SIDE, MAX_STORED_PHOTO_SIDE)
-    } else {
-        cropped
-    }
-    val directory = File(context.cacheDir, "item-photos").apply { mkdirs() }
-    val file = File(directory, "cropped-${UUID.randomUUID()}.jpg")
-    file.outputStream().use { stream ->
-        check(output.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, stream))
-    }
-    FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+    val files = ItemPhotoProcessor.writeVariants(
+        crop = cropped,
+        directory = File(context.filesDir, "item-photos"),
+    )
+    ItemPhoto(
+        uri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.files",
+            files.full,
+        ).toString(),
+        thumbnailUri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.files",
+            files.thumbnail,
+        ).toString(),
+    )
 }
 
 private data class CropGeometry(
@@ -245,6 +247,3 @@ private data class CropGeometry(
     val top: Float,
     val offsetBounds: Offset,
 )
-
-private const val MAX_STORED_PHOTO_SIDE = 1_600
-private const val JPEG_QUALITY = 88

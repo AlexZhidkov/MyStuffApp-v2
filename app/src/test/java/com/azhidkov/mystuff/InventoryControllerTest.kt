@@ -67,10 +67,15 @@ class InventoryControllerTest {
         controller.resolveCameraPermission(granted = true)
         controller.photoCaptured(ItemPhoto("content://mystuff/captured.jpg"))
 
-        controller.useCroppedPhoto(ItemPhoto("content://mystuff/cropped.jpg"))
+        controller.useCroppedPhoto(
+            ItemPhoto(
+                "content://mystuff/cropped.webp",
+                "content://mystuff/cropped-thumb.webp",
+            ),
+        )
 
         assertEquals(ItemCreationStage.Details, controller.state.itemCreationStage)
-        assertEquals("content://mystuff/cropped.jpg", controller.state.itemDraft?.photo?.uri)
+        assertEquals("content://mystuff/cropped.webp", controller.state.itemDraft?.photo?.uri)
     }
 
     @Test
@@ -93,15 +98,30 @@ class InventoryControllerTest {
         controller.beginAddItem()
         controller.resolveCameraPermission(granted = true)
         controller.photoCaptured(ItemPhoto("content://mystuff/captured.jpg"))
-        controller.useCroppedPhoto(ItemPhoto("content://mystuff/cropped.jpg"))
+        controller.useCroppedPhoto(
+            ItemPhoto(
+                "content://mystuff/cropped.webp",
+                "content://mystuff/cropped-thumb.webp",
+            ),
+        )
         controller.changeItemName("Drill")
 
         controller.saveItem()
 
-        assertEquals(ItemPhoto("content://mystuff/cropped.jpg"), gateway.createdPhoto)
         assertEquals(
-            "gs://mystuff/households/household-1/items/item-1/photo.jpg",
+            ItemPhoto(
+                "content://mystuff/cropped.webp",
+                "content://mystuff/cropped-thumb.webp",
+            ),
+            gateway.createdPhoto,
+        )
+        assertEquals(
+            "gs://mystuff/households/household-1/items/item-1.webp",
             controller.state.childItems.single().photoUrl,
+        )
+        assertEquals(
+            "gs://mystuff/households/household-1/items/item-1-thumb.webp",
+            controller.state.childItems.single().photoThumbnailUrl,
         )
     }
 
@@ -263,7 +283,10 @@ private class FakeInventoryGateway(
             name = name,
             parentItemId = parentItemId,
             photoUrl = photo?.let {
-                "gs://mystuff/households/household-1/items/item-1/photo.jpg"
+                "gs://mystuff/households/household-1/items/item-1.webp"
+            },
+            photoThumbnailUrl = photo?.let {
+                "gs://mystuff/households/household-1/items/item-1-thumb.webp"
             },
         )
         inventory = inventory.withItem(created)
@@ -294,6 +317,7 @@ private fun item(
     name: String,
     parentItemId: String?,
     photoUrl: String? = null,
+    photoThumbnailUrl: String? = null,
 ) = Item(
     id = id,
     name = name,
@@ -301,4 +325,5 @@ private fun item(
     photoUrl = photoUrl,
     description = null,
     tags = emptyList(),
+    photoThumbnailUrl = photoThumbnailUrl,
 )

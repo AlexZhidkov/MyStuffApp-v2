@@ -28,7 +28,8 @@ Currently implemented:
 - Automatic reopening of an existing Household after sign-in
 - Owner-only, seven-day Household invitations with revocation and link replacement
 - Text-only Child Item creation beneath the currently displayed Item
-- Camera-first Item creation with optional crop-and-use photos
+- Camera-first Item creation with optional mobile-sized WebP photos and thumbnails
+- Independent persistent background upload and retry for each Item photo variant
 - Deep Inventory browsing with immediate Child Items and complete Item Paths
 - Firebase rules and emulator tests for Household, Item, invitation, and photo authorization
 - Unit-tested session state transitions
@@ -44,6 +45,8 @@ synchronization are planned in the
 - Android Credential Manager
 - Firebase Authentication
 - Cloud Firestore
+- Firebase Storage
+- Jetpack WorkManager
 - Gradle Kotlin DSL with a version catalog
 - JUnit 4
 
@@ -112,6 +115,12 @@ gateways. Firestore and Storage authorization tests run against the Firebase emu
 ```bash
 npm install
 npm run test:rules
+```
+
+The on-device photo encoder check verifies the generated WebP format and dimensions:
+
+```bash
+./gradlew connectedDebugAndroidTest
 ```
 
 ## Project structure

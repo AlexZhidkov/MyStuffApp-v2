@@ -3,4 +3,7 @@
     <cache-path
         name="item_photos"
         path="item-photos/" />
+    <files-path
+        name="pending_item_photos"
+        path="item-photos/" />
 </paths>

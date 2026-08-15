@@ -28,12 +28,13 @@ Currently implemented:
 - Automatic reopening of an existing Household after sign-in
 - Owner-only, seven-day Household invitations with revocation and link replacement
 - Text-only Child Item creation beneath the currently displayed Item
+- Camera-first Item creation with optional crop-and-use photos
 - Deep Inventory browsing with immediate Child Items and complete Item Paths
-- Firestore rules and emulator tests for Household, Item, and invitation authorization
+- Firebase rules and emulator tests for Household, Item, invitation, and photo authorization
 - Unit-tested session state transitions
 
-Invitation acceptance, camera-first Item capture, search, editing,
-moving, deletion, and connected synchronization are planned in the
+Invitation acceptance, search, editing, moving, deletion, and connected
+synchronization are planned in the
 [prototype specification](.scratch/household-inventory/spec.md).
 
 ## Technology
@@ -106,7 +107,7 @@ Run the local unit tests with:
 ```
 
 The local unit tests exercise authentication and Household navigation with fake
-gateways. Firestore authorization tests run against the Firebase emulator:
+gateways. Firestore and Storage authorization tests run against the Firebase emulators:
 
 ```bash
 npm install

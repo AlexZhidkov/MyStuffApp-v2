@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.clickable
@@ -44,6 +45,7 @@ import com.azhidkov.mystuff.InvitationUiState
 import com.azhidkov.mystuff.InventoryActions
 import com.azhidkov.mystuff.InventoryUiState
 import com.azhidkov.mystuff.Item
+import com.azhidkov.mystuff.ItemCreationStage
 import com.azhidkov.mystuff.R
 import java.time.Duration
 import java.time.Instant
@@ -67,12 +69,28 @@ fun HouseholdRootScreen(
 ) {
     val itemDraft = inventoryState.itemDraft
     if (itemDraft != null) {
-        AddItemScreen(
-            state = inventoryState,
-            onCancel = inventoryActions::cancelAddItem,
-            onChangeName = inventoryActions::changeItemName,
-            onSave = inventoryActions::saveItem,
-        )
+        when (itemDraft.stage) {
+            ItemCreationStage.CameraPermission,
+            ItemCreationStage.Camera,
+            -> CameraCaptureStep(itemDraft.stage, inventoryActions)
+
+            ItemCreationStage.PhotoReview -> CapturedPhotoScreen(
+                photo = requireNotNull(itemDraft.photo),
+                actions = inventoryActions,
+            )
+
+            ItemCreationStage.Crop -> CropPhotoScreen(
+                photo = requireNotNull(itemDraft.photo),
+                actions = inventoryActions,
+            )
+
+            ItemCreationStage.Details -> AddItemScreen(
+                state = inventoryState,
+                onCancel = inventoryActions::cancelAddItem,
+                onChangeName = inventoryActions::changeItemName,
+                onSave = inventoryActions::saveItem,
+            )
+        }
         return
     }
 
@@ -111,6 +129,16 @@ fun HouseholdRootScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item { Spacer(Modifier.height(24.dp)) }
+            inventoryState.selectedItem.photoUrl?.let { photoUrl ->
+                item {
+                    StoredItemPhoto(
+                        location = photoUrl,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(240.dp),
+                    )
+                }
+            }
             item {
                 Text(
                     text = stringResource(
@@ -172,12 +200,23 @@ fun HouseholdRootScreen(
                             .fillMaxWidth()
                             .clickable { inventoryActions.openItem(item.id) },
                     ) {
-                        Text(
-                            text = item.name,
-                            modifier = Modifier.padding(16.dp),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                        )
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            item.photoUrl?.let { photoUrl ->
+                                StoredItemPhoto(
+                                    location = photoUrl,
+                                    modifier = Modifier.size(64.dp),
+                                )
+                            }
+                            Text(
+                                text = item.name,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
                     }
                 }
             }
@@ -254,6 +293,16 @@ private fun AddItemScreen(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.primary,
                 )
+            }
+            draft.photo?.let { photo ->
+                item {
+                    LocalItemPhoto(
+                        photo = photo,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(200.dp),
+                    )
+                }
             }
             item {
                 OutlinedTextField(

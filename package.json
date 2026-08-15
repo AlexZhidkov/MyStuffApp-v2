@@ -2,7 +2,7 @@
   "name": "mystuff-firebase-tests",
   "private": true,
   "scripts": {
-    "test:rules": "firebase emulators:exec --only firestore --project mystuff-ai-app 'node --test firestore.rules.test.js'"
+    "test:rules": "firebase emulators:exec --only firestore,storage --project mystuff-ai-app 'node --test firestore.rules.test.js storage.rules.test.js'"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "5.0.1",

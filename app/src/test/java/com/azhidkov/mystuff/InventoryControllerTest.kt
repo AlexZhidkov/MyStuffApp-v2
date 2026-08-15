@@ -6,6 +6,124 @@ import org.junit.Test
 
 class InventoryControllerTest {
     @Test
+    fun `camera permission denial continues Item creation without a photo`() {
+        val controller = InventoryController(household(), identity(), FakeInventoryGateway(inventory()))
+
+        controller.beginAddItem()
+        assertEquals(ItemCreationStage.CameraPermission, controller.state.itemCreationStage)
+
+        controller.resolveCameraPermission(granted = false)
+
+        assertEquals(ItemCreationStage.Details, controller.state.itemCreationStage)
+        assertNull(controller.state.itemDraft?.photo)
+    }
+
+    @Test
+    fun `unavailable camera continues Item creation without requesting capture`() {
+        val controller = InventoryController(household(), identity(), FakeInventoryGateway(inventory()))
+
+        controller.beginAddItem()
+        controller.cameraUnavailable()
+
+        assertEquals(ItemCreationStage.Details, controller.state.itemCreationStage)
+        assertNull(controller.state.itemDraft?.photo)
+    }
+
+    @Test
+    fun `camera capture failure continues Item creation without a photo`() {
+        val controller = InventoryController(household(), identity(), FakeInventoryGateway(inventory()))
+
+        controller.beginAddItem()
+        controller.resolveCameraPermission(granted = true)
+        assertEquals(ItemCreationStage.Camera, controller.state.itemCreationStage)
+
+        controller.photoCaptureFailed()
+
+        assertEquals(ItemCreationStage.Details, controller.state.itemCreationStage)
+        assertNull(controller.state.itemDraft?.photo)
+    }
+
+    @Test
+    fun `successful capture offers photo choices and retake reopens the camera`() {
+        val controller = InventoryController(household(), identity(), FakeInventoryGateway(inventory()))
+
+        controller.beginAddItem()
+        controller.resolveCameraPermission(granted = true)
+        controller.photoCaptured(ItemPhoto("content://mystuff/captured.jpg"))
+
+        assertEquals(ItemCreationStage.PhotoReview, controller.state.itemCreationStage)
+        assertEquals("content://mystuff/captured.jpg", controller.state.itemDraft?.photo?.uri)
+
+        controller.retakePhoto()
+
+        assertEquals(ItemCreationStage.Camera, controller.state.itemCreationStage)
+        assertNull(controller.state.itemDraft?.photo)
+    }
+
+    @Test
+    fun `cancelling crop returns to the captured photo choices`() {
+        val controller = InventoryController(household(), identity(), FakeInventoryGateway(inventory()))
+        controller.beginAddItem()
+        controller.resolveCameraPermission(granted = true)
+        controller.photoCaptured(ItemPhoto("content://mystuff/captured.jpg"))
+
+        controller.beginPhotoCrop()
+        assertEquals(ItemCreationStage.Crop, controller.state.itemCreationStage)
+
+        controller.cancelPhotoCrop()
+
+        assertEquals(ItemCreationStage.PhotoReview, controller.state.itemCreationStage)
+        assertEquals("content://mystuff/captured.jpg", controller.state.itemDraft?.photo?.uri)
+    }
+
+    @Test
+    fun `using a crop continues to Item details with the cropped photo`() {
+        val controller = InventoryController(household(), identity(), FakeInventoryGateway(inventory()))
+        controller.beginAddItem()
+        controller.resolveCameraPermission(granted = true)
+        controller.photoCaptured(ItemPhoto("content://mystuff/captured.jpg"))
+        controller.beginPhotoCrop()
+
+        controller.useCroppedPhoto(ItemPhoto("content://mystuff/cropped.jpg"))
+
+        assertEquals(ItemCreationStage.Details, controller.state.itemCreationStage)
+        assertEquals("content://mystuff/cropped.jpg", controller.state.itemDraft?.photo?.uri)
+    }
+
+    @Test
+    fun `Member can omit a successfully captured photo`() {
+        val controller = InventoryController(household(), identity(), FakeInventoryGateway(inventory()))
+        controller.beginAddItem()
+        controller.resolveCameraPermission(granted = true)
+        controller.photoCaptured(ItemPhoto("content://mystuff/captured.jpg"))
+
+        controller.continueWithoutPhoto()
+
+        assertEquals(ItemCreationStage.Details, controller.state.itemCreationStage)
+        assertNull(controller.state.itemDraft?.photo)
+    }
+
+    @Test
+    fun `saved Item keeps its cropped photo`() {
+        val gateway = FakeInventoryGateway(inventory())
+        val controller = InventoryController(household(), identity(), gateway)
+        controller.beginAddItem()
+        controller.resolveCameraPermission(granted = true)
+        controller.photoCaptured(ItemPhoto("content://mystuff/captured.jpg"))
+        controller.beginPhotoCrop()
+        controller.useCroppedPhoto(ItemPhoto("content://mystuff/cropped.jpg"))
+        controller.changeItemName("Drill")
+
+        controller.saveItem()
+
+        assertEquals(ItemPhoto("content://mystuff/cropped.jpg"), gateway.createdPhoto)
+        assertEquals(
+            "gs://mystuff/households/household-1/items/item-1/photo.jpg",
+            controller.state.childItems.single().photoUrl,
+        )
+    }
+
+    @Test
     fun `Member browses immediate Child Items and a complete deep Item Path`() {
         val household = household()
         val inventory = Inventory.from(
@@ -135,6 +253,8 @@ private class FakeInventoryGateway(
         private set
     var createdName: String? = null
         private set
+    var createdPhoto: ItemPhoto? = null
+        private set
 
     override fun observe(
         household: Household,
@@ -150,11 +270,20 @@ private class FakeInventoryGateway(
         parentItemId: String,
         creator: AuthenticatedIdentity,
         name: String,
+        photo: ItemPhoto?,
         onResult: (Result<Item>) -> Unit,
     ) {
         createdParentItemId = parentItemId
         createdName = name
-        val created = item("created-${nextId++}", name, parentItemId)
+        createdPhoto = photo
+        val created = item(
+            id = "created-${nextId++}",
+            name = name,
+            parentItemId = parentItemId,
+            photoUrl = photo?.let {
+                "gs://mystuff/households/household-1/items/item-1/photo.jpg"
+            },
+        )
         inventory = inventory.withItem(created)
         onResult(Result.success(created))
         observer?.invoke(Result.success(inventory))
@@ -178,11 +307,16 @@ private fun inventory(): Inventory {
     return Inventory.from(household, listOf(household.rootItem))
 }
 
-private fun item(id: String, name: String, parentItemId: String?) = Item(
+private fun item(
+    id: String,
+    name: String,
+    parentItemId: String?,
+    photoUrl: String? = null,
+) = Item(
     id = id,
     name = name,
     parentItemId = parentItemId,
-    photoUrl = null,
+    photoUrl = photoUrl,
     description = null,
     tags = emptyList(),
 )

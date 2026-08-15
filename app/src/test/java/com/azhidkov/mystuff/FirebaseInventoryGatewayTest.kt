@@ -5,6 +5,29 @@ import org.junit.Test
 
 class FirebaseInventoryGatewayTest {
     @Test
+    fun `creating an Item uploads its photo and writes the stored URL`() {
+        val documents = FakeInventoryDocumentStore()
+        val photos = FakeInventoryPhotoStore("gs://mystuff/households/household-1/items/item-1/photo.jpg")
+        val gateway = FirebaseInventoryGateway(documents, photos)
+        var result: Result<Item>? = null
+
+        gateway.createItem(
+            householdId = "household-1",
+            parentItemId = "garage",
+            creator = inventoryIdentity(),
+            name = "Drill",
+            photo = ItemPhoto("content://mystuff/cropped.jpg"),
+        ) { result = it }
+
+        assertEquals("household-1", photos.uploadedHouseholdId)
+        assertEquals("item-1", photos.uploadedItemId)
+        assertEquals(ItemPhoto("content://mystuff/cropped.jpg"), photos.uploadedPhoto)
+        val storedLocation = "gs://mystuff/households/household-1/items/item-1/photo.jpg"
+        assertEquals(storedLocation, documents.createdData?.get("photoUrl"))
+        assertEquals(storedLocation, result?.getOrThrow()?.photoUrl)
+    }
+
+    @Test
     fun `observed Item documents become one connected Inventory`() {
         val household = inventoryHousehold()
         val store = FakeInventoryDocumentStore(
@@ -14,7 +37,7 @@ class FirebaseInventoryGatewayTest {
                 itemDocument("cabinet", "Cabinet", "garage"),
             ),
         )
-        val gateway = FirebaseInventoryGateway(store)
+        val gateway = FirebaseInventoryGateway(store, FakeInventoryPhotoStore("unused"))
         var result: Result<Inventory>? = null
 
         gateway.observe(household) { result = it }
@@ -29,7 +52,7 @@ class FirebaseInventoryGatewayTest {
     fun `creating an Item writes its generated identity current Parent Item and attribution`() {
         val timestamp = Any()
         val store = FakeInventoryDocumentStore(serverTimestamp = timestamp)
-        val gateway = FirebaseInventoryGateway(store)
+        val gateway = FirebaseInventoryGateway(store, FakeInventoryPhotoStore("unused"))
         var result: Result<Item>? = null
 
         gateway.createItem(
@@ -37,6 +60,7 @@ class FirebaseInventoryGatewayTest {
             parentItemId = "garage",
             creator = inventoryIdentity(),
             name = "Drill",
+            photo = null,
         ) { result = it }
 
         assertEquals("item-1", store.createdItemId)
@@ -61,6 +85,29 @@ class FirebaseInventoryGatewayTest {
             inventoryItem("item-1", "Drill", "garage"),
             result?.getOrThrow(),
         )
+    }
+}
+
+private class FakeInventoryPhotoStore(
+    private val storedUrl: String,
+) : InventoryPhotoStore {
+    var uploadedHouseholdId: String? = null
+        private set
+    var uploadedItemId: String? = null
+        private set
+    var uploadedPhoto: ItemPhoto? = null
+        private set
+
+    override fun upload(
+        householdId: String,
+        itemId: String,
+        photo: ItemPhoto,
+        onResult: (Result<String>) -> Unit,
+    ) {
+        uploadedHouseholdId = householdId
+        uploadedItemId = itemId
+        uploadedPhoto = photo
+        onResult(Result.success(storedUrl))
     }
 }
 

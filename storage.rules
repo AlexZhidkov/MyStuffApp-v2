@@ -1,0 +1,22 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isMember(householdId) {
+      return request.auth != null
+        && firestore.exists(
+          /databases/(default)/documents/memberships/$(request.auth.uid)
+        )
+        && firestore.get(
+          /databases/(default)/documents/memberships/$(request.auth.uid)
+        ).data.householdId == householdId;
+    }
+
+    match /households/{householdId}/items/{itemId}/photo.jpg {
+      allow read, delete: if isMember(householdId);
+      allow create, update: if isMember(householdId)
+        && request.resource.size <= 10 * 1024 * 1024
+        && request.resource.contentType == 'image/jpeg';
+    }
+  }
+}

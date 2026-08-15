@@ -15,6 +15,7 @@ interface InventoryGateway {
         parentItemId: String,
         creator: AuthenticatedIdentity,
         name: String,
+        photo: ItemPhoto?,
         onResult: (Result<Item>) -> Unit,
     )
 }
@@ -23,14 +24,37 @@ interface InventoryActions {
     fun openItem(itemId: String)
     fun openParentItem()
     fun beginAddItem()
+    fun cameraUnavailable()
+    fun resolveCameraPermission(granted: Boolean)
+    fun photoCaptureFailed()
+    fun photoCaptured(photo: ItemPhoto)
+    fun retakePhoto()
+    fun beginPhotoCrop()
+    fun cancelPhotoCrop()
+    fun useCroppedPhoto(photo: ItemPhoto)
+    fun continueWithoutPhoto()
     fun cancelAddItem()
     fun changeItemName(name: String)
     fun saveItem()
 }
 
+enum class ItemCreationStage {
+    CameraPermission,
+    Camera,
+    PhotoReview,
+    Crop,
+    Details,
+}
+
+data class ItemPhoto(
+    val uri: String,
+)
+
 data class ItemDraft(
     val name: String = "",
     val parentItemId: String,
+    val stage: ItemCreationStage = ItemCreationStage.CameraPermission,
+    val photo: ItemPhoto? = null,
     val nameError: String? = null,
 )
 
@@ -42,6 +66,8 @@ data class InventoryUiState(
     val operationInProgress: Boolean = false,
     val errorMessage: String? = null,
 ) {
+    val itemCreationStage: ItemCreationStage?
+        get() = itemDraft?.stage
     val selectedItem: Item
         get() = inventory.item(selectedItemId)
     val childItems: List<Item>
@@ -101,6 +127,60 @@ class InventoryController(
         updateState(state.copy(itemDraft = ItemDraft(parentItemId = state.selectedItemId)))
     }
 
+    override fun cameraUnavailable() {
+        transitionItemDraft(ItemCreationStage.CameraPermission) {
+            it.copy(stage = ItemCreationStage.Details)
+        }
+    }
+
+    override fun resolveCameraPermission(granted: Boolean) {
+        transitionItemDraft(ItemCreationStage.CameraPermission) {
+            it.copy(stage = if (granted) ItemCreationStage.Camera else ItemCreationStage.Details)
+        }
+    }
+
+    override fun photoCaptureFailed() {
+        transitionItemDraft(ItemCreationStage.Camera) {
+            it.copy(stage = ItemCreationStage.Details)
+        }
+    }
+
+    override fun photoCaptured(photo: ItemPhoto) {
+        transitionItemDraft(ItemCreationStage.Camera) {
+            it.copy(stage = ItemCreationStage.PhotoReview, photo = photo)
+        }
+    }
+
+    override fun retakePhoto() {
+        transitionItemDraft(ItemCreationStage.PhotoReview) {
+            it.copy(stage = ItemCreationStage.Camera, photo = null)
+        }
+    }
+
+    override fun beginPhotoCrop() {
+        val draft = state.itemDraft ?: return
+        if (draft.stage != ItemCreationStage.PhotoReview || draft.photo == null) return
+        updateState(state.copy(itemDraft = draft.copy(stage = ItemCreationStage.Crop)))
+    }
+
+    override fun cancelPhotoCrop() {
+        transitionItemDraft(ItemCreationStage.Crop) {
+            it.copy(stage = ItemCreationStage.PhotoReview)
+        }
+    }
+
+    override fun useCroppedPhoto(photo: ItemPhoto) {
+        transitionItemDraft(ItemCreationStage.Crop) {
+            it.copy(stage = ItemCreationStage.Details, photo = photo)
+        }
+    }
+
+    override fun continueWithoutPhoto() {
+        transitionItemDraft(ItemCreationStage.PhotoReview) {
+            it.copy(stage = ItemCreationStage.Details, photo = null)
+        }
+    }
+
     override fun cancelAddItem() {
         if (state.operationInProgress) return
         updateState(state.copy(itemDraft = null, errorMessage = null))
@@ -138,6 +218,7 @@ class InventoryController(
             parentItemId = draft.parentItemId,
             creator = identity,
             name = name,
+            photo = draft.photo,
         ) { result ->
             result.onSuccess { created ->
                 updateState(
@@ -168,6 +249,15 @@ class InventoryController(
     private fun updateState(newState: InventoryUiState) {
         state = newState
         onStateChanged(newState)
+    }
+
+    private fun transitionItemDraft(
+        expectedStage: ItemCreationStage,
+        transition: (ItemDraft) -> ItemDraft,
+    ) {
+        val draft = state.itemDraft ?: return
+        if (draft.stage != expectedStage) return
+        updateState(state.copy(itemDraft = transition(draft)))
     }
 
     private companion object {

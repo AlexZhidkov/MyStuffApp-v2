@@ -276,6 +276,18 @@ test("Member can create duplicate Child Item names beneath an existing Parent It
   ));
 });
 
+test("Member can create a Child Item with an optional photo URL", async () => {
+  await seedHousehold();
+  const database = testEnvironment.authenticatedContext("member-1").firestore();
+
+  await assertSucceeds(setDoc(
+    doc(database, "households/household-1/items/item-1"),
+    childItemData("Drill", "household-1", {
+      photoUrl: "https://photos.example/item-1.jpg",
+    }),
+  ));
+});
+
 test("Child Item requires a trimmed one-to-one-hundred-character name", async () => {
   await seedHousehold();
   const database = testEnvironment.authenticatedContext("member-1").firestore();

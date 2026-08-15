@@ -20,24 +20,43 @@ import java.util.concurrent.TimeUnit
 
 internal sealed interface PhotoTransferTask {
     val storagePath: String
+    val operationName: String
+
+    fun execute(remoteStore: PhotoRemoteStore): Result<Unit>
+    fun cleanUpLocalSource(context: Context)
 
     data class Upload(
         override val storagePath: String,
         val sourceUri: String,
-    ) : PhotoTransferTask
+    ) : PhotoTransferTask {
+        override val operationName = UPLOAD_OPERATION
+
+        override fun execute(remoteStore: PhotoRemoteStore): Result<Unit> =
+            remoteStore.upload(storagePath, sourceUri)
+
+        override fun cleanUpLocalSource(context: Context) {
+            runCatching {
+                context.contentResolver.delete(sourceUri.toUri(), null, null)
+            }
+        }
+    }
 
     data class Delete(
         override val storagePath: String,
-    ) : PhotoTransferTask
+    ) : PhotoTransferTask {
+        override val operationName = DELETE_OPERATION
+
+        override fun execute(remoteStore: PhotoRemoteStore): Result<Unit> =
+            remoteStore.delete(storagePath)
+
+        override fun cleanUpLocalSource(context: Context) = Unit
+    }
 
     fun toWorkData(): Data {
         val builder = Data.Builder()
             .putString(
             OPERATION_KEY,
-            when (this) {
-                is Upload -> UPLOAD_OPERATION
-                is Delete -> DELETE_OPERATION
-            },
+            operationName,
         )
             .putString(STORAGE_PATH_KEY, storagePath)
         if (this is Upload) builder.putString(SOURCE_URI_KEY, sourceUri)
@@ -142,13 +161,7 @@ internal class PhotoTransferRunner(
     private val remoteStore: PhotoRemoteStore,
 ) {
     fun run(task: PhotoTransferTask): PhotoTransferResult {
-        val result = when (task) {
-            is PhotoTransferTask.Upload -> remoteStore.upload(
-                task.storagePath,
-                task.sourceUri,
-            )
-            is PhotoTransferTask.Delete -> remoteStore.delete(task.storagePath)
-        }
+        val result = task.execute(remoteStore)
         return if (result.isSuccess) PhotoTransferResult.Success else PhotoTransferResult.Retry
     }
 }
@@ -160,14 +173,8 @@ internal class InventoryPhotoTransferWorker(
     override fun doWork(): Result {
         val task = PhotoTransferTask.fromWorkData(inputData) ?: return Result.failure()
         val result = PhotoTransferRunner(FirebasePhotoRemoteStore()).run(task)
-        if (result == PhotoTransferResult.Success && task is PhotoTransferTask.Upload) {
-            runCatching {
-                applicationContext.contentResolver.delete(
-                    task.sourceUri.toUri(),
-                    null,
-                    null,
-                )
-            }
+        if (result == PhotoTransferResult.Success) {
+            task.cleanUpLocalSource(applicationContext)
         }
         return when (result) {
             PhotoTransferResult.Success -> Result.success()

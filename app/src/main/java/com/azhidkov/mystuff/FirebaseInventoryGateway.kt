@@ -46,12 +46,17 @@ class FirebaseInventoryGateway internal constructor(
             name = name,
             photoLocations = locations,
         ) { result ->
-            result.onSuccess {
-                if (photo != null) {
-                    photoStore.uploadInBackground(householdId, itemId, photo)
+            try {
+                result.onSuccess {
+                    if (photo != null) {
+                        photoStore.uploadInBackground(householdId, itemId, photo)
+                    }
                 }
+            } catch (_: RuntimeException) {
+                // The Item exists and remains usable with its photo placeholder.
+            } finally {
+                onResult(result)
             }
-            onResult(result)
         }
     }
 

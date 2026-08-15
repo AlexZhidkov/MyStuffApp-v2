@@ -54,6 +54,27 @@ class FirebaseInventoryGatewayTest {
     }
 
     @Test
+    fun `background scheduling failure does not block completed Item creation`() {
+        val photos = FakeInventoryPhotoStore(enqueueFailure = IllegalStateException("scheduler"))
+        val gateway = FirebaseInventoryGateway(FakeInventoryDocumentStore(), photos)
+        var result: Result<Item>? = null
+
+        gateway.createItem(
+            householdId = "household-1",
+            parentItemId = "garage",
+            creator = inventoryIdentity(),
+            name = "Drill",
+            photo = ItemPhoto("content://full.webp", "content://thumb.webp"),
+        ) { result = it }
+
+        assertEquals("item-1", result?.getOrThrow()?.id)
+        assertEquals(
+            "gs://mystuff/households/household-1/items/item-1.webp",
+            result?.getOrThrow()?.photoUrl,
+        )
+    }
+
+    @Test
     fun `observed Item documents become one connected Inventory`() {
         val household = inventoryHousehold()
         val store = FakeInventoryDocumentStore(
@@ -121,7 +142,9 @@ private data class QueuedPhotoUpload(
     val storagePath: String,
 )
 
-private class FakeInventoryPhotoStore : InventoryPhotoStore {
+private class FakeInventoryPhotoStore(
+    private val enqueueFailure: Throwable? = null,
+) : InventoryPhotoStore {
     val uploads = mutableListOf<QueuedPhotoUpload>()
 
     override fun locations(householdId: String, itemId: String) = ItemPhotoLocations(
@@ -134,6 +157,7 @@ private class FakeInventoryPhotoStore : InventoryPhotoStore {
         itemId: String,
         photo: ItemPhoto,
     ) {
+        enqueueFailure?.let { throw it }
         uploads += QueuedPhotoUpload(
             ItemPhotoVariant.Full,
             photo.uri,

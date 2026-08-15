@@ -29,6 +29,7 @@ class MainActivity : ComponentActivity() {
             householdGateway = FirebaseHouseholdGateway(),
         )
         val invitationGateway = FirebaseInvitationGateway()
+        val inventoryGateway = FirebaseInventoryGateway()
         setContent {
             var sessionState by remember { mutableStateOf(sessionController.state) }
             DisposableEffect(sessionController) {
@@ -46,6 +47,7 @@ class MainActivity : ComponentActivity() {
                     onSignOut = sessionController::signOut,
                     onCreateHousehold = sessionController::createHousehold,
                     invitationGateway = invitationGateway,
+                    inventoryGateway = inventoryGateway,
                 )
             }
         }
@@ -58,6 +60,7 @@ private fun MyStuffApp(
     onSignOut: () -> Unit,
     onCreateHousehold: (String) -> Unit,
     invitationGateway: InvitationGateway,
+    inventoryGateway: InventoryGateway,
 ) {
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -88,6 +91,16 @@ private fun MyStuffApp(
                         gateway = invitationGateway,
                     )
                 }
+                val inventoryController = remember(household.id, identity.id) {
+                    InventoryController(
+                        household = household,
+                        identity = identity,
+                        gateway = inventoryGateway,
+                    )
+                }
+                var inventoryState by remember(inventoryController) {
+                    mutableStateOf(inventoryController.state)
+                }
                 var invitationState by remember(invitationController) {
                     mutableStateOf(invitationController.state)
                 }
@@ -96,9 +109,14 @@ private fun MyStuffApp(
                     invitationState = invitationController.state
                     onDispose { invitationController.onStateChanged = {} }
                 }
+                DisposableEffect(inventoryController) {
+                    inventoryController.onStateChanged = { inventoryState = it }
+                    inventoryState = inventoryController.state
+                    onDispose { inventoryController.close() }
+                }
 
                 HouseholdRootScreen(
-                    household = household,
+                    inventoryState = inventoryState,
                     invitationState = invitationState,
                     signOutInProgress = state.operationInProgress,
                     onCreateInvitation = invitationController::create,
@@ -106,6 +124,7 @@ private fun MyStuffApp(
                     onReplaceInvitation = { invitationId, email ->
                         invitationController.replace(invitationId, email)
                     },
+                    inventoryActions = inventoryController,
                     onSignOut = onSignOut,
                 )
             }

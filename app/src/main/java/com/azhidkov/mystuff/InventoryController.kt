@@ -1,0 +1,181 @@
+package com.azhidkov.mystuff
+
+fun interface InventorySubscription {
+    fun cancel()
+}
+
+interface InventoryGateway {
+    fun observe(
+        household: Household,
+        onResult: (Result<Inventory>) -> Unit,
+    ): InventorySubscription
+
+    fun createItem(
+        householdId: String,
+        parentItemId: String,
+        creator: AuthenticatedIdentity,
+        name: String,
+        onResult: (Result<Item>) -> Unit,
+    )
+}
+
+interface InventoryActions {
+    fun openItem(itemId: String)
+    fun openParentItem()
+    fun beginAddItem()
+    fun cancelAddItem()
+    fun changeItemName(name: String)
+    fun changeParentItem(parentItemId: String)
+    fun saveItem()
+}
+
+data class ItemDraft(
+    val name: String = "",
+    val parentItemId: String,
+    val nameError: String? = null,
+)
+
+data class InventoryUiState(
+    val inventory: Inventory,
+    val selectedItemId: String,
+    val itemDraft: ItemDraft? = null,
+    val loading: Boolean = false,
+    val operationInProgress: Boolean = false,
+    val errorMessage: String? = null,
+) {
+    val selectedItem: Item
+        get() = inventory.item(selectedItemId)
+    val childItems: List<Item>
+        get() = inventory.childrenOf(selectedItemId)
+    val itemPath: List<Item>
+        get() = inventory.pathTo(selectedItemId)
+}
+
+class InventoryController(
+    private val household: Household,
+    private val identity: AuthenticatedIdentity,
+    private val gateway: InventoryGateway,
+) : InventoryActions, AutoCloseable {
+    var state = InventoryUiState(
+        inventory = Inventory.from(household, listOf(household.rootItem)),
+        selectedItemId = household.rootItem.id,
+        loading = true,
+    )
+        private set
+
+    var onStateChanged: (InventoryUiState) -> Unit = {}
+
+    private val subscription = gateway.observe(household) { result ->
+        result.onSuccess { inventory ->
+            val selectedItemId = state.selectedItemId.takeIf(inventory::contains)
+                ?: inventory.rootItemId
+            updateState(
+                state.copy(
+                    inventory = inventory,
+                    selectedItemId = selectedItemId,
+                    loading = false,
+                    errorMessage = null,
+                ),
+            )
+        }.onFailure { failure ->
+            updateState(
+                state.copy(
+                    loading = false,
+                    errorMessage = failure.message ?: "Couldn't load your Inventory.",
+                ),
+            )
+        }
+    }
+
+    override fun openItem(itemId: String) {
+        if (!state.inventory.contains(itemId) || state.itemDraft != null) return
+        updateState(state.copy(selectedItemId = itemId, errorMessage = null))
+    }
+
+    override fun openParentItem() {
+        val parentItemId = state.selectedItem.parentItemId ?: return
+        openItem(parentItemId)
+    }
+
+    override fun beginAddItem() {
+        if (state.itemDraft != null || state.operationInProgress) return
+        updateState(state.copy(itemDraft = ItemDraft(parentItemId = state.selectedItemId)))
+    }
+
+    override fun cancelAddItem() {
+        if (state.operationInProgress) return
+        updateState(state.copy(itemDraft = null, errorMessage = null))
+    }
+
+    override fun changeItemName(name: String) {
+        val draft = state.itemDraft ?: return
+        updateState(state.copy(itemDraft = draft.copy(name = name, nameError = null)))
+    }
+
+    override fun changeParentItem(parentItemId: String) {
+        val draft = state.itemDraft ?: return
+        if (!state.inventory.contains(parentItemId)) return
+        updateState(state.copy(itemDraft = draft.copy(parentItemId = parentItemId)))
+    }
+
+    override fun saveItem() {
+        val draft = state.itemDraft ?: return
+        if (state.operationInProgress) return
+        val name = draft.name.trim(Char::isWhitespace)
+        val nameError = when {
+            name.isEmpty() -> "Enter an Item name."
+            name.codePointCount(0, name.length) > MAX_ITEM_NAME_LENGTH ->
+                "Item names can contain at most 100 characters."
+            else -> null
+        }
+        if (nameError != null) {
+            updateState(state.copy(itemDraft = draft.copy(nameError = nameError)))
+            return
+        }
+        if (!state.inventory.contains(draft.parentItemId)) {
+            updateState(state.copy(errorMessage = "Choose an Item in this Household."))
+            return
+        }
+
+        updateState(state.copy(operationInProgress = true, errorMessage = null))
+        gateway.createItem(
+            householdId = household.id,
+            parentItemId = draft.parentItemId,
+            creator = identity,
+            name = name,
+        ) { result ->
+            result.onSuccess { created ->
+                updateState(
+                    state.copy(
+                        inventory = state.inventory.withItem(created),
+                        selectedItemId = created.parentItemId
+                            ?: throw InvalidInventoryException(),
+                        itemDraft = null,
+                        operationInProgress = false,
+                    ),
+                )
+            }.onFailure { failure ->
+                updateState(
+                    state.copy(
+                        operationInProgress = false,
+                        errorMessage = failure.message ?: "Couldn't add the Item.",
+                    ),
+                )
+            }
+        }
+    }
+
+    override fun close() {
+        subscription.cancel()
+        onStateChanged = {}
+    }
+
+    private fun updateState(newState: InventoryUiState) {
+        state = newState
+        onStateChanged(newState)
+    }
+
+    private companion object {
+        const val MAX_ITEM_NAME_LENGTH = 100
+    }
+}

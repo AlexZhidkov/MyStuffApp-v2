@@ -18,6 +18,10 @@ service cloud.firestore {
       return /databases/$(database)/documents/households/$(householdId)/items/$(householdId);
     }
 
+    function itemPath(householdId, itemId) {
+      return /databases/$(database)/documents/households/$(householdId)/items/$(itemId);
+    }
+
     function invitationPath(invitationId) {
       return /databases/$(database)/documents/invitations/$(invitationId);
     }
@@ -167,6 +171,31 @@ service cloud.firestore {
         && isMemberAfter(householdId);
     }
 
+    function validChildItemCreate(householdId, itemId) {
+      return itemId != householdId
+        && request.resource.data.keys().hasOnly([
+          'householdId', 'name', 'parentItemId', 'photoUrl', 'description',
+          'tags', 'createdAt', 'updatedAt', 'createdById',
+          'createdByDisplayName', 'updatedById', 'updatedByDisplayName'
+        ])
+        && request.resource.data.householdId == householdId
+        && validName(request.resource.data.name)
+        && request.resource.data.parentItemId is string
+        && exists(itemPath(householdId, request.resource.data.parentItemId))
+        && request.resource.data.photoUrl == null
+        && request.resource.data.description == null
+        && request.resource.data.tags is list
+        && request.resource.data.tags.size() == 0
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.createdById == request.auth.uid
+        && request.resource.data.createdByDisplayName is string
+        && request.resource.data.updatedById == request.auth.uid
+        && request.resource.data.updatedByDisplayName
+          == request.resource.data.createdByDisplayName
+        && isMember(householdId);
+    }
+
     match /memberships/{memberId} {
       allow read: if signedIn() && request.auth.uid == memberId;
       allow create: if signedIn()
@@ -206,7 +235,10 @@ service cloud.firestore {
       match /items/{itemId} {
         allow read: if isMember(householdId);
         allow create: if signedIn()
-          && validRootItemCreate(householdId, itemId);
+          && (
+            validRootItemCreate(householdId, itemId)
+            || validChildItemCreate(householdId, itemId)
+          );
         allow update, delete: if false;
       }
     }

@@ -173,6 +173,24 @@ function rootItemData(householdId, name) {
   };
 }
 
+function childItemData(name, parentItemId, overrides = {}) {
+  return {
+    householdId: "household-1",
+    name,
+    parentItemId,
+    photoUrl: null,
+    description: null,
+    tags: [],
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    createdById: "member-1",
+    createdByDisplayName: "Alex",
+    updatedById: "member-1",
+    updatedByDisplayName: "Alex",
+    ...overrides,
+  };
+}
+
 test("current Member can access the Household and its root Item", async () => {
   await seedHousehold();
   const database = testEnvironment.authenticatedContext("member-1").firestore();
@@ -242,6 +260,78 @@ test("Household name accepts 100 Unicode characters and rejects 101", async () =
 
   await testEnvironment.clearFirestore();
   await assertFails(householdCreationBatch(database, "🏠".repeat(101)).commit());
+});
+
+test("Member can create duplicate Child Item names beneath an existing Parent Item", async () => {
+  await seedHousehold();
+  const database = testEnvironment.authenticatedContext("member-1").firestore();
+
+  await assertSucceeds(setDoc(
+    doc(database, "households/household-1/items/item-1"),
+    childItemData("Box", "household-1"),
+  ));
+  await assertSucceeds(setDoc(
+    doc(database, "households/household-1/items/item-2"),
+    childItemData("Box", "household-1"),
+  ));
+});
+
+test("Child Item requires a trimmed one-to-one-hundred-character name", async () => {
+  await seedHousehold();
+  const database = testEnvironment.authenticatedContext("member-1").firestore();
+  const reference = doc(database, "households/household-1/items/item-1");
+
+  await assertFails(setDoc(reference, childItemData(" Box", "household-1")));
+  await assertFails(setDoc(reference, childItemData(" ", "household-1")));
+  await assertSucceeds(setDoc(
+    reference,
+    childItemData("🏠".repeat(100), "household-1"),
+  ));
+
+  await assertFails(setDoc(
+    doc(database, "households/household-1/items/item-2"),
+    childItemData("🏠".repeat(101), "household-1"),
+  ));
+});
+
+test("Child Item must name an existing Parent Item in the same Household", async () => {
+  await seedHousehold();
+  const database = testEnvironment.authenticatedContext("member-1").firestore();
+
+  await assertFails(setDoc(
+    doc(database, "households/household-1/items/lost"),
+    childItemData("Lost", "missing-parent"),
+  ));
+  await assertFails(setDoc(
+    doc(database, "households/household-1/items/household-1"),
+    childItemData("Another root", "household-1"),
+  ));
+});
+
+test("non-Member cannot create a Child Item", async () => {
+  await seedHousehold();
+  const database = testEnvironment.authenticatedContext("member-2").firestore();
+
+  await assertFails(setDoc(
+    doc(database, "households/household-1/items/item-1"),
+    childItemData("Box", "household-1"),
+  ));
+});
+
+test("Household Member can create a Child Item", async () => {
+  await seedHousehold();
+  await seedHouseholdMember();
+  const database = testEnvironment.authenticatedContext("member-2").firestore();
+
+  await assertSucceeds(setDoc(
+    doc(database, "households/household-1/items/item-1"),
+    childItemData("Box", "household-1", {
+      createdById: "member-2",
+      createdByDisplayName: "Sam",
+      updatedById: "member-2",
+      updatedByDisplayName: "Sam",
+    }),
+  ));
 });
 
 test("only the Household Owner can create a pending invitation", async () => {

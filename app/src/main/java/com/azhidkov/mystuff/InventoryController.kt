@@ -43,21 +43,6 @@ enum class ItemCreationStage {
     Details,
 }
 
-data class ItemPhoto(
-    val uri: String,
-    val thumbnailUri: String = uri,
-)
-
-enum class ItemPhotoVariant {
-    Full,
-    Thumbnail,
-}
-
-data class ItemPhotoLocations(
-    val full: String,
-    val thumbnail: String,
-)
-
 data class ItemDraft(
     val name: String = "",
     val parentItemId: String,

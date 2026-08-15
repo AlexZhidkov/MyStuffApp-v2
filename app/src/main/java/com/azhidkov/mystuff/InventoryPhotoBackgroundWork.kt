@@ -18,41 +18,43 @@ import com.google.firebase.storage.StorageException
 import com.google.firebase.storage.StorageMetadata
 import java.util.concurrent.TimeUnit
 
-internal enum class PhotoTransferOperation {
-    Upload,
-    Delete,
-}
+internal sealed interface PhotoTransferTask {
+    val storagePath: String
 
-internal data class PhotoTransferTask(
-    val operation: PhotoTransferOperation,
-    val storagePath: String,
-    val sourceUri: String?,
-) {
-    fun toWorkData(): Data = Data.Builder()
-        .putString(OPERATION_KEY, operation.name)
-        .putString(STORAGE_PATH_KEY, storagePath)
-        .apply { sourceUri?.let { putString(SOURCE_URI_KEY, it) } }
-        .build()
+    data class Upload(
+        override val storagePath: String,
+        val sourceUri: String,
+    ) : PhotoTransferTask
+
+    data class Delete(
+        override val storagePath: String,
+    ) : PhotoTransferTask
+
+    fun toWorkData(): Data {
+        val builder = Data.Builder()
+            .putString(
+            OPERATION_KEY,
+            when (this) {
+                is Upload -> UPLOAD_OPERATION
+                is Delete -> DELETE_OPERATION
+            },
+        )
+            .putString(STORAGE_PATH_KEY, storagePath)
+        if (this is Upload) builder.putString(SOURCE_URI_KEY, sourceUri)
+        return builder.build()
+    }
 
     companion object {
-        fun upload(storagePath: String, sourceUri: String) = PhotoTransferTask(
-            operation = PhotoTransferOperation.Upload,
-            storagePath = storagePath,
-            sourceUri = sourceUri,
-        )
-
-        fun delete(storagePath: String) = PhotoTransferTask(
-            operation = PhotoTransferOperation.Delete,
-            storagePath = storagePath,
-            sourceUri = null,
-        )
-
         fun fromWorkData(data: Data): PhotoTransferTask? = runCatching {
-            val operation = PhotoTransferOperation.valueOf(requireNotNull(data.getString(OPERATION_KEY)))
             val storagePath = requireNotNull(data.getString(STORAGE_PATH_KEY))
-            val sourceUri = data.getString(SOURCE_URI_KEY)
-            if (operation == PhotoTransferOperation.Upload) requireNotNull(sourceUri)
-            PhotoTransferTask(operation, storagePath, sourceUri)
+            when (requireNotNull(data.getString(OPERATION_KEY))) {
+                UPLOAD_OPERATION -> Upload(
+                    storagePath,
+                    requireNotNull(data.getString(SOURCE_URI_KEY)),
+                )
+                DELETE_OPERATION -> Delete(storagePath)
+                else -> error("Unknown photo transfer operation")
+            }
         }.getOrNull()
     }
 }
@@ -79,13 +81,13 @@ internal class BackgroundInventoryPhotoStore(
 
     override fun uploadInBackground(householdId: String, itemId: String, photo: ItemPhoto) {
         queue.replace(
-            PhotoTransferTask.upload(
+            PhotoTransferTask.Upload(
                 photoStoragePath(householdId, itemId, ItemPhotoVariant.Full),
                 photo.uri,
             ),
         )
         queue.replace(
-            PhotoTransferTask.upload(
+            PhotoTransferTask.Upload(
                 photoStoragePath(householdId, itemId, ItemPhotoVariant.Thumbnail),
                 photo.thumbnailUri,
             ),
@@ -95,7 +97,7 @@ internal class BackgroundInventoryPhotoStore(
     override fun deleteInBackground(householdId: String, itemIds: Collection<String>) {
         itemIds.forEach { itemId ->
             ItemPhotoVariant.entries.forEach { variant ->
-                queue.replace(PhotoTransferTask.delete(photoStoragePath(householdId, itemId, variant)))
+                queue.replace(PhotoTransferTask.Delete(photoStoragePath(householdId, itemId, variant)))
             }
         }
     }
@@ -140,12 +142,12 @@ internal class PhotoTransferRunner(
     private val remoteStore: PhotoRemoteStore,
 ) {
     fun run(task: PhotoTransferTask): PhotoTransferResult {
-        val result = when (task.operation) {
-            PhotoTransferOperation.Upload -> remoteStore.upload(
+        val result = when (task) {
+            is PhotoTransferTask.Upload -> remoteStore.upload(
                 task.storagePath,
-                requireNotNull(task.sourceUri),
+                task.sourceUri,
             )
-            PhotoTransferOperation.Delete -> remoteStore.delete(task.storagePath)
+            is PhotoTransferTask.Delete -> remoteStore.delete(task.storagePath)
         }
         return if (result.isSuccess) PhotoTransferResult.Success else PhotoTransferResult.Retry
     }
@@ -158,10 +160,10 @@ internal class InventoryPhotoTransferWorker(
     override fun doWork(): Result {
         val task = PhotoTransferTask.fromWorkData(inputData) ?: return Result.failure()
         val result = PhotoTransferRunner(FirebasePhotoRemoteStore()).run(task)
-        if (result == PhotoTransferResult.Success && task.operation == PhotoTransferOperation.Upload) {
+        if (result == PhotoTransferResult.Success && task is PhotoTransferTask.Upload) {
             runCatching {
                 applicationContext.contentResolver.delete(
-                    requireNotNull(task.sourceUri).toUri(),
+                    task.sourceUri.toUri(),
                     null,
                     null,
                 )
@@ -206,4 +208,6 @@ private class FirebasePhotoRemoteStore(
 private const val OPERATION_KEY = "operation"
 private const val STORAGE_PATH_KEY = "storage-path"
 private const val SOURCE_URI_KEY = "source-uri"
+private const val UPLOAD_OPERATION = "upload"
+private const val DELETE_OPERATION = "delete"
 private const val WEBP_CONTENT_TYPE = "image/webp"

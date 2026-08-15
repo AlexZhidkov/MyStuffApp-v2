@@ -20,19 +20,19 @@ class InventoryPhotoBackgroundWorkTest {
         val runner = PhotoTransferRunner(remote)
 
         val fullResult = runner.run(
-            PhotoTransferTask.upload(
+            PhotoTransferTask.Upload(
                 storagePath = "households/household-1/items/item-1.webp",
                 sourceUri = "content://mystuff/full.webp",
             ),
         )
         val thumbnailResult = runner.run(
-            PhotoTransferTask.upload(
+            PhotoTransferTask.Upload(
                 storagePath = "households/household-1/items/item-1-thumb.webp",
                 sourceUri = "content://mystuff/thumb.webp",
             ),
         )
         val retriedFullResult = runner.run(
-            PhotoTransferTask.upload(
+            PhotoTransferTask.Upload(
                 storagePath = "households/household-1/items/item-1.webp",
                 sourceUri = "content://mystuff/full.webp",
             ),
@@ -66,11 +66,11 @@ class InventoryPhotoBackgroundWorkTest {
 
         assertEquals(
             listOf(
-                PhotoTransferTask.upload(
+                PhotoTransferTask.Upload(
                     "households/household-1/items/item-1.webp",
                     "content://new-full.webp",
                 ),
-                PhotoTransferTask.upload(
+                PhotoTransferTask.Upload(
                     "households/household-1/items/item-1-thumb.webp",
                     "content://new-thumb.webp",
                 ),
@@ -82,10 +82,10 @@ class InventoryPhotoBackgroundWorkTest {
 
         assertEquals(
             listOf(
-                PhotoTransferTask.delete("households/household-1/items/item-1.webp"),
-                PhotoTransferTask.delete("households/household-1/items/item-1-thumb.webp"),
-                PhotoTransferTask.delete("households/household-1/items/item-2.webp"),
-                PhotoTransferTask.delete("households/household-1/items/item-2-thumb.webp"),
+                PhotoTransferTask.Delete("households/household-1/items/item-1.webp"),
+                PhotoTransferTask.Delete("households/household-1/items/item-1-thumb.webp"),
+                PhotoTransferTask.Delete("households/household-1/items/item-2.webp"),
+                PhotoTransferTask.Delete("households/household-1/items/item-2-thumb.webp"),
             ),
             queue.tasks,
         )

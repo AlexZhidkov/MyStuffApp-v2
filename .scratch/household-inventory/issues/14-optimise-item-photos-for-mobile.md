@@ -15,11 +15,12 @@
 - [x] Full-image and thumbnail uploads proceed and retry independently after Item creation, including while the Member navigates elsewhere or backgrounds the app.
 - [x] Item detail and editing views load the full image, while compact Item and search-result views load the thumbnail.
 - [x] A pending or independently failed image upload leaves the Item usable and displays a non-blocking placeholder instead of blocking navigation or Item creation.
-- [x] Replacing or removing a photo, deleting an Item subtree, and deleting a Household account for both stored image variants.
+- [x] Photo replacement or removal, Item subtree deletion, and Household deletion each account for both stored image variants.
 - [x] Storage authorization accepts only the two expected WebP object names and MIME type, with upload limits appropriate to each image size.
 - [x] Automated checks cover WebP dimensions and format, both storage locations, immediate Item creation, independent background upload success and retry, variant-specific display, authorization, replacement, and deletion.
 
 ## Comments
 
 - Implemented full and thumbnail WebP processing, deterministic storage locations, persistent independent WorkManager transfers, retrying placeholders, cleanup scheduling, and variant-specific authorization.
+- Editing, search, Item subtree deletion, and Household deletion remain owned by issues 07, 08, 10, and 12; their photo presentation and cleanup paths now use the variant-aware seams added here.
 - Added JVM, Android instrumentation, and Firebase emulator coverage. The Android encoder test requires a connected device or emulator.

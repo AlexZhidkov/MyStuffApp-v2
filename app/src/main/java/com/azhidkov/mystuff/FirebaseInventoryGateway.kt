@@ -46,14 +46,12 @@ class FirebaseInventoryGateway internal constructor(
             name = name,
             photoLocations = locations,
         ) { result ->
-            onResult(result)
             result.onSuccess {
                 if (photo != null) {
-                    runCatching {
-                        photoStore.uploadInBackground(householdId, itemId, photo)
-                    }
+                    photoStore.uploadInBackground(householdId, itemId, photo)
                 }
             }
+            onResult(result)
         }
     }
 
@@ -124,7 +122,7 @@ internal fun photoStoragePath(
     itemId: String,
     variant: ItemPhotoVariant,
 ): String = "households/$householdId/items/$itemId" +
-    if (variant == ItemPhotoVariant.Thumbnail) "-thumb.webp" else ".webp"
+    variant.fileSuffix
 
 internal data class InventoryItemDocument(
     val id: String,

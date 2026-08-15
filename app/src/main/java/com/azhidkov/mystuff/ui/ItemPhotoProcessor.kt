@@ -9,21 +9,6 @@ import java.util.UUID
 import kotlin.math.max
 import kotlin.math.roundToInt
 
-internal data class ItemPhotoVariantSpec(
-    val maxSide: Int,
-    val quality: Int,
-)
-
-internal object ItemPhotoVariantSpecs {
-    val full = ItemPhotoVariantSpec(maxSide = 1_024, quality = 75)
-    val thumbnail = ItemPhotoVariantSpec(maxSide = 256, quality = 68)
-
-    fun forVariant(variant: ItemPhotoVariant): ItemPhotoVariantSpec = when (variant) {
-        ItemPhotoVariant.Full -> full
-        ItemPhotoVariant.Thumbnail -> thumbnail
-    }
-}
-
 internal data class ItemPhotoFiles(
     val full: File,
     val thumbnail: File,
@@ -50,12 +35,10 @@ internal object ItemPhotoProcessor {
         stem: String,
         variant: ItemPhotoVariant,
     ): File {
-        val spec = ItemPhotoVariantSpecs.forVariant(variant)
-        val output = crop.scaledWithin(spec.maxSide)
-        val suffix = if (variant == ItemPhotoVariant.Thumbnail) "-thumb" else ""
-        val file = File(directory, "$stem$suffix.webp")
+        val output = crop.scaledWithin(variant.maxSide)
+        val file = File(directory, "$stem${variant.fileSuffix}")
         file.outputStream().use { stream ->
-            check(output.compress(webPFormat(), spec.quality, stream))
+            check(output.compress(webPFormat(), variant.webPQuality, stream))
         }
         if (output !== crop) output.recycle()
         return file

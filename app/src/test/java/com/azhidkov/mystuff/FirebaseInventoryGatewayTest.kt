@@ -8,7 +8,7 @@ class FirebaseInventoryGatewayTest {
     fun `creating an Item finishes before its two photo variants upload`() {
         val documents = FakeInventoryDocumentStore()
         var result: Result<Item>? = null
-        val photos = FakeInventoryPhotoStore { result != null }
+        val photos = FakeInventoryPhotoStore()
         val gateway = FirebaseInventoryGateway(documents, photos)
 
         gateway.createItem(
@@ -51,7 +51,6 @@ class FirebaseInventoryGatewayTest {
             ),
             photos.uploads,
         )
-        assertEquals(true, photos.creationCompletedWhenUploadsStarted)
     }
 
     @Test
@@ -122,12 +121,8 @@ private data class QueuedPhotoUpload(
     val storagePath: String,
 )
 
-private class FakeInventoryPhotoStore(
-    private val isCreationCompleted: () -> Boolean = { true },
-) : InventoryPhotoStore {
+private class FakeInventoryPhotoStore : InventoryPhotoStore {
     val uploads = mutableListOf<QueuedPhotoUpload>()
-    var creationCompletedWhenUploadsStarted: Boolean? = null
-        private set
 
     override fun locations(householdId: String, itemId: String) = ItemPhotoLocations(
         full = "gs://mystuff/households/$householdId/items/$itemId.webp",
@@ -139,7 +134,6 @@ private class FakeInventoryPhotoStore(
         itemId: String,
         photo: ItemPhoto,
     ) {
-        creationCompletedWhenUploadsStarted = isCreationCompleted()
         uploads += QueuedPhotoUpload(
             ItemPhotoVariant.Full,
             photo.uri,

@@ -134,6 +134,17 @@ service cloud.firestore {
         && name.matches('^[^\\s\\p{Z}](.{0,98}[^\\s\\p{Z}])?$');
     }
 
+    function validPhotoLocations(data) {
+      return (
+          data.photoUrl == null
+          || data.photoUrl is string
+        )
+        && (
+          data.get('photoThumbnailUrl', null) == null
+          || data.photoThumbnailUrl is string
+        );
+    }
+
     function validHouseholdCreate(householdId) {
       return request.resource.data.keys().hasOnly([
           'name', 'ownerMemberId', 'rootItemId', 'createdAt'
@@ -158,14 +169,7 @@ service cloud.firestore {
         && request.resource.data.householdId == householdId
         && request.resource.data.name == household.name
         && request.resource.data.parentItemId == null
-        && (
-          request.resource.data.photoUrl == null
-          || request.resource.data.photoUrl is string
-        )
-        && (
-          request.resource.data.get('photoThumbnailUrl', null) == null
-          || request.resource.data.photoThumbnailUrl is string
-        )
+        && validPhotoLocations(request.resource.data)
         && request.resource.data.description == null
         && request.resource.data.tags is list
         && request.resource.data.tags.size() == 0
@@ -191,14 +195,7 @@ service cloud.firestore {
         && validName(request.resource.data.name)
         && request.resource.data.parentItemId is string
         && exists(itemPath(householdId, request.resource.data.parentItemId))
-        && (
-          request.resource.data.photoUrl == null
-          || request.resource.data.photoUrl is string
-        )
-        && (
-          request.resource.data.get('photoThumbnailUrl', null) == null
-          || request.resource.data.photoThumbnailUrl is string
-        )
+        && validPhotoLocations(request.resource.data)
         && request.resource.data.description == null
         && request.resource.data.tags is list
         && request.resource.data.tags.size() == 0

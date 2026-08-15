@@ -20,7 +20,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -72,7 +71,6 @@ fun HouseholdRootScreen(
             state = inventoryState,
             onCancel = inventoryActions::cancelAddItem,
             onChangeName = inventoryActions::changeItemName,
-            onChangeParent = inventoryActions::changeParentItem,
             onSave = inventoryActions::saveItem,
         )
         return
@@ -225,7 +223,6 @@ private fun AddItemScreen(
     state: InventoryUiState,
     onCancel: () -> Unit,
     onChangeName: (String) -> Unit,
-    onChangeParent: (String) -> Unit,
     onSave: () -> Unit,
 ) {
     val draft = requireNotNull(state.itemDraft)
@@ -251,6 +248,14 @@ private fun AddItemScreen(
         ) {
             item { Spacer(Modifier.height(12.dp)) }
             item {
+                Text(
+                    text = state.inventory.pathTo(draft.parentItemId)
+                        .joinToString(" → ", transform = Item::name),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            item {
                 OutlinedTextField(
                     value = draft.name,
                     onValueChange = onChangeName,
@@ -263,43 +268,6 @@ private fun AddItemScreen(
                     },
                     isError = draft.nameError != null,
                 )
-            }
-            item {
-                Text(
-                    text = stringResource(R.string.parent_item),
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                )
-            }
-            items(
-                items = state.inventory.allItems,
-                key = Item::id,
-            ) { candidate ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable(
-                            enabled = !state.operationInProgress,
-                            onClick = { onChangeParent(candidate.id) },
-                        )
-                        .padding(vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    RadioButton(
-                        selected = candidate.id == draft.parentItemId,
-                        onClick = { onChangeParent(candidate.id) },
-                        enabled = !state.operationInProgress,
-                    )
-                    Column(modifier = Modifier.padding(start = 8.dp)) {
-                        Text(candidate.name, fontWeight = FontWeight.SemiBold)
-                        Text(
-                            text = state.inventory.pathTo(candidate.id)
-                                .joinToString(" → ", transform = Item::name),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
             }
             state.errorMessage?.let { error ->
                 item {

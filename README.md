@@ -27,7 +27,7 @@ Currently implemented:
 - Transactional Household creation with one root Item and an Owner membership
 - Automatic reopening of an existing Household after sign-in
 - Owner-only, seven-day Household invitations with revocation and link replacement
-- Text-only Item creation with selectable Parent Items
+- Text-only Child Item creation beneath the currently displayed Item
 - Deep Inventory browsing with immediate Child Items and complete Item Paths
 - Firestore rules and emulator tests for Household, Item, and invitation authorization
 - Unit-tested session state transitions

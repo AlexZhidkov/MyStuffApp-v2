@@ -119,7 +119,7 @@ A person who joins the Household using an invitation tied to their Google Accoun
 4. After capture, the Member may retake the photo, crop and use it, or continue without it.
 5. The app presents the Item form.
 6. The Member enters a required name and may add a description and Tags.
-7. The Member confirms or changes the Parent Item.
+7. The app shows the Parent Item's Item Path and uses that Parent Item without asking the Member to select or confirm it.
 8. The Member saves the Item and sees it beneath its Parent Item.
 
 If camera permission is denied or the camera is unavailable, the app continues directly to the Item form without a photo. Item creation must not depend on camera permission.
@@ -205,10 +205,10 @@ V1 does not guarantee a particular ordering for Child Items.
 | EDT-02 | Camera permission denial or camera unavailability continues to the Item form and does not block Item creation.                         |
 | EDT-03 | After photo capture, a Member can retake the photo, crop and use it, or continue without it.                                           |
 | EDT-04 | Cancelling the crop returns to the post-capture choice rather than cancelling Item creation.                                           |
-| EDT-05 | From an Item detail screen, **Add item** defaults the Parent Item to the displayed Item.                                               |
-| EDT-06 | From Home, **Add item** defaults the Parent Item to the Household root.                                                                |
-| EDT-07 | From Search, **Add item** defaults to the Parent Item of the currently opened result, or to the Household root when no result is open. |
-| EDT-08 | A Member can change the proposed Parent Item before saving.                                                                            |
+| EDT-05 | From an Item detail screen, **Add item** uses the displayed Item as the Parent Item.                                                     |
+| EDT-06 | From Home, **Add item** uses the Household root as the Parent Item.                                                                      |
+| EDT-07 | From Search, **Add item** uses the Parent Item of the currently opened result, or the Household root when no result is open.               |
+| EDT-08 | The Item form shows the Parent Item's complete Item Path without asking the Member to select or confirm it.                               |
 | EDT-09 | A Member can view and edit a non-root Item's name, photo, description, and Tags.                                                       |
 | EDT-10 | V1 need not recover unsaved form data after backgrounding, process recreation, force-stop, sign-out, restart, or navigation away.      |
 
@@ -316,7 +316,7 @@ The model must preserve these invariants:
 - The current Household name is always clear.
 - The primary **Add item** action is available from Home, Search, and Item detail screens.
 - The camera-first flow always permits continuing without a photo.
-- The Item form clearly shows the selected Parent Item.
+- The Item form shows the Parent Item as a complete Item Path at the top of the screen.
 - Item details visually distinguish the selected Item from its Child Items.
 - Empty states explain the next useful action.
 - Complete Item Paths remain available even when compact views collapse middle segments.

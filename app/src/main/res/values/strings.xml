@@ -25,7 +25,6 @@
     <string name="cancel">Cancel</string>
     <string name="item_name">Item name</string>
     <string name="item_name_supporting_text">1–100 characters</string>
-    <string name="parent_item">Parent Item</string>
     <string name="save_item">Save Item</string>
     <string name="saving_item">Saving Item…</string>
     <string name="household_invitations">Household invitations</string>

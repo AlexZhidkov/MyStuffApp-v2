@@ -35,14 +35,13 @@ class InventoryControllerTest {
     }
 
     @Test
-    fun `Add item defaults to displayed Item and accepts a changed Parent Item`() {
+    fun `Add item always uses the displayed Item as its Parent Item`() {
         val household = household()
         val inventory = Inventory.from(
             household,
             listOf(
                 household.rootItem,
                 item("garage", "Garage", household.id),
-                item("shed", "Shed", household.id),
             ),
         )
         val gateway = FakeInventoryGateway(inventory)
@@ -56,14 +55,13 @@ class InventoryControllerTest {
         controller.beginAddItem()
         assertEquals("garage", controller.state.itemDraft?.parentItemId)
 
-        controller.changeParentItem("shed")
         controller.changeItemName("  Drill  ")
         controller.saveItem()
 
-        assertEquals("shed", gateway.createdParentItemId)
+        assertEquals("garage", gateway.createdParentItemId)
         assertEquals("Drill", gateway.createdName)
         assertNull(controller.state.itemDraft)
-        assertEquals("shed", controller.state.selectedItem.id)
+        assertEquals("garage", controller.state.selectedItem.id)
         assertEquals(listOf("Drill"), controller.state.childItems.map(Item::name))
     }
 

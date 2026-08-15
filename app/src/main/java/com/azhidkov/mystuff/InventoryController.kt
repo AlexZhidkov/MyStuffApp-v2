@@ -25,7 +25,6 @@ interface InventoryActions {
     fun beginAddItem()
     fun cancelAddItem()
     fun changeItemName(name: String)
-    fun changeParentItem(parentItemId: String)
     fun saveItem()
 }
 
@@ -112,12 +111,6 @@ class InventoryController(
         updateState(state.copy(itemDraft = draft.copy(name = name, nameError = null)))
     }
 
-    override fun changeParentItem(parentItemId: String) {
-        val draft = state.itemDraft ?: return
-        if (!state.inventory.contains(parentItemId)) return
-        updateState(state.copy(itemDraft = draft.copy(parentItemId = parentItemId)))
-    }
-
     override fun saveItem() {
         val draft = state.itemDraft ?: return
         if (state.operationInProgress) return
@@ -133,7 +126,9 @@ class InventoryController(
             return
         }
         if (!state.inventory.contains(draft.parentItemId)) {
-            updateState(state.copy(errorMessage = "Choose an Item in this Household."))
+            updateState(
+                state.copy(errorMessage = "The Parent Item is no longer in this Household."),
+            )
             return
         }
 

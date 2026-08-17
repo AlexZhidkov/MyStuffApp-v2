@@ -89,6 +89,8 @@ fun HouseholdRootScreen(
     }
 
     val isHome = inventoryState.selectedItemId == inventoryState.inventory.rootItemId
+    val showSearchResults = inventoryState.searchQuery.isNotBlank() &&
+        inventoryState.openedSearchResultId == null
     Scaffold(
         contentWindowInsets = WindowInsets.safeDrawing,
         topBar = {
@@ -100,7 +102,15 @@ fun HouseholdRootScreen(
                     )
                 },
                 actions = {
-                    if (!isHome) {
+                    if (inventoryState.openedSearchResultId != null) {
+                        TextButton(
+                            onClick = {
+                                inventoryActions.changeSearchQuery(inventoryState.searchQuery)
+                            },
+                        ) {
+                            Text(stringResource(R.string.search_results))
+                        }
+                    } else if (!isHome && !showSearchResults) {
                         TextButton(onClick = inventoryActions::openParentItem) {
                             Text(stringResource(R.string.up_to_parent_item))
                         }
@@ -123,164 +133,251 @@ fun HouseholdRootScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item { Spacer(Modifier.height(24.dp)) }
-            storedPhotoLocation(
-                inventoryState.selectedItem,
-                ItemPhotoPresentation.Detail,
-            )?.let {
-                item {
-                    StoredItemPhoto(
-                        item = inventoryState.selectedItem,
-                        presentation = ItemPhotoPresentation.Detail,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(240.dp),
-                    )
-                }
-            }
             item {
-                Text(
-                    text = stringResource(
-                        if (isHome) {
-                            R.string.household_root_label
-                        } else {
-                            R.string.item_details
-                        },
-                    ),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.SemiBold,
+                OutlinedTextField(
+                    value = inventoryState.searchQuery,
+                    onValueChange = inventoryActions::changeSearchQuery,
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text(stringResource(R.string.search_household)) },
                 )
             }
-            item {
-                Text(
-                    text = inventoryState.selectedItem.name,
-                    style = MaterialTheme.typography.headlineLarge,
-                    fontWeight = FontWeight.Bold,
-                )
-            }
-            item {
-                Text(
-                    text = inventoryState.itemPath.joinToString(" → ", transform = Item::name),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
-            inventoryState.selectedItem.description?.let { description ->
+            if (showSearchResults) {
                 item {
-                    Text(
-                        text = description,
-                        style = MaterialTheme.typography.bodyLarge,
-                    )
-                }
-            }
-            if (inventoryState.selectedItem.tags.isNotEmpty()) {
-                item {
-                    Text(
-                        text = inventoryState.selectedItem.tags.joinToString(" · "),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.secondary,
-                    )
-                }
-            }
-            if (!isHome) {
-                item {
-                    TextButton(onClick = inventoryActions::beginEditItem) {
-                        Text(stringResource(R.string.edit_item))
+                    Button(
+                        onClick = inventoryActions::beginAddItem,
+                        enabled = !inventoryState.loading,
+                    ) {
+                        Text(stringResource(R.string.add_item))
                     }
                 }
-            }
-            item {
-                Button(
-                    onClick = inventoryActions::beginAddItem,
-                    enabled = !inventoryState.loading,
-                ) {
-                    Text(stringResource(R.string.add_item))
-                }
-            }
-            item {
-                Text(
-                    text = stringResource(R.string.child_items),
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                )
-            }
-            if (inventoryState.childItems.isEmpty()) {
                 item {
                     Text(
-                        text = stringResource(R.string.no_child_items),
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        text = stringResource(R.string.search_results),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
                     )
                 }
-            } else {
-                items(
-                    items = inventoryState.childItems,
-                    key = Item::id,
-                ) { item ->
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { inventoryActions.openItem(item.id) },
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(12.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
+                if (inventoryState.searchResults.isEmpty()) {
+                    item {
+                        Text(
+                            text = stringResource(R.string.no_search_results),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                } else {
+                    items(
+                        items = inventoryState.searchResults,
+                        key = { it.item.id },
+                    ) { result ->
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    inventoryActions.openSearchResult(result.item.id)
+                                },
                         ) {
-                            storedPhotoLocation(item, ItemPhotoPresentation.Compact)?.let {
-                                StoredItemPhoto(
-                                    item = item,
-                                    presentation = ItemPhotoPresentation.Compact,
-                                    modifier = Modifier.size(64.dp),
-                                )
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                storedPhotoLocation(
+                                    result.item,
+                                    ItemPhotoPresentation.Compact,
+                                )?.let {
+                                    StoredItemPhoto(
+                                        item = result.item,
+                                        presentation = ItemPhotoPresentation.Compact,
+                                        modifier = Modifier.size(64.dp),
+                                    )
+                                }
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text(
+                                        text = result.item.name,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                    Text(
+                                        text = result.itemPath.joinToString(
+                                            " → ",
+                                            transform = Item::name,
+                                        ),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
                             }
-                            Text(
-                                text = item.name,
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold,
-                            )
                         }
                     }
                 }
-            }
-            inventoryState.errorMessage?.let { error ->
-                item {
-                    Text(
-                        text = error,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
+            } else {
+                storedPhotoLocation(
+                    inventoryState.selectedItem,
+                    ItemPhotoPresentation.Detail,
+                )?.let {
+                    item {
+                        StoredItemPhoto(
+                            item = inventoryState.selectedItem,
+                            presentation = ItemPhotoPresentation.Detail,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(240.dp),
+                        )
+                    }
                 }
-            }
-            inventoryState.successMessage?.let { success ->
                 item {
                     Text(
-                        text = success,
+                        text = stringResource(
+                            if (isHome) {
+                                R.string.household_root_label
+                            } else {
+                                R.string.item_details
+                            },
+                        ),
+                        style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.primary,
-                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
                     )
                 }
-            }
-            if (isHome && invitationState.canManage) {
-                item { Spacer(Modifier.height(16.dp)) }
                 item {
-                    InvitationComposer(
-                        state = invitationState,
-                        onCreateInvitation = onCreateInvitation,
+                    Text(
+                        text = inventoryState.selectedItem.name,
+                        style = MaterialTheme.typography.headlineLarge,
+                        fontWeight = FontWeight.Bold,
                     )
                 }
-                items(
-                    items = invitationState.invitations,
-                    key = HouseholdInvitation::id,
-                ) { invitation ->
-                    InvitationCard(
-                        invitation = invitation,
-                        operationInProgress = invitationState.operationInProgress,
-                        onRevoke = { onRevokeInvitation(invitation.id) },
-                        onReplace = {
-                            onReplaceInvitation(invitation.id, invitation.intendedEmail)
-                        },
+                item {
+                    Text(
+                        text = inventoryState.itemPath.joinToString(
+                            " → ",
+                            transform = Item::name,
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary,
                     )
+                }
+                inventoryState.selectedItem.description?.let { description ->
+                    item {
+                        Text(
+                            text = description,
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                    }
+                }
+                if (inventoryState.selectedItem.tags.isNotEmpty()) {
+                    item {
+                        Text(
+                            text = inventoryState.selectedItem.tags.joinToString(" · "),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.secondary,
+                        )
+                    }
+                }
+                if (!isHome) {
+                    item {
+                        TextButton(onClick = inventoryActions::beginEditItem) {
+                            Text(stringResource(R.string.edit_item))
+                        }
+                    }
+                }
+                item {
+                    Button(
+                        onClick = inventoryActions::beginAddItem,
+                        enabled = !inventoryState.loading,
+                    ) {
+                        Text(stringResource(R.string.add_item))
+                    }
+                }
+                item {
+                    Text(
+                        text = stringResource(R.string.child_items),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                if (inventoryState.childItems.isEmpty()) {
+                    item {
+                        Text(
+                            text = stringResource(R.string.no_child_items),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                } else {
+                    items(
+                        items = inventoryState.childItems,
+                        key = Item::id,
+                    ) { item ->
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { inventoryActions.openItem(item.id) },
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                storedPhotoLocation(
+                                    item,
+                                    ItemPhotoPresentation.Compact,
+                                )?.let {
+                                    StoredItemPhoto(
+                                        item = item,
+                                        presentation = ItemPhotoPresentation.Compact,
+                                        modifier = Modifier.size(64.dp),
+                                    )
+                                }
+                                Text(
+                                    text = item.name,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+                        }
+                    }
+                }
+                inventoryState.errorMessage?.let { error ->
+                    item {
+                        Text(
+                            text = error,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+                inventoryState.successMessage?.let { success ->
+                    item {
+                        Text(
+                            text = success,
+                            color = MaterialTheme.colorScheme.primary,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+                if (isHome && invitationState.canManage) {
+                    item { Spacer(Modifier.height(16.dp)) }
+                    item {
+                        InvitationComposer(
+                            state = invitationState,
+                            onCreateInvitation = onCreateInvitation,
+                        )
+                    }
+                    items(
+                        items = invitationState.invitations,
+                        key = HouseholdInvitation::id,
+                    ) { invitation ->
+                        InvitationCard(
+                            invitation = invitation,
+                            operationInProgress = invitationState.operationInProgress,
+                            onRevoke = { onRevokeInvitation(invitation.id) },
+                            onReplace = {
+                                onReplaceInvitation(invitation.id, invitation.intendedEmail)
+                            },
+                        )
+                    }
                 }
             }
             item { Spacer(Modifier.height(24.dp)) }

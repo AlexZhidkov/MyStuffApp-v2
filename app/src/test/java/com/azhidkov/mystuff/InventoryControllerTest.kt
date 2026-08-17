@@ -8,6 +8,139 @@ import org.junit.Test
 
 class InventoryControllerTest {
     @Test
+    fun `Household search matches normalized substrings and excludes its root Item`() {
+        val household = household()
+        val controller = InventoryController(
+            household,
+            identity(),
+            FakeInventoryGateway(
+                Inventory.from(
+                    household,
+                    listOf(
+                        household.rootItem,
+                        item("cafe-table", "Café Table", household.id),
+                        item("drill", "Drill", household.id, tags = listOf("Powér Tools")),
+                        item(
+                            "charger",
+                            "Charger",
+                            household.id,
+                            description = "Spare BATTERY pack",
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        controller.changeSearchQuery("CAFE")
+
+        assertEquals(listOf("cafe-table"), controller.state.searchResults.map { it.item.id })
+
+        controller.changeSearchQuery("power")
+        assertEquals(listOf("drill"), controller.state.searchResults.map { it.item.id })
+
+        controller.changeSearchQuery("battery")
+        assertEquals(listOf("charger"), controller.state.searchResults.map { it.item.id })
+
+        controller.changeSearchQuery("our home")
+        assertTrue(controller.state.searchResults.isEmpty())
+    }
+
+    @Test
+    fun `Household search ranks field priority before exact prefix and substring matches`() {
+        val household = household()
+        val controller = InventoryController(
+            household,
+            identity(),
+            FakeInventoryGateway(
+                Inventory.from(
+                    household,
+                    listOf(
+                        household.rootItem,
+                        item("description-substring", "Manual", household.id, description = "Using a drill safely"),
+                        item("tag-prefix", "Bit Set", household.id, tags = listOf("Drill bits")),
+                        item("name-substring", "Cordless Drill Kit", household.id),
+                        item("description-exact", "Reference", household.id, description = "Drill"),
+                        item("tag-substring", "Toolbox", household.id, tags = listOf("Cordless drill set")),
+                        item("name-prefix", "Drill Press", household.id),
+                        item("description-prefix", "Instructions", household.id, description = "Drill maintenance"),
+                        item("tag-exact", "Impact Driver", household.id, tags = listOf("Drill")),
+                        item("name-exact", "Drill", household.id),
+                    ),
+                ),
+            ),
+        )
+
+        controller.changeSearchQuery("drill")
+
+        assertEquals(
+            listOf(
+                "name-exact",
+                "name-prefix",
+                "name-substring",
+                "tag-exact",
+                "tag-prefix",
+                "tag-substring",
+                "description-exact",
+                "description-prefix",
+                "description-substring",
+            ),
+            controller.state.searchResults.map { it.item.id },
+        )
+
+        controller.changeSearchQuery("drilx")
+        assertTrue(controller.state.searchResults.isEmpty())
+    }
+
+    @Test
+    fun `opening a search result exposes its complete Item Path details and Child Items`() {
+        val household = household()
+        val controller = InventoryController(
+            household,
+            identity(),
+            FakeInventoryGateway(
+                Inventory.from(
+                    household,
+                    listOf(
+                        household.rootItem,
+                        item("garage", "Garage", household.id),
+                        item("cabinet", "Cabinet", "garage"),
+                        item(
+                            "drill",
+                            "Drill",
+                            "cabinet",
+                            photoThumbnailUrl = "gs://mystuff/drill-thumb.webp",
+                        ),
+                        item("battery", "Battery", "drill"),
+                        item("saw", "Saw", "garage"),
+                    ),
+                ),
+            ),
+        )
+        controller.changeSearchQuery("drill")
+
+        val result = controller.state.searchResults.single()
+
+        assertEquals("gs://mystuff/drill-thumb.webp", result.item.photoThumbnailUrl)
+        assertEquals(
+            listOf("Our Home", "Garage", "Cabinet", "Drill"),
+            result.itemPath.map(Item::name),
+        )
+
+        controller.openSearchResult(result.item.id)
+
+        assertEquals("Drill", controller.state.selectedItem.name)
+        assertEquals(listOf("Battery"), controller.state.childItems.map(Item::name))
+
+        controller.beginAddItem()
+        assertEquals("cabinet", controller.state.itemDraft?.parentItemId)
+
+        controller.closeItemForm()
+        controller.changeSearchQuery("saw")
+        controller.beginAddItem()
+        assertEquals(household.id, controller.state.itemDraft?.parentItemId)
+    }
+
+    @Test
     fun `camera permission denial continues Item creation without a photo`() {
         val controller = InventoryController(household(), identity(), FakeInventoryGateway(inventory()))
 

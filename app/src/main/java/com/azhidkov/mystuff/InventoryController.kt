@@ -49,6 +49,8 @@ sealed interface ItemPhotoUpdate {
 }
 
 interface InventoryActions {
+    fun changeSearchQuery(query: String)
+    fun openSearchResult(itemId: String)
     fun openItem(itemId: String)
     fun openParentItem()
     fun beginAddItem()
@@ -71,6 +73,11 @@ interface InventoryActions {
     fun removeTag(tag: String)
     fun saveItem()
 }
+
+data class InventorySearchResult(
+    val item: Item,
+    val itemPath: List<Item>,
+)
 
 enum class ItemFormStage {
     CameraPermission,
@@ -97,6 +104,8 @@ data class ItemFormState(
 data class InventoryUiState(
     val inventory: Inventory,
     val selectedItemId: String,
+    val searchQuery: String = "",
+    val openedSearchResultId: String? = null,
     val itemDraft: ItemFormState? = null,
     val loading: Boolean = false,
     val operationInProgress: Boolean = false,
@@ -111,6 +120,22 @@ data class InventoryUiState(
         get() = inventory.childrenOf(selectedItemId)
     val itemPath: List<Item>
         get() = inventory.pathTo(selectedItemId)
+    val searchResults: List<InventorySearchResult>
+        get() {
+            val query = searchQuery.trimUnicodeWhitespace().tagKey().value
+            if (query.isEmpty()) return emptyList()
+            return inventory.allItems
+                .asSequence()
+                .filterNot { it.id == inventory.rootItemId }
+                .mapNotNull { item ->
+                    item.searchRank(query)?.let { rank -> item to rank }
+                }
+                .sortedWith(compareBy({ it.second.field }, { it.second.match }))
+                .map { (item) ->
+                    InventorySearchResult(item = item, itemPath = inventory.pathTo(item.id))
+                }
+                .toList()
+        }
     val tagSuggestions: List<String>
         get() {
             val draft = itemDraft ?: return emptyList()
@@ -148,6 +173,8 @@ class InventoryController(
                 state.copy(
                     inventory = inventory,
                     selectedItemId = selectedItemId,
+                    openedSearchResultId = state.openedSearchResultId
+                        ?.takeIf(inventory::contains),
                     loading = false,
                     errorMessage = null,
                 ),
@@ -162,10 +189,32 @@ class InventoryController(
         }
     }
 
+    override fun changeSearchQuery(query: String) {
+        updateState(state.copy(searchQuery = query, openedSearchResultId = null))
+    }
+
+    override fun openSearchResult(itemId: String) {
+        if (state.itemDraft != null || state.searchResults.none { it.item.id == itemId }) return
+        updateState(
+            state.copy(
+                selectedItemId = itemId,
+                openedSearchResultId = itemId,
+                errorMessage = null,
+                successMessage = null,
+            ),
+        )
+    }
+
     override fun openItem(itemId: String) {
         if (!state.inventory.contains(itemId) || state.itemDraft != null) return
         updateState(
-            state.copy(selectedItemId = itemId, errorMessage = null, successMessage = null),
+            state.copy(
+                selectedItemId = itemId,
+                searchQuery = "",
+                openedSearchResultId = null,
+                errorMessage = null,
+                successMessage = null,
+            ),
         )
     }
 
@@ -176,9 +225,15 @@ class InventoryController(
 
     override fun beginAddItem() {
         if (state.itemDraft != null || state.operationInProgress) return
+        val parentItemId = when {
+            state.openedSearchResultId != null ->
+                state.selectedItem.parentItemId ?: state.inventory.rootItemId
+            state.searchQuery.trimUnicodeWhitespace().isNotEmpty() -> state.inventory.rootItemId
+            else -> state.selectedItemId
+        }
         updateState(
             state.copy(
-                itemDraft = ItemFormState(parentItemId = state.selectedItemId),
+                itemDraft = ItemFormState(parentItemId = parentItemId),
                 errorMessage = null,
                 successMessage = null,
             ),
@@ -489,6 +544,44 @@ internal fun String.tagKey(): TagKey = TagKey(
         )
         .replace("\\p{M}+".toRegex(), ""),
 )
+
+private enum class SearchFieldPriority {
+    Name,
+    Tag,
+    Description,
+}
+
+private enum class SearchMatchPriority {
+    Exact,
+    Prefix,
+    Substring,
+}
+
+private data class SearchRank(
+    val field: SearchFieldPriority,
+    val match: SearchMatchPriority,
+)
+
+private fun Item.searchRank(query: String): SearchRank? {
+    name.matchPriority(query)?.let { return SearchRank(SearchFieldPriority.Name, it) }
+    tags.mapNotNull { it.matchPriority(query) }.minOrNull()?.let {
+        return SearchRank(SearchFieldPriority.Tag, it)
+    }
+    description?.matchPriority(query)?.let {
+        return SearchRank(SearchFieldPriority.Description, it)
+    }
+    return null
+}
+
+private fun String.matchPriority(query: String): SearchMatchPriority? {
+    val candidate = tagKey().value
+    return when {
+        candidate == query -> SearchMatchPriority.Exact
+        candidate.startsWith(query) -> SearchMatchPriority.Prefix
+        query in candidate -> SearchMatchPriority.Substring
+        else -> null
+    }
+}
 
 internal fun ItemDetails.validationFailure(): String? {
     if (name != name.trimUnicodeWhitespace() || name.isEmpty()) return "Invalid Item name."

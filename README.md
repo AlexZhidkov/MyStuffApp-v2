@@ -30,11 +30,11 @@ Currently implemented:
 - Child Item creation and editing with names, descriptions, Tags, and camera-first
   optional mobile-sized WebP photos and thumbnails
 - Independent persistent background upload and retry for each Item photo variant
-- Deep Inventory browsing with immediate Child Items and complete Item Paths
+- Deep Inventory browsing and Household search with immediate Child Items and complete Item Paths
 - Firebase rules and emulator tests for Household, Item, invitation, and photo authorization
 - Unit-tested session state transitions
 
-Invitation acceptance, search, moving, deletion, and connected
+Invitation acceptance, moving, deletion, and connected
 synchronization are planned in the
 [prototype specification](.scratch/household-inventory/spec.md).
 

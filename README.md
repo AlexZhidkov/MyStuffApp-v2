@@ -27,14 +27,14 @@ Currently implemented:
 - Transactional Household creation with one root Item and an Owner membership
 - Automatic reopening of an existing Household after sign-in
 - Owner-only, seven-day Household invitations with revocation and link replacement
-- Text-only Child Item creation beneath the currently displayed Item
-- Camera-first Item creation with optional mobile-sized WebP photos and thumbnails
+- Child Item creation and editing with names, descriptions, Tags, and camera-first
+  optional mobile-sized WebP photos and thumbnails
 - Independent persistent background upload and retry for each Item photo variant
 - Deep Inventory browsing with immediate Child Items and complete Item Paths
 - Firebase rules and emulator tests for Household, Item, invitation, and photo authorization
 - Unit-tested session state transitions
 
-Invitation acceptance, search, editing, moving, deletion, and connected
+Invitation acceptance, search, moving, deletion, and connected
 synchronization are planned in the
 [prototype specification](.scratch/household-inventory/spec.md).
 

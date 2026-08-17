@@ -35,6 +35,13 @@ data class ItemDetails(
     val tags: List<String>,
 )
 
+internal object ItemFormPolicy {
+    const val MAX_ITEM_NAME_LENGTH = 100
+    const val MAX_DESCRIPTION_LENGTH = 2_000
+    const val MAX_TAG_COUNT = 20
+    const val MAX_TAG_LENGTH = 40
+}
+
 sealed interface ItemPhotoUpdate {
     data object Unchanged : ItemPhotoUpdate
     data object Removed : ItemPhotoUpdate
@@ -55,7 +62,7 @@ interface InventoryActions {
     fun retakePhoto()
     fun useCroppedPhoto(photo: ItemPhoto)
     fun continueWithoutPhoto()
-    fun cancelAddItem()
+    fun closeItemForm()
     fun changeItemName(name: String)
     fun changeItemDescription(description: String)
     fun changeTagInput(tag: String)
@@ -65,17 +72,17 @@ interface InventoryActions {
     fun saveItem()
 }
 
-enum class ItemCreationStage {
+enum class ItemFormStage {
     CameraPermission,
     Camera,
     Crop,
     Details,
 }
 
-data class ItemDraft(
+data class ItemFormState(
     val name: String = "",
     val parentItemId: String,
-    val stage: ItemCreationStage = ItemCreationStage.CameraPermission,
+    val stage: ItemFormStage = ItemFormStage.CameraPermission,
     val photo: ItemPhoto? = null,
     val description: String = "",
     val tags: List<String> = emptyList(),
@@ -85,18 +92,19 @@ data class ItemDraft(
     val tagError: String? = null,
     val editingItemId: String? = null,
     val photoRemoved: Boolean = false,
+    val saveSucceeded: Boolean = false,
 )
 
 data class InventoryUiState(
     val inventory: Inventory,
     val selectedItemId: String,
-    val itemDraft: ItemDraft? = null,
+    val itemDraft: ItemFormState? = null,
     val loading: Boolean = false,
     val operationInProgress: Boolean = false,
     val errorMessage: String? = null,
     val successMessage: String? = null,
 ) {
-    val itemCreationStage: ItemCreationStage?
+    val itemFormStage: ItemFormStage?
         get() = itemDraft?.stage
     val selectedItem: Item
         get() = inventory.item(selectedItemId)
@@ -107,14 +115,14 @@ data class InventoryUiState(
     val tagSuggestions: List<String>
         get() {
             val draft = itemDraft ?: return emptyList()
-            val selectedTags = draft.tags.mapTo(mutableSetOf(), String::normalizedTag)
-            val query = draft.tagInput.trimUnicodeWhitespace().normalizedTag()
+            val selectedTags = draft.tags.mapTo(mutableSetOf(), String::tagKey)
+            val query = draft.tagInput.trimUnicodeWhitespace().tagKey().value
             return inventory.allItems
                 .flatMap(Item::tags)
-                .distinctBy(String::normalizedTag)
+                .distinctBy(String::tagKey)
                 .filter { suggestion ->
-                    suggestion.normalizedTag() !in selectedTags &&
-                        (query.isEmpty() || query in suggestion.normalizedTag())
+                    suggestion.tagKey() !in selectedTags &&
+                        (query.isEmpty() || query in suggestion.tagKey().value)
                 }
         }
 }
@@ -171,7 +179,7 @@ class InventoryController(
         if (state.itemDraft != null || state.operationInProgress) return
         updateState(
             state.copy(
-                itemDraft = ItemDraft(parentItemId = state.selectedItemId),
+                itemDraft = ItemFormState(parentItemId = state.selectedItemId),
                 errorMessage = null,
                 successMessage = null,
             ),
@@ -189,10 +197,10 @@ class InventoryController(
         val item = state.selectedItem
         updateState(
             state.copy(
-                itemDraft = ItemDraft(
+                itemDraft = ItemFormState(
                     name = item.name,
                     parentItemId = item.parentItemId ?: return,
-                    stage = ItemCreationStage.Details,
+                    stage = ItemFormStage.Details,
                     description = item.description.orEmpty(),
                     tags = item.tags,
                     editingItemId = item.id,
@@ -205,11 +213,17 @@ class InventoryController(
 
     override fun beginReplaceItemPhoto() {
         val draft = state.itemDraft ?: return
-        if (draft.stage != ItemCreationStage.Details || state.operationInProgress) return
+        if (
+            draft.stage != ItemFormStage.Details ||
+            state.operationInProgress ||
+            draft.saveSucceeded
+        ) {
+            return
+        }
         updateState(
             state.copy(
                 itemDraft = draft.copy(
-                    stage = ItemCreationStage.CameraPermission,
+                    stage = ItemFormStage.CameraPermission,
                     photo = null,
                 ),
                 errorMessage = null,
@@ -219,7 +233,13 @@ class InventoryController(
 
     override fun removeItemPhoto() {
         val draft = state.itemDraft ?: return
-        if (draft.stage != ItemCreationStage.Details || state.operationInProgress) return
+        if (
+            draft.stage != ItemFormStage.Details ||
+            state.operationInProgress ||
+            draft.saveSucceeded
+        ) {
+            return
+        }
         updateState(
             state.copy(
                 itemDraft = draft.copy(photo = null, photoRemoved = true),
@@ -229,63 +249,65 @@ class InventoryController(
     }
 
     override fun cameraUnavailable() {
-        transitionItemDraft(ItemCreationStage.CameraPermission) {
-            it.copy(stage = ItemCreationStage.Details)
+        transitionItemFormState(ItemFormStage.CameraPermission) {
+            it.copy(stage = ItemFormStage.Details)
         }
     }
 
     override fun resolveCameraPermission(granted: Boolean) {
-        transitionItemDraft(ItemCreationStage.CameraPermission) {
-            it.copy(stage = if (granted) ItemCreationStage.Camera else ItemCreationStage.Details)
+        transitionItemFormState(ItemFormStage.CameraPermission) {
+            it.copy(stage = if (granted) ItemFormStage.Camera else ItemFormStage.Details)
         }
     }
 
     override fun photoCaptureFailed() {
-        transitionItemDraft(ItemCreationStage.Camera) {
-            it.copy(stage = ItemCreationStage.Details)
+        transitionItemFormState(ItemFormStage.Camera) {
+            it.copy(stage = ItemFormStage.Details)
         }
     }
 
     override fun photoCaptured(photo: ItemPhoto) {
-        transitionItemDraft(ItemCreationStage.Camera) {
-            it.copy(stage = ItemCreationStage.Crop, photo = photo)
+        transitionItemFormState(ItemFormStage.Camera) {
+            it.copy(stage = ItemFormStage.Crop, photo = photo)
         }
     }
 
     override fun retakePhoto() {
-        transitionItemDraft(ItemCreationStage.Crop) {
-            it.copy(stage = ItemCreationStage.Camera, photo = null)
+        transitionItemFormState(ItemFormStage.Crop) {
+            it.copy(stage = ItemFormStage.Camera, photo = null)
         }
     }
 
     override fun useCroppedPhoto(photo: ItemPhoto) {
-        transitionItemDraft(ItemCreationStage.Crop) {
-            it.copy(stage = ItemCreationStage.Details, photo = photo, photoRemoved = false)
+        transitionItemFormState(ItemFormStage.Crop) {
+            it.copy(stage = ItemFormStage.Details, photo = photo, photoRemoved = false)
         }
     }
 
     override fun continueWithoutPhoto() {
-        transitionItemDraft(ItemCreationStage.Crop) {
+        transitionItemFormState(ItemFormStage.Crop) {
             it.copy(
-                stage = ItemCreationStage.Details,
+                stage = ItemFormStage.Details,
                 photo = null,
                 photoRemoved = it.editingItemId != null,
             )
         }
     }
 
-    override fun cancelAddItem() {
+    override fun closeItemForm() {
         if (state.operationInProgress) return
         updateState(state.copy(itemDraft = null, errorMessage = null))
     }
 
     override fun changeItemName(name: String) {
         val draft = state.itemDraft ?: return
+        if (draft.saveSucceeded) return
         updateState(state.copy(itemDraft = draft.copy(name = name, nameError = null)))
     }
 
     override fun changeItemDescription(description: String) {
         val draft = state.itemDraft ?: return
+        if (draft.saveSucceeded) return
         updateState(
             state.copy(itemDraft = draft.copy(description = description, descriptionError = null)),
         )
@@ -293,18 +315,21 @@ class InventoryController(
 
     override fun changeTagInput(tag: String) {
         val draft = state.itemDraft ?: return
+        if (draft.saveSucceeded) return
         updateState(state.copy(itemDraft = draft.copy(tagInput = tag, tagError = null)))
     }
 
     override fun addTag() {
         val draft = state.itemDraft ?: return
+        if (draft.saveSucceeded) return
         val tag = draft.tagInput.trimUnicodeWhitespace()
         val tagError = when {
             tag.isEmpty() -> "Enter a Tag."
-            tag.codePointCount(0, tag.length) > MAX_TAG_LENGTH ->
-                "Tags can contain at most 40 characters."
-            draft.tags.size >= MAX_TAG_COUNT -> "An Item can have at most 20 Tags."
-            draft.tags.any { it.normalizedTag() == tag.normalizedTag() } ->
+            tag.codePointCount(0, tag.length) > ItemFormPolicy.MAX_TAG_LENGTH ->
+                "Tags can contain at most ${ItemFormPolicy.MAX_TAG_LENGTH} characters."
+            draft.tags.size >= ItemFormPolicy.MAX_TAG_COUNT ->
+                "An Item can have at most ${ItemFormPolicy.MAX_TAG_COUNT} Tags."
+            draft.tags.any { it.tagKey() == tag.tagKey() } ->
                 "That Tag is already on this Item."
             else -> null
         }
@@ -326,10 +351,11 @@ class InventoryController(
 
     override fun removeTag(tag: String) {
         val draft = state.itemDraft ?: return
+        if (draft.saveSucceeded) return
         updateState(
             state.copy(
                 itemDraft = draft.copy(
-                    tags = draft.tags.filterNot { it.normalizedTag() == tag.normalizedTag() },
+                    tags = draft.tags.filterNot { it.tagKey() == tag.tagKey() },
                     tagError = null,
                 ),
             ),
@@ -338,12 +364,13 @@ class InventoryController(
 
     override fun saveItem() {
         val draft = state.itemDraft ?: return
-        if (state.operationInProgress) return
+        if (state.operationInProgress || draft.saveSucceeded) return
         val name = draft.name.trimUnicodeWhitespace()
         val nameError = when {
             name.isEmpty() -> "Enter an Item name."
-            name.codePointCount(0, name.length) > MAX_ITEM_NAME_LENGTH ->
-                "Item names can contain at most 100 characters."
+            name.codePointCount(0, name.length) > ItemFormPolicy.MAX_ITEM_NAME_LENGTH ->
+                "Item names can contain at most " +
+                    "${ItemFormPolicy.MAX_ITEM_NAME_LENGTH} characters."
             else -> null
         }
         if (nameError != null) {
@@ -351,9 +378,15 @@ class InventoryController(
             return
         }
         val descriptionError = if (
-            draft.description.codePointCount(0, draft.description.length) > MAX_DESCRIPTION_LENGTH
+            draft.description.codePointCount(0, draft.description.length) >
+                ItemFormPolicy.MAX_DESCRIPTION_LENGTH
         ) {
-            "Descriptions can contain at most 2,000 characters."
+            "Descriptions can contain at most " +
+                "${java.lang.String.format(
+                    java.util.Locale.ROOT,
+                    "%,d",
+                    ItemFormPolicy.MAX_DESCRIPTION_LENGTH,
+                )} characters."
         } else {
             null
         }
@@ -375,16 +408,20 @@ class InventoryController(
             tags = draft.tags,
         )
         val onResult: (Result<Item>) -> Unit = { result ->
-            result.onSuccess { created ->
+            result.onSuccess { savedItem ->
                 updateState(
                     state.copy(
-                        inventory = state.inventory.withItem(created),
+                        inventory = state.inventory.withItem(savedItem),
                         selectedItemId = if (draft.editingItemId == null) {
-                            created.parentItemId ?: throw InvalidInventoryException()
+                            savedItem.parentItemId ?: throw InvalidInventoryException()
                         } else {
-                            created.id
+                            savedItem.id
                         },
-                        itemDraft = null,
+                        itemDraft = draft.copy(
+                            name = details.name,
+                            description = details.description.orEmpty(),
+                            saveSucceeded = true,
+                        ),
                         operationInProgress = false,
                         errorMessage = null,
                         successMessage = "Item saved.",
@@ -438,28 +475,31 @@ class InventoryController(
         onStateChanged(newState)
     }
 
-    private fun transitionItemDraft(
-        expectedStage: ItemCreationStage,
-        transition: (ItemDraft) -> ItemDraft,
+    private fun transitionItemFormState(
+        expectedStage: ItemFormStage,
+        transition: (ItemFormState) -> ItemFormState,
     ) {
         val draft = state.itemDraft ?: return
         if (draft.stage != expectedStage) return
         updateState(state.copy(itemDraft = transition(draft)))
     }
 
-    private companion object {
-        const val MAX_ITEM_NAME_LENGTH = 100
-        const val MAX_DESCRIPTION_LENGTH = 2_000
-        const val MAX_TAG_COUNT = 20
-        const val MAX_TAG_LENGTH = 40
-    }
 }
 
 private fun String.trimUnicodeWhitespace(): String = trim { character ->
     character.isWhitespace() || Character.isSpaceChar(character)
 }
 
-private fun String.normalizedTag(): String = java.text.Normalizer
-    .normalize(this, java.text.Normalizer.Form.NFD)
-    .replace("\\p{M}+".toRegex(), "")
-    .lowercase(java.util.Locale.ROOT)
+@JvmInline
+internal value class TagKey(val value: String)
+
+internal fun String.tagKey(): TagKey = TagKey(
+    java.text.Normalizer
+        .normalize(
+            uppercase(java.util.Locale.ROOT).lowercase(java.util.Locale.ROOT),
+            java.text.Normalizer.Form.NFD,
+        )
+        .replace("\\p{M}+".toRegex(), ""),
+)
+
+internal fun ItemDetails.tagKeys(): List<String> = tags.map { it.tagKey().value }

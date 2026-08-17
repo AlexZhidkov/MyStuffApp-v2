@@ -45,7 +45,8 @@ import com.azhidkov.mystuff.InvitationUiState
 import com.azhidkov.mystuff.InventoryActions
 import com.azhidkov.mystuff.InventoryUiState
 import com.azhidkov.mystuff.Item
-import com.azhidkov.mystuff.ItemCreationStage
+import com.azhidkov.mystuff.ItemFormStage
+import com.azhidkov.mystuff.ItemFormPolicy
 import com.azhidkov.mystuff.R
 import java.time.Duration
 import java.time.Instant
@@ -70,16 +71,16 @@ fun HouseholdRootScreen(
     val itemDraft = inventoryState.itemDraft
     if (itemDraft != null) {
         when (itemDraft.stage) {
-            ItemCreationStage.CameraPermission,
-            ItemCreationStage.Camera,
+            ItemFormStage.CameraPermission,
+            ItemFormStage.Camera,
             -> CameraCaptureStep(itemDraft.stage, inventoryActions)
 
-            ItemCreationStage.Crop -> CropPhotoScreen(
+            ItemFormStage.Crop -> CropPhotoScreen(
                 photo = requireNotNull(itemDraft.photo),
                 actions = inventoryActions,
             )
 
-            ItemCreationStage.Details -> AddItemScreen(
+            ItemFormStage.Details -> AddItemScreen(
                 state = inventoryState,
                 actions = inventoryActions,
             )
@@ -295,6 +296,7 @@ private fun AddItemScreen(
 ) {
     val draft = requireNotNull(state.itemDraft)
     val editing = draft.editingItemId != null
+    val formEnabled = !state.operationInProgress && !draft.saveSucceeded
     val storedPhotoItem = draft.editingItemId
         ?.takeIf(state.inventory::contains)
         ?.let(state.inventory::item)
@@ -310,10 +312,14 @@ private fun AddItemScreen(
                 },
                 navigationIcon = {
                     TextButton(
-                        onClick = actions::cancelAddItem,
+                        onClick = actions::closeItemForm,
                         enabled = !state.operationInProgress,
                     ) {
-                        Text(stringResource(R.string.cancel))
+                        Text(
+                            stringResource(
+                                if (draft.saveSucceeded) R.string.done else R.string.cancel,
+                            ),
+                        )
                     }
                 },
             )
@@ -362,7 +368,7 @@ private fun AddItemScreen(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(
                         onClick = actions::beginReplaceItemPhoto,
-                        enabled = !state.operationInProgress,
+                        enabled = formEnabled,
                     ) {
                         Text(
                             stringResource(
@@ -380,7 +386,7 @@ private fun AddItemScreen(
                     if (draft.photo != null || storedPhotoItem?.photoUrl != null) {
                         TextButton(
                             onClick = actions::removeItemPhoto,
-                            enabled = !state.operationInProgress,
+                            enabled = formEnabled,
                         ) {
                             Text(stringResource(R.string.remove_photo))
                         }
@@ -392,7 +398,7 @@ private fun AddItemScreen(
                     value = draft.name,
                     onValueChange = actions::changeItemName,
                     modifier = Modifier.fillMaxWidth(),
-                    enabled = !state.operationInProgress,
+                    enabled = formEnabled,
                     singleLine = true,
                     label = { Text(stringResource(R.string.item_name)) },
                     supportingText = {
@@ -406,7 +412,7 @@ private fun AddItemScreen(
                     value = draft.description,
                     onValueChange = actions::changeItemDescription,
                     modifier = Modifier.fillMaxWidth(),
-                    enabled = !state.operationInProgress,
+                    enabled = formEnabled,
                     minLines = 4,
                     label = { Text(stringResource(R.string.item_description)) },
                     supportingText = {
@@ -415,6 +421,7 @@ private fun AddItemScreen(
                                 ?: stringResource(
                                     R.string.item_description_supporting_text,
                                     draft.description.codePointCount(0, draft.description.length),
+                                    ItemFormPolicy.MAX_DESCRIPTION_LENGTH,
                                 ),
                         )
                     },
@@ -437,7 +444,7 @@ private fun AddItemScreen(
                     Text(tag, style = MaterialTheme.typography.bodyLarge)
                     TextButton(
                         onClick = { actions.removeTag(tag) },
-                        enabled = !state.operationInProgress,
+                        enabled = formEnabled,
                     ) {
                         Text(stringResource(R.string.remove_tag))
                     }
@@ -448,11 +455,17 @@ private fun AddItemScreen(
                     value = draft.tagInput,
                     onValueChange = actions::changeTagInput,
                     modifier = Modifier.fillMaxWidth(),
-                    enabled = !state.operationInProgress,
+                    enabled = formEnabled,
                     singleLine = true,
                     label = { Text(stringResource(R.string.item_tag)) },
                     supportingText = {
-                        Text(draft.tagError ?: stringResource(R.string.item_tag_supporting_text))
+                        Text(
+                            draft.tagError ?: stringResource(
+                                R.string.item_tag_supporting_text,
+                                ItemFormPolicy.MAX_TAG_LENGTH,
+                                ItemFormPolicy.MAX_TAG_COUNT,
+                            ),
+                        )
                     },
                     isError = draft.tagError != null,
                 )
@@ -460,7 +473,7 @@ private fun AddItemScreen(
             item {
                 Button(
                     onClick = actions::addTag,
-                    enabled = !state.operationInProgress && draft.tags.size < 20,
+                    enabled = formEnabled && draft.tags.size < ItemFormPolicy.MAX_TAG_COUNT,
                 ) {
                     Text(stringResource(R.string.add_tag))
                 }
@@ -475,7 +488,7 @@ private fun AddItemScreen(
                 items(state.tagSuggestions, key = { "suggested-tag:$it" }) { suggestion ->
                     TextButton(
                         onClick = { actions.addSuggestedTag(suggestion) },
-                        enabled = !state.operationInProgress,
+                        enabled = formEnabled,
                     ) {
                         Text(suggestion)
                     }
@@ -489,15 +502,29 @@ private fun AddItemScreen(
                     )
                 }
             }
+            state.successMessage?.let { success ->
+                item {
+                    Text(
+                        text = success,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
             item {
                 Button(
-                    onClick = actions::saveItem,
+                    onClick = if (draft.saveSucceeded) {
+                        actions::closeItemForm
+                    } else {
+                        actions::saveItem
+                    },
                     enabled = !state.operationInProgress,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(
                         if (state.operationInProgress) {
                             stringResource(R.string.saving_item)
+                        } else if (draft.saveSucceeded) {
+                            stringResource(R.string.done)
                         } else {
                             stringResource(R.string.save_item)
                         },

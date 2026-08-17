@@ -35,7 +35,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import com.azhidkov.mystuff.InventoryActions
-import com.azhidkov.mystuff.ItemCreationStage
+import com.azhidkov.mystuff.ItemFormStage
 import com.azhidkov.mystuff.ItemPhoto
 import com.azhidkov.mystuff.R
 import java.io.File
@@ -43,7 +43,7 @@ import java.util.UUID
 
 @Composable
 internal fun CameraCaptureStep(
-    stage: ItemCreationStage,
+    stage: ItemFormStage,
     actions: InventoryActions,
 ) {
     val context = LocalContext.current
@@ -65,7 +65,7 @@ internal fun CameraCaptureStep(
 
     LaunchedEffect(stage) {
         when (stage) {
-            ItemCreationStage.CameraPermission -> {
+            ItemFormStage.CameraPermission -> {
                 val cameraAvailable = context.packageManager.hasSystemFeature(
                     PackageManager.FEATURE_CAMERA_ANY,
                 )
@@ -76,7 +76,7 @@ internal fun CameraCaptureStep(
                 }
             }
 
-            ItemCreationStage.Camera -> {
+            ItemFormStage.Camera -> {
                 runCatching {
                     createTemporaryPhotoUri(context).also { uri ->
                         pendingPhotoUri = uri
@@ -92,7 +92,7 @@ internal fun CameraCaptureStep(
     ItemCreationMessageScreen(
         title = stringResource(R.string.opening_camera),
         body = stringResource(R.string.opening_camera_body),
-        onCancel = actions::cancelAddItem,
+        onCancel = actions::closeItemForm,
     )
 }
 

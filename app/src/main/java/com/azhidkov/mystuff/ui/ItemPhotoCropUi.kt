@@ -75,7 +75,7 @@ internal fun CropPhotoScreen(
             TopAppBar(
                 title = { Text(stringResource(R.string.crop_photo)) },
                 navigationIcon = {
-                    TextButton(onClick = actions::cancelAddItem, enabled = !cropping) {
+                    TextButton(onClick = actions::closeItemForm, enabled = !cropping) {
                         Text(stringResource(R.string.cancel))
                     }
                 },

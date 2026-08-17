@@ -70,20 +70,19 @@ class FirebaseInventoryGateway internal constructor(
     ) {
         val replacementLocations = (photoUpdate as? ItemPhotoUpdate.Replaced)
             ?.let { photoStore.locations(householdId, item.id) }
+        val (photoUrl, photoThumbnailUrl) = when (photoUpdate) {
+            ItemPhotoUpdate.Unchanged -> item.photoUrl to item.photoThumbnailUrl
+            ItemPhotoUpdate.Removed -> null to null
+            is ItemPhotoUpdate.Replaced -> requireNotNull(replacementLocations).let {
+                it.full to it.thumbnail
+            }
+        }
         val updated = item.copy(
             name = details.name,
             description = details.description,
             tags = details.tags,
-            photoUrl = when (photoUpdate) {
-                ItemPhotoUpdate.Unchanged -> item.photoUrl
-                ItemPhotoUpdate.Removed -> null
-                is ItemPhotoUpdate.Replaced -> replacementLocations?.full
-            },
-            photoThumbnailUrl = when (photoUpdate) {
-                ItemPhotoUpdate.Unchanged -> item.photoThumbnailUrl
-                ItemPhotoUpdate.Removed -> null
-                is ItemPhotoUpdate.Replaced -> replacementLocations?.thumbnail
-            },
+            photoUrl = photoUrl,
+            photoThumbnailUrl = photoThumbnailUrl,
         )
         val data = mapOf(
             NAME to updated.name,
@@ -91,6 +90,7 @@ class FirebaseInventoryGateway internal constructor(
             PHOTO_THUMBNAIL_URL to updated.photoThumbnailUrl,
             DESCRIPTION to updated.description,
             TAGS to updated.tags,
+            TAG_KEYS to details.tagKeys(),
             UPDATED_AT to store.serverTimestamp,
             UPDATED_BY_ID to updater.id,
             UPDATED_BY_DISPLAY_NAME to updater.attributionDisplayName(),
@@ -139,6 +139,7 @@ class FirebaseInventoryGateway internal constructor(
             PHOTO_THUMBNAIL_URL to photoLocations?.thumbnail,
             DESCRIPTION to item.description,
             TAGS to item.tags,
+            TAG_KEYS to details.tagKeys(),
             CREATED_AT to store.serverTimestamp,
             UPDATED_AT to store.serverTimestamp,
             CREATED_BY_ID to creator.id,
@@ -308,6 +309,7 @@ private const val PHOTO_URL = "photoUrl"
 private const val PHOTO_THUMBNAIL_URL = "photoThumbnailUrl"
 private const val DESCRIPTION = "description"
 private const val TAGS = "tags"
+private const val TAG_KEYS = "tagKeys"
 private const val CREATED_AT = "createdAt"
 private const val UPDATED_AT = "updatedAt"
 private const val CREATED_BY_ID = "createdById"

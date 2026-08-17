@@ -24,13 +24,14 @@
     <string name="no_child_items">No Child Items yet.</string>
     <string name="up_to_parent_item">Up</string>
     <string name="cancel">Cancel</string>
+    <string name="done">Done</string>
     <string name="item_name">Item name</string>
     <string name="item_name_supporting_text">1–100 characters</string>
     <string name="item_description">Description (optional)</string>
-    <string name="item_description_supporting_text">%1$d/2,000 characters</string>
+    <string name="item_description_supporting_text">%1$d/%2$d characters</string>
     <string name="item_tags">Tags (optional)</string>
     <string name="item_tag">New Tag</string>
-    <string name="item_tag_supporting_text">1–40 characters; up to 20 Tags</string>
+    <string name="item_tag_supporting_text">1–%1$d characters; up to %2$d Tags</string>
     <string name="add_tag">Add Tag</string>
     <string name="remove_tag">Remove</string>
     <string name="existing_household_tags">Existing Household Tags</string>

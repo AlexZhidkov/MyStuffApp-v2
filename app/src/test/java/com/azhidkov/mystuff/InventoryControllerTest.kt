@@ -12,11 +12,11 @@ class InventoryControllerTest {
         val controller = InventoryController(household(), identity(), FakeInventoryGateway(inventory()))
 
         controller.beginAddItem()
-        assertEquals(ItemCreationStage.CameraPermission, controller.state.itemCreationStage)
+        assertEquals(ItemFormStage.CameraPermission, controller.state.itemFormStage)
 
         controller.resolveCameraPermission(granted = false)
 
-        assertEquals(ItemCreationStage.Details, controller.state.itemCreationStage)
+        assertEquals(ItemFormStage.Details, controller.state.itemFormStage)
         assertNull(controller.state.itemDraft?.photo)
     }
 
@@ -27,7 +27,7 @@ class InventoryControllerTest {
         controller.beginAddItem()
         controller.cameraUnavailable()
 
-        assertEquals(ItemCreationStage.Details, controller.state.itemCreationStage)
+        assertEquals(ItemFormStage.Details, controller.state.itemFormStage)
         assertNull(controller.state.itemDraft?.photo)
     }
 
@@ -37,11 +37,11 @@ class InventoryControllerTest {
 
         controller.beginAddItem()
         controller.resolveCameraPermission(granted = true)
-        assertEquals(ItemCreationStage.Camera, controller.state.itemCreationStage)
+        assertEquals(ItemFormStage.Camera, controller.state.itemFormStage)
 
         controller.photoCaptureFailed()
 
-        assertEquals(ItemCreationStage.Details, controller.state.itemCreationStage)
+        assertEquals(ItemFormStage.Details, controller.state.itemFormStage)
         assertNull(controller.state.itemDraft?.photo)
     }
 
@@ -53,12 +53,12 @@ class InventoryControllerTest {
         controller.resolveCameraPermission(granted = true)
         controller.photoCaptured(ItemPhoto("content://mystuff/captured.jpg"))
 
-        assertEquals(ItemCreationStage.Crop, controller.state.itemCreationStage)
+        assertEquals(ItemFormStage.Crop, controller.state.itemFormStage)
         assertEquals("content://mystuff/captured.jpg", controller.state.itemDraft?.photo?.uri)
 
         controller.retakePhoto()
 
-        assertEquals(ItemCreationStage.Camera, controller.state.itemCreationStage)
+        assertEquals(ItemFormStage.Camera, controller.state.itemFormStage)
         assertNull(controller.state.itemDraft?.photo)
     }
 
@@ -76,7 +76,7 @@ class InventoryControllerTest {
             ),
         )
 
-        assertEquals(ItemCreationStage.Details, controller.state.itemCreationStage)
+        assertEquals(ItemFormStage.Details, controller.state.itemFormStage)
         assertEquals("content://mystuff/cropped.webp", controller.state.itemDraft?.photo?.uri)
     }
 
@@ -89,7 +89,7 @@ class InventoryControllerTest {
 
         controller.continueWithoutPhoto()
 
-        assertEquals(ItemCreationStage.Details, controller.state.itemCreationStage)
+        assertEquals(ItemFormStage.Details, controller.state.itemFormStage)
         assertNull(controller.state.itemDraft?.photo)
     }
 
@@ -171,7 +171,7 @@ class InventoryControllerTest {
 
         controller.beginAddItem()
         assertEquals("household-1", controller.state.itemDraft?.parentItemId)
-        controller.cancelAddItem()
+        controller.closeItemForm()
 
         controller.openItem("garage")
         controller.beginAddItem()
@@ -182,6 +182,8 @@ class InventoryControllerTest {
 
         assertEquals("garage", gateway.createdParentItemId)
         assertEquals("Drill", gateway.createdName)
+        assertTrue(controller.state.itemDraft?.saveSucceeded == true)
+        controller.closeItemForm()
         assertNull(controller.state.itemDraft)
         assertEquals("garage", controller.state.selectedItem.id)
         assertEquals(listOf("Drill"), controller.state.childItems.map(Item::name))
@@ -218,6 +220,7 @@ class InventoryControllerTest {
             controller.beginAddItem()
             controller.changeItemName("Box")
             controller.saveItem()
+            controller.closeItemForm()
         }
 
         assertEquals(listOf("Box", "Box"), controller.state.childItems.map(Item::name))
@@ -306,6 +309,21 @@ class InventoryControllerTest {
     }
 
     @Test
+    fun `Tag comparison uses Unicode caseless matching`() {
+        val controller = InventoryController(household(), identity(), FakeInventoryGateway(inventory()))
+        controller.beginAddItem()
+        controller.cameraUnavailable()
+
+        controller.changeTagInput("ς")
+        controller.addTag()
+        controller.changeTagInput("σ")
+        controller.addTag()
+
+        assertEquals(listOf("ς"), controller.state.itemDraft?.tags)
+        assertEquals("That Tag is already on this Item.", controller.state.itemDraft?.tagError)
+    }
+
+    @Test
     fun `failed Item edit keeps every field open and can be retried successfully`() {
         val household = household()
         val existing = item(
@@ -346,12 +364,14 @@ class InventoryControllerTest {
 
         controller.saveItem()
 
-        assertNull(controller.state.itemDraft)
+        assertTrue(controller.state.itemDraft?.saveSucceeded == true)
         assertEquals("Hammer Drill", controller.state.selectedItem.name)
         assertEquals("New description", controller.state.selectedItem.description)
         assertEquals(listOf("Power Tools"), controller.state.selectedItem.tags)
         assertEquals("Item saved.", controller.state.successMessage)
         assertEquals(2, gateway.updateAttempts)
+        controller.closeItemForm()
+        assertNull(controller.state.itemDraft)
     }
 
     @Test
@@ -370,8 +390,10 @@ class InventoryControllerTest {
         gateway.completeCreate()
 
         assertFalse(controller.state.operationInProgress)
-        assertNull(controller.state.itemDraft)
+        assertTrue(controller.state.itemDraft?.saveSucceeded == true)
         assertEquals("Item saved.", controller.state.successMessage)
+        controller.closeItemForm()
+        assertNull(controller.state.itemDraft)
     }
 
     @Test(expected = InvalidInventoryException::class)

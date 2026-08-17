@@ -81,9 +81,7 @@ fun HouseholdRootScreen(
 
             ItemCreationStage.Details -> AddItemScreen(
                 state = inventoryState,
-                onCancel = inventoryActions::cancelAddItem,
-                onChangeName = inventoryActions::changeItemName,
-                onSave = inventoryActions::saveItem,
+                actions = inventoryActions,
             )
         }
         return
@@ -166,6 +164,30 @@ fun HouseholdRootScreen(
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
+            inventoryState.selectedItem.description?.let { description ->
+                item {
+                    Text(
+                        text = description,
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                }
+            }
+            if (inventoryState.selectedItem.tags.isNotEmpty()) {
+                item {
+                    Text(
+                        text = inventoryState.selectedItem.tags.joinToString(" · "),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.secondary,
+                    )
+                }
+            }
+            if (!isHome) {
+                item {
+                    TextButton(onClick = inventoryActions::beginEditItem) {
+                        Text(stringResource(R.string.edit_item))
+                    }
+                }
+            }
             item {
                 Button(
                     onClick = inventoryActions::beginAddItem,
@@ -229,6 +251,15 @@ fun HouseholdRootScreen(
                     )
                 }
             }
+            inventoryState.successMessage?.let { success ->
+                item {
+                    Text(
+                        text = success,
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
             if (isHome && invitationState.canManage) {
                 item { Spacer(Modifier.height(16.dp)) }
                 item {
@@ -260,18 +291,28 @@ fun HouseholdRootScreen(
 @Composable
 private fun AddItemScreen(
     state: InventoryUiState,
-    onCancel: () -> Unit,
-    onChangeName: (String) -> Unit,
-    onSave: () -> Unit,
+    actions: InventoryActions,
 ) {
     val draft = requireNotNull(state.itemDraft)
+    val editing = draft.editingItemId != null
+    val storedPhotoItem = draft.editingItemId
+        ?.takeIf(state.inventory::contains)
+        ?.let(state.inventory::item)
+        ?.takeUnless { draft.photoRemoved || draft.photo != null }
     Scaffold(
         contentWindowInsets = WindowInsets.safeDrawing,
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.add_item)) },
+                title = {
+                    Text(
+                        stringResource(if (editing) R.string.edit_item else R.string.add_item),
+                    )
+                },
                 navigationIcon = {
-                    TextButton(onClick = onCancel, enabled = !state.operationInProgress) {
+                    TextButton(
+                        onClick = actions::cancelAddItem,
+                        enabled = !state.operationInProgress,
+                    ) {
                         Text(stringResource(R.string.cancel))
                     }
                 },
@@ -304,10 +345,52 @@ private fun AddItemScreen(
                     )
                 }
             }
+            storedPhotoItem?.let { itemWithPhoto ->
+                if (storedPhotoLocation(itemWithPhoto, ItemPhotoPresentation.Detail) != null) {
+                    item {
+                        StoredItemPhoto(
+                            item = itemWithPhoto,
+                            presentation = ItemPhotoPresentation.Detail,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(200.dp),
+                        )
+                    }
+                }
+            }
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(
+                        onClick = actions::beginReplaceItemPhoto,
+                        enabled = !state.operationInProgress,
+                    ) {
+                        Text(
+                            stringResource(
+                                if (
+                                    draft.photo != null ||
+                                    storedPhotoItem?.photoUrl != null
+                                ) {
+                                    R.string.replace_photo
+                                } else {
+                                    R.string.add_photo
+                                },
+                            ),
+                        )
+                    }
+                    if (draft.photo != null || storedPhotoItem?.photoUrl != null) {
+                        TextButton(
+                            onClick = actions::removeItemPhoto,
+                            enabled = !state.operationInProgress,
+                        ) {
+                            Text(stringResource(R.string.remove_photo))
+                        }
+                    }
+                }
+            }
             item {
                 OutlinedTextField(
                     value = draft.name,
-                    onValueChange = onChangeName,
+                    onValueChange = actions::changeItemName,
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !state.operationInProgress,
                     singleLine = true,
@@ -317,6 +400,86 @@ private fun AddItemScreen(
                     },
                     isError = draft.nameError != null,
                 )
+            }
+            item {
+                OutlinedTextField(
+                    value = draft.description,
+                    onValueChange = actions::changeItemDescription,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !state.operationInProgress,
+                    minLines = 4,
+                    label = { Text(stringResource(R.string.item_description)) },
+                    supportingText = {
+                        Text(
+                            draft.descriptionError
+                                ?: stringResource(
+                                    R.string.item_description_supporting_text,
+                                    draft.description.codePointCount(0, draft.description.length),
+                                ),
+                        )
+                    },
+                    isError = draft.descriptionError != null,
+                )
+            }
+            item {
+                Text(
+                    text = stringResource(R.string.item_tags),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            items(draft.tags, key = { "selected-tag:$it" }) { tag ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(tag, style = MaterialTheme.typography.bodyLarge)
+                    TextButton(
+                        onClick = { actions.removeTag(tag) },
+                        enabled = !state.operationInProgress,
+                    ) {
+                        Text(stringResource(R.string.remove_tag))
+                    }
+                }
+            }
+            item {
+                OutlinedTextField(
+                    value = draft.tagInput,
+                    onValueChange = actions::changeTagInput,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !state.operationInProgress,
+                    singleLine = true,
+                    label = { Text(stringResource(R.string.item_tag)) },
+                    supportingText = {
+                        Text(draft.tagError ?: stringResource(R.string.item_tag_supporting_text))
+                    },
+                    isError = draft.tagError != null,
+                )
+            }
+            item {
+                Button(
+                    onClick = actions::addTag,
+                    enabled = !state.operationInProgress && draft.tags.size < 20,
+                ) {
+                    Text(stringResource(R.string.add_tag))
+                }
+            }
+            if (state.tagSuggestions.isNotEmpty()) {
+                item {
+                    Text(
+                        text = stringResource(R.string.existing_household_tags),
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                }
+                items(state.tagSuggestions, key = { "suggested-tag:$it" }) { suggestion ->
+                    TextButton(
+                        onClick = { actions.addSuggestedTag(suggestion) },
+                        enabled = !state.operationInProgress,
+                    ) {
+                        Text(suggestion)
+                    }
+                }
             }
             state.errorMessage?.let { error ->
                 item {
@@ -328,7 +491,7 @@ private fun AddItemScreen(
             }
             item {
                 Button(
-                    onClick = onSave,
+                    onClick = actions::saveItem,
                     enabled = !state.operationInProgress,
                     modifier = Modifier.fillMaxWidth(),
                 ) {

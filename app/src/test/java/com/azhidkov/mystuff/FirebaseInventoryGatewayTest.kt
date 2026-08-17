@@ -1,6 +1,7 @@
 package com.azhidkov.mystuff
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class FirebaseInventoryGatewayTest {
@@ -15,7 +16,11 @@ class FirebaseInventoryGatewayTest {
             householdId = "household-1",
             parentItemId = "garage",
             creator = inventoryIdentity(),
-            name = "Drill",
+            details = ItemDetails(
+                name = "Drill",
+                description = "18V cordless",
+                tags = listOf("Power Tools"),
+            ),
             photo = ItemPhoto(
                 uri = "content://mystuff/cropped.webp",
                 thumbnailUri = "content://mystuff/cropped-thumb.webp",
@@ -63,7 +68,11 @@ class FirebaseInventoryGatewayTest {
             householdId = "household-1",
             parentItemId = "garage",
             creator = inventoryIdentity(),
-            name = "Drill",
+            details = ItemDetails(
+                name = "Drill",
+                description = "18V cordless",
+                tags = listOf("Power Tools"),
+            ),
             photo = ItemPhoto("content://full.webp", "content://thumb.webp"),
         ) { result = it }
 
@@ -106,7 +115,11 @@ class FirebaseInventoryGatewayTest {
             householdId = "household-1",
             parentItemId = "garage",
             creator = inventoryIdentity(),
-            name = "Drill",
+            details = ItemDetails(
+                name = "Drill",
+                description = "18V cordless",
+                tags = listOf("Power Tools"),
+            ),
             photo = null,
         ) { result = it }
 
@@ -118,8 +131,8 @@ class FirebaseInventoryGatewayTest {
                 "parentItemId" to "garage",
                 "photoUrl" to null,
                 "photoThumbnailUrl" to null,
-                "description" to null,
-                "tags" to emptyList<String>(),
+                "description" to "18V cordless",
+                "tags" to listOf("Power Tools"),
                 "createdAt" to timestamp,
                 "updatedAt" to timestamp,
                 "createdById" to "member-1",
@@ -130,11 +143,116 @@ class FirebaseInventoryGatewayTest {
             store.createdData,
         )
         assertEquals(
-            inventoryItem("item-1", "Drill", "garage"),
+            inventoryItem(
+                "item-1",
+                "Drill",
+                "garage",
+                description = "18V cordless",
+                tags = listOf("Power Tools"),
+            ),
             result?.getOrThrow(),
         )
     }
+
+    @Test
+    fun `updating an Item writes editable details and last-updating Member attribution`() {
+        val timestamp = Any()
+        val store = FakeInventoryDocumentStore(serverTimestamp = timestamp)
+        val gateway = FirebaseInventoryGateway(store, FakeInventoryPhotoStore())
+        var result: Result<Item>? = null
+
+        gateway.updateItem(
+            householdId = "household-1",
+            item = inventoryItem("item-1", "Drill", "garage"),
+            updater = inventoryIdentity().copy(id = "member-2", displayName = "Sam"),
+            details = ItemDetails(
+                name = "Hammer Drill",
+                description = "18V cordless",
+                tags = listOf("Power Tools"),
+            ),
+            photoUpdate = ItemPhotoUpdate.Unchanged,
+        ) { result = it }
+
+        assertEquals(
+            mapOf(
+                "name" to "Hammer Drill",
+                "photoUrl" to null,
+                "photoThumbnailUrl" to null,
+                "description" to "18V cordless",
+                "tags" to listOf("Power Tools"),
+                "updatedAt" to timestamp,
+                "updatedById" to "member-2",
+                "updatedByDisplayName" to "Sam",
+            ),
+            store.updatedData,
+        )
+        assertEquals("Hammer Drill", result?.getOrThrow()?.name)
+        assertEquals(listOf("Power Tools"), result?.getOrThrow()?.tags)
+    }
+
+    @Test
+    fun `replacing an Item photo supersedes both stored variants`() {
+        val store = FakeInventoryDocumentStore()
+        val photos = FakeInventoryPhotoStore()
+        val gateway = FirebaseInventoryGateway(store, photos)
+        var result: Result<Item>? = null
+
+        gateway.updateItem(
+            householdId = "household-1",
+            item = inventoryItem(
+                "item-1",
+                "Drill",
+                "garage",
+                photoUrl = "gs://old/full.webp",
+                photoThumbnailUrl = "gs://old/thumb.webp",
+            ),
+            updater = inventoryIdentity(),
+            details = inventoryDetails(),
+            photoUpdate = ItemPhotoUpdate.Replaced(
+                ItemPhoto("content://new.webp", "content://new-thumb.webp"),
+            ),
+        ) { result = it }
+
+        assertEquals(
+            "gs://mystuff/households/household-1/items/item-1.webp",
+            result?.getOrThrow()?.photoUrl,
+        )
+        assertEquals(2, photos.uploads.size)
+        assertEquals("content://new.webp", photos.uploads.first().sourceUri)
+    }
+
+    @Test
+    fun `removing an Item photo clears its locations and deletes both stored variants`() {
+        val store = FakeInventoryDocumentStore()
+        val photos = FakeInventoryPhotoStore()
+        val gateway = FirebaseInventoryGateway(store, photos)
+        var result: Result<Item>? = null
+
+        gateway.updateItem(
+            householdId = "household-1",
+            item = inventoryItem(
+                "item-1",
+                "Drill",
+                "garage",
+                photoUrl = "gs://old/full.webp",
+                photoThumbnailUrl = "gs://old/thumb.webp",
+            ),
+            updater = inventoryIdentity(),
+            details = inventoryDetails(),
+            photoUpdate = ItemPhotoUpdate.Removed,
+        ) { result = it }
+
+        assertNull(result?.getOrThrow()?.photoUrl)
+        assertNull(result?.getOrThrow()?.photoThumbnailUrl)
+        assertEquals(listOf("item-1"), photos.deletedItemIds)
+    }
 }
+
+private fun inventoryDetails() = ItemDetails(
+    name = "Drill",
+    description = null,
+    tags = emptyList(),
+)
 
 private data class QueuedPhotoUpload(
     val variant: ItemPhotoVariant,
@@ -146,6 +264,7 @@ private class FakeInventoryPhotoStore(
     private val enqueueFailure: Throwable? = null,
 ) : InventoryPhotoStore {
     val uploads = mutableListOf<QueuedPhotoUpload>()
+    val deletedItemIds = mutableListOf<String>()
 
     override fun locations(householdId: String, itemId: String) = ItemPhotoLocations(
         full = "gs://mystuff/households/$householdId/items/$itemId.webp",
@@ -171,7 +290,7 @@ private class FakeInventoryPhotoStore(
     }
 
     override fun deleteInBackground(householdId: String, itemIds: Collection<String>) {
-        error("Not used")
+        deletedItemIds += itemIds
     }
 }
 
@@ -182,6 +301,8 @@ private class FakeInventoryDocumentStore(
     var createdItemId: String? = null
         private set
     var createdData: Map<String, Any?>? = null
+        private set
+    var updatedData: Map<String, Any?>? = null
         private set
 
     override fun observeItems(
@@ -202,6 +323,16 @@ private class FakeInventoryDocumentStore(
     ) {
         createdItemId = itemId
         createdData = data
+        onResult(Result.success(Unit))
+    }
+
+    override fun updateItem(
+        householdId: String,
+        itemId: String,
+        data: Map<String, Any?>,
+        onResult: (Result<Unit>) -> Unit,
+    ) {
+        updatedData = data
         onResult(Result.success(Unit))
     }
 }
@@ -235,12 +366,20 @@ private fun inventoryIdentity() = AuthenticatedIdentity(
     email = "alex@example.com",
 )
 
-private fun inventoryItem(id: String, name: String, parentItemId: String?) = Item(
+private fun inventoryItem(
+    id: String,
+    name: String,
+    parentItemId: String?,
+    photoUrl: String? = null,
+    photoThumbnailUrl: String? = null,
+    description: String? = null,
+    tags: List<String> = emptyList(),
+) = Item(
     id = id,
     name = name,
     parentItemId = parentItemId,
-    photoUrl = null,
-    photoThumbnailUrl = null,
-    description = null,
-    tags = emptyList(),
+    photoUrl = photoUrl,
+    photoThumbnailUrl = photoThumbnailUrl,
+    description = description,
+    tags = tags,
 )

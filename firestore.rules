@@ -145,6 +145,44 @@ service cloud.firestore {
         );
     }
 
+    function validDescription(description) {
+      return description == null
+        || (
+          description is string
+          && description.matches('^(.|\\n){0,1000}(.|\\n){0,1000}$')
+        );
+    }
+
+    function validTag(tag) {
+      return tag is string
+        && tag.matches('^[^\\s\\p{Z}](.{0,38}[^\\s\\p{Z}])?$');
+    }
+
+    function validTags(tags) {
+      return tags is list
+        && tags.size() <= 20
+        && (tags.size() < 1 || validTag(tags[0]))
+        && (tags.size() < 2 || validTag(tags[1]))
+        && (tags.size() < 3 || validTag(tags[2]))
+        && (tags.size() < 4 || validTag(tags[3]))
+        && (tags.size() < 5 || validTag(tags[4]))
+        && (tags.size() < 6 || validTag(tags[5]))
+        && (tags.size() < 7 || validTag(tags[6]))
+        && (tags.size() < 8 || validTag(tags[7]))
+        && (tags.size() < 9 || validTag(tags[8]))
+        && (tags.size() < 10 || validTag(tags[9]))
+        && (tags.size() < 11 || validTag(tags[10]))
+        && (tags.size() < 12 || validTag(tags[11]))
+        && (tags.size() < 13 || validTag(tags[12]))
+        && (tags.size() < 14 || validTag(tags[13]))
+        && (tags.size() < 15 || validTag(tags[14]))
+        && (tags.size() < 16 || validTag(tags[15]))
+        && (tags.size() < 17 || validTag(tags[16]))
+        && (tags.size() < 18 || validTag(tags[17]))
+        && (tags.size() < 19 || validTag(tags[18]))
+        && (tags.size() < 20 || validTag(tags[19]));
+    }
+
     function validHouseholdCreate(householdId) {
       return request.resource.data.keys().hasOnly([
           'name', 'ownerMemberId', 'rootItemId', 'createdAt'
@@ -196,9 +234,8 @@ service cloud.firestore {
         && request.resource.data.parentItemId is string
         && exists(itemPath(householdId, request.resource.data.parentItemId))
         && validPhotoLocations(request.resource.data)
-        && request.resource.data.description == null
-        && request.resource.data.tags is list
-        && request.resource.data.tags.size() == 0
+        && validDescription(request.resource.data.description)
+        && validTags(request.resource.data.tags)
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedAt == request.time
         && request.resource.data.createdById == request.auth.uid
@@ -206,6 +243,23 @@ service cloud.firestore {
         && request.resource.data.updatedById == request.auth.uid
         && request.resource.data.updatedByDisplayName
           == request.resource.data.createdByDisplayName
+        && isMember(householdId);
+    }
+
+    function validChildItemUpdate(householdId, itemId) {
+      return itemId != householdId
+        && resource.data.parentItemId is string
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'name', 'photoUrl', 'photoThumbnailUrl', 'description', 'tags',
+          'updatedAt', 'updatedById', 'updatedByDisplayName'
+        ])
+        && validName(request.resource.data.name)
+        && validPhotoLocations(request.resource.data)
+        && validDescription(request.resource.data.description)
+        && validTags(request.resource.data.tags)
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.updatedById == request.auth.uid
+        && request.resource.data.updatedByDisplayName is string
         && isMember(householdId);
     }
 
@@ -252,7 +306,9 @@ service cloud.firestore {
             validRootItemCreate(householdId, itemId)
             || validChildItemCreate(householdId, itemId)
           );
-        allow update, delete: if false;
+        allow update: if signedIn()
+          && validChildItemUpdate(householdId, itemId);
+        allow delete: if false;
       }
     }
   }

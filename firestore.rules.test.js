@@ -346,6 +346,81 @@ test("Household Member can create a Child Item", async () => {
   ));
 });
 
+test("Child Item accepts bounded descriptions and trimmed Tags", async () => {
+  await seedHousehold();
+  const database = testEnvironment.authenticatedContext("member-1").firestore();
+  const validReference = doc(database, "households/household-1/items/item-1");
+
+  await assertSucceeds(setDoc(
+    validReference,
+    childItemData("Drill", "household-1", {
+      description: "🏠".repeat(2000),
+      tags: ["Power Tools", "DIY"],
+    }),
+  ));
+  await assertFails(setDoc(
+    doc(database, "households/household-1/items/item-2"),
+    childItemData("Saw", "household-1", { description: "x".repeat(2001) }),
+  ));
+  await assertFails(setDoc(
+    doc(database, "households/household-1/items/item-3"),
+    childItemData("Saw", "household-1", { tags: [" Power Tools"] }),
+  ));
+  await assertFails(setDoc(
+    doc(database, "households/household-1/items/item-4"),
+    childItemData("Saw", "household-1", {
+      tags: Array.from({ length: 21 }, (_, index) => `Tag ${index}`),
+    }),
+  ));
+});
+
+test("Household Member can update Child Item details with fresh attribution", async () => {
+  await seedHousehold();
+  await seedHouseholdMember();
+  await testEnvironment.withSecurityRulesDisabled(async (context) => {
+    await setDoc(
+      doc(context.firestore(), "households/household-1/items/item-1"),
+      childItemData("Drill", "household-1"),
+    );
+  });
+  const database = testEnvironment.authenticatedContext("member-2").firestore();
+  const reference = doc(database, "households/household-1/items/item-1");
+
+  await assertSucceeds(updateDoc(reference, {
+    name: "Hammer Drill",
+    description: "18V cordless",
+    tags: ["Power Tools"],
+    photoUrl: null,
+    photoThumbnailUrl: null,
+    updatedAt: serverTimestamp(),
+    updatedById: "member-2",
+    updatedByDisplayName: "Sam",
+  }));
+
+  const updated = (await getDoc(reference)).data();
+  assert.equal(updated.createdById, "member-1");
+  assert.equal(updated.updatedById, "member-2");
+});
+
+test("Child Item update cannot change creation attribution Parent Item or root fields", async () => {
+  await seedHousehold();
+  await testEnvironment.withSecurityRulesDisabled(async (context) => {
+    await setDoc(
+      doc(context.firestore(), "households/household-1/items/item-1"),
+      childItemData("Drill", "household-1"),
+    );
+  });
+  const database = testEnvironment.authenticatedContext("member-1").firestore();
+  const childReference = doc(database, "households/household-1/items/item-1");
+
+  await assertFails(updateDoc(childReference, { createdById: "member-2" }));
+  await assertFails(updateDoc(childReference, { parentItemId: "item-1" }));
+  await assertFails(updateDoc(
+    doc(database, "households/household-1/items/household-1"),
+    { description: "Root description" },
+  ));
+});
+
 test("only the Household Owner can create a pending invitation", async () => {
   await seedHousehold();
   await seedHouseholdMember();

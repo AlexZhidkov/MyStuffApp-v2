@@ -32,7 +32,7 @@ class FirebaseInventoryGateway internal constructor(
         householdId: String,
         parentItemId: String,
         creator: AuthenticatedIdentity,
-        name: String,
+        details: ItemDetails,
         photo: ItemPhoto?,
         onResult: (Result<Item>) -> Unit,
     ) {
@@ -43,7 +43,7 @@ class FirebaseInventoryGateway internal constructor(
             parentItemId = parentItemId,
             creator = creator,
             itemId = itemId,
-            name = name,
+            details = details,
             photoLocations = locations,
         ) { result ->
             try {
@@ -60,35 +60,85 @@ class FirebaseInventoryGateway internal constructor(
         }
     }
 
+    override fun updateItem(
+        householdId: String,
+        item: Item,
+        updater: AuthenticatedIdentity,
+        details: ItemDetails,
+        photoUpdate: ItemPhotoUpdate,
+        onResult: (Result<Item>) -> Unit,
+    ) {
+        val replacementLocations = (photoUpdate as? ItemPhotoUpdate.Replaced)
+            ?.let { photoStore.locations(householdId, item.id) }
+        val updated = item.copy(
+            name = details.name,
+            description = details.description,
+            tags = details.tags,
+            photoUrl = when (photoUpdate) {
+                ItemPhotoUpdate.Unchanged -> item.photoUrl
+                ItemPhotoUpdate.Removed -> null
+                is ItemPhotoUpdate.Replaced -> replacementLocations?.full
+            },
+            photoThumbnailUrl = when (photoUpdate) {
+                ItemPhotoUpdate.Unchanged -> item.photoThumbnailUrl
+                ItemPhotoUpdate.Removed -> null
+                is ItemPhotoUpdate.Replaced -> replacementLocations?.thumbnail
+            },
+        )
+        val data = mapOf(
+            NAME to updated.name,
+            PHOTO_URL to updated.photoUrl,
+            PHOTO_THUMBNAIL_URL to updated.photoThumbnailUrl,
+            DESCRIPTION to updated.description,
+            TAGS to updated.tags,
+            UPDATED_AT to store.serverTimestamp,
+            UPDATED_BY_ID to updater.id,
+            UPDATED_BY_DISPLAY_NAME to updater.attributionDisplayName(),
+        )
+        store.updateItem(householdId, item.id, data) { result ->
+            val completed = result.mapCatching {
+                when (photoUpdate) {
+                    ItemPhotoUpdate.Unchanged -> Unit
+                    ItemPhotoUpdate.Removed -> {
+                        photoStore.deleteInBackground(householdId, listOf(item.id))
+                    }
+                    is ItemPhotoUpdate.Replaced -> {
+                        photoStore.uploadInBackground(householdId, item.id, photoUpdate.photo)
+                    }
+                }
+                updated
+            }
+            onResult(completed)
+        }
+    }
+
     private fun createItemDocument(
         householdId: String,
         parentItemId: String,
         creator: AuthenticatedIdentity,
         itemId: String,
-        name: String,
+        details: ItemDetails,
         photoLocations: ItemPhotoLocations?,
         onResult: (Result<Item>) -> Unit,
     ) {
         val item = Item(
             id = itemId,
-            name = name,
+            name = details.name,
             parentItemId = parentItemId,
             photoUrl = photoLocations?.full,
-            description = null,
-            tags = emptyList(),
+            description = details.description,
+            tags = details.tags,
             photoThumbnailUrl = photoLocations?.thumbnail,
         )
-        val displayName = creator.displayName?.takeIf(String::isNotBlank)
-            ?: creator.email?.takeIf(String::isNotBlank)
-            ?: "Household Member"
+        val displayName = creator.attributionDisplayName()
         val data = mapOf(
             HOUSEHOLD_ID to householdId,
             NAME to item.name,
             PARENT_ITEM_ID to parentItemId,
             PHOTO_URL to photoLocations?.full,
             PHOTO_THUMBNAIL_URL to photoLocations?.thumbnail,
-            DESCRIPTION to null,
-            TAGS to emptyList<String>(),
+            DESCRIPTION to item.description,
+            TAGS to item.tags,
             CREATED_AT to store.serverTimestamp,
             UPDATED_AT to store.serverTimestamp,
             CREATED_BY_ID to creator.id,
@@ -170,6 +220,13 @@ internal interface InventoryDocumentStore {
         data: Map<String, Any?>,
         onResult: (Result<Unit>) -> Unit,
     )
+
+    fun updateItem(
+        householdId: String,
+        itemId: String,
+        data: Map<String, Any?>,
+        onResult: (Result<Unit>) -> Unit,
+    )
 }
 
 private class FirestoreInventoryDocumentStore(
@@ -211,6 +268,17 @@ private class FirestoreInventoryDocumentStore(
             .addOnFailureListener { failure -> onResult(Result.failure(failure)) }
     }
 
+    override fun updateItem(
+        householdId: String,
+        itemId: String,
+        data: Map<String, Any?>,
+        onResult: (Result<Unit>) -> Unit,
+    ) {
+        items(householdId).document(itemId).update(data)
+            .addOnSuccessListener { onResult(Result.success(Unit)) }
+            .addOnFailureListener { failure -> onResult(Result.failure(failure)) }
+    }
+
     private fun items(householdId: String) = firestore
         .collection(HOUSEHOLDS)
         .document(householdId)
@@ -225,6 +293,11 @@ private fun Map<String, Any?>.inventoryNullableString(key: String): String? {
     if (value != null && value !is String) throw InvalidInventoryException()
     return value
 }
+
+private fun AuthenticatedIdentity.attributionDisplayName(): String =
+    displayName?.takeIf(String::isNotBlank)
+        ?: email?.takeIf(String::isNotBlank)
+        ?: "Household Member"
 
 private const val HOUSEHOLDS = "households"
 private const val ITEMS = "items"

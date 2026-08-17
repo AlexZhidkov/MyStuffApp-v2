@@ -24,7 +24,6 @@
     <string name="no_child_items">No Child Items yet.</string>
     <string name="up_to_parent_item">Up</string>
     <string name="cancel">Cancel</string>
-    <string name="done">Done</string>
     <string name="item_name">Item name</string>
     <string name="item_name_supporting_text">1–100 characters</string>
     <string name="item_description">Description (optional)</string>

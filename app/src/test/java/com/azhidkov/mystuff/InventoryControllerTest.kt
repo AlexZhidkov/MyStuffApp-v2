@@ -157,7 +157,7 @@ class InventoryControllerTest {
     }
 
     @Test
-    fun `Add item always uses the displayed Item as its Parent Item`() {
+    fun `saved Item returns to its Parent Item details`() {
         val household = household()
         val inventory = Inventory.from(
             household,
@@ -182,8 +182,6 @@ class InventoryControllerTest {
 
         assertEquals("garage", gateway.createdParentItemId)
         assertEquals("Drill", gateway.createdName)
-        assertTrue(controller.state.itemDraft?.saveSucceeded == true)
-        controller.closeItemForm()
         assertNull(controller.state.itemDraft)
         assertEquals("garage", controller.state.selectedItem.id)
         assertEquals(listOf("Drill"), controller.state.childItems.map(Item::name))
@@ -364,18 +362,16 @@ class InventoryControllerTest {
 
         controller.saveItem()
 
-        assertTrue(controller.state.itemDraft?.saveSucceeded == true)
+        assertNull(controller.state.itemDraft)
         assertEquals("Hammer Drill", controller.state.selectedItem.name)
         assertEquals("New description", controller.state.selectedItem.description)
         assertEquals(listOf("Power Tools"), controller.state.selectedItem.tags)
         assertEquals("Item saved.", controller.state.successMessage)
         assertEquals(2, gateway.updateAttempts)
-        controller.closeItemForm()
-        assertNull(controller.state.itemDraft)
     }
 
     @Test
-    fun `Item form reports save progress until creation succeeds`() {
+    fun `Item form reports save progress then returns to details`() {
         val gateway = FakeInventoryGateway(inventory()).apply { deferCreates = true }
         val controller = InventoryController(household(), identity(), gateway)
         controller.beginAddItem()
@@ -390,10 +386,8 @@ class InventoryControllerTest {
         gateway.completeCreate()
 
         assertFalse(controller.state.operationInProgress)
-        assertTrue(controller.state.itemDraft?.saveSucceeded == true)
-        assertEquals("Item saved.", controller.state.successMessage)
-        controller.closeItemForm()
         assertNull(controller.state.itemDraft)
+        assertEquals("Item saved.", controller.state.successMessage)
     }
 
     @Test(expected = InvalidInventoryException::class)

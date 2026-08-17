@@ -296,7 +296,7 @@ private fun ItemFormScreen(
 ) {
     val draft = requireNotNull(state.itemDraft)
     val editing = draft.editingItemId != null
-    val formEnabled = !state.operationInProgress && !draft.saveSucceeded
+    val formEnabled = !state.operationInProgress
     val storedPhotoItem = draft.editingItemId
         ?.takeIf(state.inventory::contains)
         ?.let(state.inventory::item)
@@ -315,11 +315,7 @@ private fun ItemFormScreen(
                         onClick = actions::closeItemForm,
                         enabled = !state.operationInProgress,
                     ) {
-                        Text(
-                            stringResource(
-                                if (draft.saveSucceeded) R.string.done else R.string.cancel,
-                            ),
-                        )
+                        Text(stringResource(R.string.cancel))
                     }
                 },
             )
@@ -512,19 +508,13 @@ private fun ItemFormScreen(
             }
             item {
                 Button(
-                    onClick = if (draft.saveSucceeded) {
-                        actions::closeItemForm
-                    } else {
-                        actions::saveItem
-                    },
+                    onClick = actions::saveItem,
                     enabled = !state.operationInProgress,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(
                         if (state.operationInProgress) {
                             stringResource(R.string.saving_item)
-                        } else if (draft.saveSucceeded) {
-                            stringResource(R.string.done)
                         } else {
                             stringResource(R.string.save_item)
                         },

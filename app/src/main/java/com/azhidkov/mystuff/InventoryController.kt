@@ -92,7 +92,6 @@ data class ItemFormState(
     val tagError: String? = null,
     val editingItemId: String? = null,
     val photoRemoved: Boolean = false,
-    val saveSucceeded: Boolean = false,
 )
 
 data class InventoryUiState(
@@ -215,8 +214,7 @@ class InventoryController(
         val draft = state.itemDraft ?: return
         if (
             draft.stage != ItemFormStage.Details ||
-            state.operationInProgress ||
-            draft.saveSucceeded
+            state.operationInProgress
         ) {
             return
         }
@@ -235,8 +233,7 @@ class InventoryController(
         val draft = state.itemDraft ?: return
         if (
             draft.stage != ItemFormStage.Details ||
-            state.operationInProgress ||
-            draft.saveSucceeded
+            state.operationInProgress
         ) {
             return
         }
@@ -301,13 +298,11 @@ class InventoryController(
 
     override fun changeItemName(name: String) {
         val draft = state.itemDraft ?: return
-        if (draft.saveSucceeded) return
         updateState(state.copy(itemDraft = draft.copy(name = name, nameError = null)))
     }
 
     override fun changeItemDescription(description: String) {
         val draft = state.itemDraft ?: return
-        if (draft.saveSucceeded) return
         updateState(
             state.copy(itemDraft = draft.copy(description = description, descriptionError = null)),
         )
@@ -315,13 +310,11 @@ class InventoryController(
 
     override fun changeTagInput(tag: String) {
         val draft = state.itemDraft ?: return
-        if (draft.saveSucceeded) return
         updateState(state.copy(itemDraft = draft.copy(tagInput = tag, tagError = null)))
     }
 
     override fun addTag() {
         val draft = state.itemDraft ?: return
-        if (draft.saveSucceeded) return
         val tag = draft.tagInput.trimUnicodeWhitespace()
         val tagError = when {
             tag.isEmpty() -> "Enter a Tag."
@@ -351,7 +344,6 @@ class InventoryController(
 
     override fun removeTag(tag: String) {
         val draft = state.itemDraft ?: return
-        if (draft.saveSucceeded) return
         updateState(
             state.copy(
                 itemDraft = draft.copy(
@@ -364,7 +356,7 @@ class InventoryController(
 
     override fun saveItem() {
         val draft = state.itemDraft ?: return
-        if (state.operationInProgress || draft.saveSucceeded) return
+        if (state.operationInProgress) return
         val name = draft.name.trimUnicodeWhitespace()
         val nameError = when {
             name.isEmpty() -> "Enter an Item name."
@@ -417,11 +409,7 @@ class InventoryController(
                         } else {
                             savedItem.id
                         },
-                        itemDraft = draft.copy(
-                            name = details.name,
-                            description = details.description.orEmpty(),
-                            saveSucceeded = true,
-                        ),
+                        itemDraft = null,
                         operationInProgress = false,
                         errorMessage = null,
                         successMessage = "Item saved.",

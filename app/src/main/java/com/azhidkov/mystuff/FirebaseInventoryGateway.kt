@@ -36,6 +36,10 @@ class FirebaseInventoryGateway internal constructor(
         photo: ItemPhoto?,
         onResult: (Result<Item>) -> Unit,
     ) {
+        details.validationFailure()?.let { error ->
+            onResult(Result.failure(IllegalArgumentException(error)))
+            return
+        }
         val itemId = store.newItemId(householdId)
         val locations = photo?.let { photoStore.locations(householdId, itemId) }
         createItemDocument(
@@ -68,21 +72,39 @@ class FirebaseInventoryGateway internal constructor(
         photoUpdate: ItemPhotoUpdate,
         onResult: (Result<Item>) -> Unit,
     ) {
-        val replacementLocations = (photoUpdate as? ItemPhotoUpdate.Replaced)
-            ?.let { photoStore.locations(householdId, item.id) }
-        val (photoUrl, photoThumbnailUrl) = when (photoUpdate) {
-            ItemPhotoUpdate.Unchanged -> item.photoUrl to item.photoThumbnailUrl
-            ItemPhotoUpdate.Removed -> null to null
-            is ItemPhotoUpdate.Replaced -> requireNotNull(replacementLocations).let {
-                it.full to it.thumbnail
+        details.validationFailure()?.let { error ->
+            onResult(Result.failure(IllegalArgumentException(error)))
+            return
+        }
+        val photoPlan = when (photoUpdate) {
+            ItemPhotoUpdate.Unchanged -> ItemPhotoUpdatePlan(
+                full = item.photoUrl,
+                thumbnail = item.photoThumbnailUrl,
+                afterDocumentUpdate = {},
+            )
+            ItemPhotoUpdate.Removed -> ItemPhotoUpdatePlan(
+                full = null,
+                thumbnail = null,
+                afterDocumentUpdate = {
+                    photoStore.deleteInBackground(householdId, listOf(item.id))
+                },
+            )
+            is ItemPhotoUpdate.Replaced -> photoStore.locations(householdId, item.id).let {
+                ItemPhotoUpdatePlan(
+                    full = it.full,
+                    thumbnail = it.thumbnail,
+                    afterDocumentUpdate = {
+                        photoStore.uploadInBackground(householdId, item.id, photoUpdate.photo)
+                    },
+                )
             }
         }
         val updated = item.copy(
             name = details.name,
             description = details.description,
             tags = details.tags,
-            photoUrl = photoUrl,
-            photoThumbnailUrl = photoThumbnailUrl,
+            photoUrl = photoPlan.full,
+            photoThumbnailUrl = photoPlan.thumbnail,
         )
         val data = mapOf(
             NAME to updated.name,
@@ -90,22 +112,13 @@ class FirebaseInventoryGateway internal constructor(
             PHOTO_THUMBNAIL_URL to updated.photoThumbnailUrl,
             DESCRIPTION to updated.description,
             TAGS to updated.tags,
-            TAG_KEYS to details.tagKeys(),
             UPDATED_AT to store.serverTimestamp,
             UPDATED_BY_ID to updater.id,
             UPDATED_BY_DISPLAY_NAME to updater.attributionDisplayName(),
         )
         store.updateItem(householdId, item.id, data) { result ->
             val completed = result.mapCatching {
-                when (photoUpdate) {
-                    ItemPhotoUpdate.Unchanged -> Unit
-                    ItemPhotoUpdate.Removed -> {
-                        photoStore.deleteInBackground(householdId, listOf(item.id))
-                    }
-                    is ItemPhotoUpdate.Replaced -> {
-                        photoStore.uploadInBackground(householdId, item.id, photoUpdate.photo)
-                    }
-                }
+                photoPlan.afterDocumentUpdate()
                 updated
             }
             onResult(completed)
@@ -139,7 +152,6 @@ class FirebaseInventoryGateway internal constructor(
             PHOTO_THUMBNAIL_URL to photoLocations?.thumbnail,
             DESCRIPTION to item.description,
             TAGS to item.tags,
-            TAG_KEYS to details.tagKeys(),
             CREATED_AT to store.serverTimestamp,
             UPDATED_AT to store.serverTimestamp,
             CREATED_BY_ID to creator.id,
@@ -152,6 +164,12 @@ class FirebaseInventoryGateway internal constructor(
         }
     }
 }
+
+private data class ItemPhotoUpdatePlan(
+    val full: String?,
+    val thumbnail: String?,
+    val afterDocumentUpdate: () -> Unit,
+)
 
 internal interface InventoryPhotoStore {
     fun locations(householdId: String, itemId: String): ItemPhotoLocations
@@ -309,7 +327,6 @@ private const val PHOTO_URL = "photoUrl"
 private const val PHOTO_THUMBNAIL_URL = "photoThumbnailUrl"
 private const val DESCRIPTION = "description"
 private const val TAGS = "tags"
-private const val TAG_KEYS = "tagKeys"
 private const val CREATED_AT = "createdAt"
 private const val UPDATED_AT = "updatedAt"
 private const val CREATED_BY_ID = "createdById"

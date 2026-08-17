@@ -486,7 +486,7 @@ class InventoryController(
 
 }
 
-private fun String.trimUnicodeWhitespace(): String = trim { character ->
+internal fun String.trimUnicodeWhitespace(): String = trim { character ->
     character.isWhitespace() || Character.isSpaceChar(character)
 }
 
@@ -502,4 +502,26 @@ internal fun String.tagKey(): TagKey = TagKey(
         .replace("\\p{M}+".toRegex(), ""),
 )
 
-internal fun ItemDetails.tagKeys(): List<String> = tags.map { it.tagKey().value }
+internal fun ItemDetails.validationFailure(): String? {
+    if (name != name.trimUnicodeWhitespace() || name.isEmpty()) return "Invalid Item name."
+    if (name.codePointCount(0, name.length) > ItemFormPolicy.MAX_ITEM_NAME_LENGTH) {
+        return "Invalid Item name."
+    }
+    if (
+        description != null &&
+        description.codePointCount(0, description.length) > ItemFormPolicy.MAX_DESCRIPTION_LENGTH
+    ) {
+        return "Invalid Item description."
+    }
+    if (tags.size > ItemFormPolicy.MAX_TAG_COUNT) return "Invalid Item Tags."
+    if (tags.any { tag ->
+            tag != tag.trimUnicodeWhitespace() ||
+                tag.isEmpty() ||
+                tag.codePointCount(0, tag.length) > ItemFormPolicy.MAX_TAG_LENGTH
+        }
+    ) {
+        return "Invalid Item Tags."
+    }
+    if (tags.distinctBy(String::tagKey).size != tags.size) return "Invalid Item Tags."
+    return null
+}

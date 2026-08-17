@@ -2,6 +2,7 @@ package com.azhidkov.mystuff
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class FirebaseInventoryGatewayTest {
@@ -133,7 +134,6 @@ class FirebaseInventoryGatewayTest {
                 "photoThumbnailUrl" to null,
                 "description" to "18V cordless",
                 "tags" to listOf("Power Tools"),
-                "tagKeys" to listOf("power tools"),
                 "createdAt" to timestamp,
                 "updatedAt" to timestamp,
                 "createdById" to "member-1",
@@ -181,7 +181,6 @@ class FirebaseInventoryGatewayTest {
                 "photoThumbnailUrl" to null,
                 "description" to "18V cordless",
                 "tags" to listOf("Power Tools"),
-                "tagKeys" to listOf("power tools"),
                 "updatedAt" to timestamp,
                 "updatedById" to "member-2",
                 "updatedByDisplayName" to "Sam",
@@ -190,6 +189,28 @@ class FirebaseInventoryGatewayTest {
         )
         assertEquals("Hammer Drill", result?.getOrThrow()?.name)
         assertEquals(listOf("Power Tools"), result?.getOrThrow()?.tags)
+    }
+
+    @Test
+    fun `persistence rejects Tags duplicated after Unicode normalization`() {
+        val store = FakeInventoryDocumentStore()
+        val gateway = FirebaseInventoryGateway(store, FakeInventoryPhotoStore())
+        var result: Result<Item>? = null
+
+        gateway.createItem(
+            householdId = "household-1",
+            parentItemId = "garage",
+            creator = inventoryIdentity(),
+            details = ItemDetails(
+                name = "Drill",
+                description = null,
+                tags = listOf("Power Tools", "powér tools"),
+            ),
+            photo = null,
+        ) { result = it }
+
+        assertTrue(result?.isFailure == true)
+        assertNull(store.createdData)
     }
 
     @Test

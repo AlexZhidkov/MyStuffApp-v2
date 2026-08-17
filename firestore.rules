@@ -184,12 +184,6 @@ service cloud.firestore {
         && (tags.size() < 20 || validTag(tags[19]));
     }
 
-    function validTagKeys(data) {
-      return data.tagKeys is list
-        && data.tagKeys.size() == data.tags.size()
-        && data.tagKeys.toSet().size() == data.tagKeys.size();
-    }
-
     function validHouseholdCreate(householdId) {
       return request.resource.data.keys().hasOnly([
           'name', 'ownerMemberId', 'rootItemId', 'createdAt'
@@ -232,7 +226,7 @@ service cloud.firestore {
       return itemId != householdId
         && request.resource.data.keys().hasOnly([
           'householdId', 'name', 'parentItemId', 'photoUrl',
-          'photoThumbnailUrl', 'description', 'tags', 'tagKeys', 'createdAt',
+          'photoThumbnailUrl', 'description', 'tags', 'createdAt',
           'updatedAt', 'createdById',
           'createdByDisplayName', 'updatedById', 'updatedByDisplayName'
         ])
@@ -243,7 +237,6 @@ service cloud.firestore {
         && validPhotoLocations(request.resource.data)
         && validDescription(request.resource.data.description)
         && validTags(request.resource.data.tags)
-        && validTagKeys(request.resource.data)
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedAt == request.time
         && request.resource.data.createdById == request.auth.uid
@@ -258,14 +251,13 @@ service cloud.firestore {
       return itemId != householdId
         && resource.data.parentItemId is string
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'name', 'photoUrl', 'photoThumbnailUrl', 'description', 'tags', 'tagKeys',
+          'name', 'photoUrl', 'photoThumbnailUrl', 'description', 'tags',
           'updatedAt', 'updatedById', 'updatedByDisplayName'
         ])
         && validName(request.resource.data.name)
         && validPhotoLocations(request.resource.data)
         && validDescription(request.resource.data.description)
         && validTags(request.resource.data.tags)
-        && validTagKeys(request.resource.data)
         && request.resource.data.updatedAt == request.time
         && request.resource.data.updatedById == request.auth.uid
         && request.resource.data.updatedByDisplayName is string

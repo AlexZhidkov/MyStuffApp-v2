@@ -189,18 +189,7 @@ function childItemData(name, parentItemId, overrides = {}) {
     updatedByDisplayName: "Alex",
     ...overrides,
   };
-  return {
-    ...data,
-    tagKeys: data.tags.map(tagKey),
-  };
-}
-
-function tagKey(tag) {
-  return tag
-    .toUpperCase()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/\p{M}+/gu, "");
+  return data;
 }
 
 test("current Member can access the Household and its root Item", async () => {
@@ -384,12 +373,6 @@ test("Child Item accepts bounded descriptions and trimmed Tags", async () => {
       tags: Array.from({ length: 21 }, (_, index) => `Tag ${index}`),
     }),
   ));
-  await assertFails(setDoc(
-    doc(database, "households/household-1/items/item-5"),
-    childItemData("Saw", "household-1", {
-      tags: ["Power Tools", "powér tools"],
-    }),
-  ));
 });
 
 test("Household Member can update Child Item details with fresh attribution", async () => {
@@ -408,7 +391,6 @@ test("Household Member can update Child Item details with fresh attribution", as
     name: "Hammer Drill",
     description: "18V cordless",
     tags: ["Power Tools"],
-    tagKeys: ["power tools"],
     photoUrl: null,
     photoThumbnailUrl: null,
     updatedAt: serverTimestamp(),

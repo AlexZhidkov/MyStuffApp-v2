@@ -80,7 +80,7 @@ fun HouseholdRootScreen(
                 actions = inventoryActions,
             )
 
-            ItemFormStage.Details -> AddItemScreen(
+            ItemFormStage.Details -> ItemFormScreen(
                 state = inventoryState,
                 actions = inventoryActions,
             )
@@ -290,7 +290,7 @@ fun HouseholdRootScreen(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AddItemScreen(
+private fun ItemFormScreen(
     state: InventoryUiState,
     actions: InventoryActions,
 ) {

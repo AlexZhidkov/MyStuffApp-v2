@@ -144,12 +144,7 @@ fun HouseholdRootScreen(
             }
             if (showSearchResults) {
                 item {
-                    Button(
-                        onClick = inventoryActions::beginAddItem,
-                        enabled = !inventoryState.loading,
-                    ) {
-                        Text(stringResource(R.string.add_item))
-                    }
+                    AddItemButton(inventoryState, inventoryActions)
                 }
                 item {
                     Text(
@@ -200,10 +195,7 @@ fun HouseholdRootScreen(
                                         fontWeight = FontWeight.SemiBold,
                                     )
                                     Text(
-                                        text = result.itemPath.joinToString(
-                                            " → ",
-                                            transform = Item::name,
-                                        ),
+                                        text = result.itemPathText,
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.primary,
                                     )
@@ -283,12 +275,7 @@ fun HouseholdRootScreen(
                     }
                 }
                 item {
-                    Button(
-                        onClick = inventoryActions::beginAddItem,
-                        enabled = !inventoryState.loading,
-                    ) {
-                        Text(stringResource(R.string.add_item))
-                    }
+                    AddItemButton(inventoryState, inventoryActions)
                 }
                 item {
                     Text(
@@ -382,6 +369,19 @@ fun HouseholdRootScreen(
             }
             item { Spacer(Modifier.height(24.dp)) }
         }
+    }
+}
+
+@Composable
+private fun AddItemButton(
+    state: InventoryUiState,
+    actions: InventoryActions,
+) {
+    Button(
+        onClick = actions::beginAddItem,
+        enabled = !state.loading,
+    ) {
+        Text(stringResource(R.string.add_item))
     }
 }
 

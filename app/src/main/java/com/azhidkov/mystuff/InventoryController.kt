@@ -77,6 +77,14 @@ interface InventoryActions {
 data class InventorySearchResult(
     val item: Item,
     val itemPath: List<Item>,
+) {
+    val itemPathText: String
+        get() = itemPath.joinToString(" → ", transform = Item::name)
+}
+
+data class InventorySearchState(
+    val query: String = "",
+    val openedResultId: String? = null,
 )
 
 enum class ItemFormStage {
@@ -104,8 +112,7 @@ data class ItemFormState(
 data class InventoryUiState(
     val inventory: Inventory,
     val selectedItemId: String,
-    val searchQuery: String = "",
-    val openedSearchResultId: String? = null,
+    val search: InventorySearchState = InventorySearchState(),
     val itemDraft: ItemFormState? = null,
     val loading: Boolean = false,
     val operationInProgress: Boolean = false,
@@ -120,10 +127,14 @@ data class InventoryUiState(
         get() = inventory.childrenOf(selectedItemId)
     val itemPath: List<Item>
         get() = inventory.pathTo(selectedItemId)
+    val searchQuery: String
+        get() = search.query
+    val openedSearchResultId: String?
+        get() = search.openedResultId
     val searchResults: List<InventorySearchResult>
         get() {
-            val query = searchQuery.trimUnicodeWhitespace().tagKey().value
-            if (query.isEmpty()) return emptyList()
+            val query = SearchQuery(searchQuery.trimUnicodeWhitespace().tagKey().value)
+            if (query.value.isEmpty()) return emptyList()
             return inventory.allItems
                 .asSequence()
                 .filterNot { it.id == inventory.rootItemId }
@@ -173,8 +184,10 @@ class InventoryController(
                 state.copy(
                     inventory = inventory,
                     selectedItemId = selectedItemId,
-                    openedSearchResultId = state.openedSearchResultId
-                        ?.takeIf(inventory::contains),
+                    search = state.search.copy(
+                        openedResultId = state.openedSearchResultId
+                            ?.takeIf(inventory::contains),
+                    ),
                     loading = false,
                     errorMessage = null,
                 ),
@@ -190,7 +203,7 @@ class InventoryController(
     }
 
     override fun changeSearchQuery(query: String) {
-        updateState(state.copy(searchQuery = query, openedSearchResultId = null))
+        updateState(state.copy(search = InventorySearchState(query = query)))
     }
 
     override fun openSearchResult(itemId: String) {
@@ -198,7 +211,7 @@ class InventoryController(
         updateState(
             state.copy(
                 selectedItemId = itemId,
-                openedSearchResultId = itemId,
+                search = state.search.copy(openedResultId = itemId),
                 errorMessage = null,
                 successMessage = null,
             ),
@@ -210,8 +223,7 @@ class InventoryController(
         updateState(
             state.copy(
                 selectedItemId = itemId,
-                searchQuery = "",
-                openedSearchResultId = null,
+                search = InventorySearchState(),
                 errorMessage = null,
                 successMessage = null,
             ),
@@ -226,9 +238,9 @@ class InventoryController(
     override fun beginAddItem() {
         if (state.itemDraft != null || state.operationInProgress) return
         val parentItemId = when {
-            state.openedSearchResultId != null ->
+            state.search.openedResultId != null ->
                 state.selectedItem.parentItemId ?: state.inventory.rootItemId
-            state.searchQuery.trimUnicodeWhitespace().isNotEmpty() -> state.inventory.rootItemId
+            state.search.query.trimUnicodeWhitespace().isNotEmpty() -> state.inventory.rootItemId
             else -> state.selectedItemId
         }
         updateState(
@@ -562,7 +574,10 @@ private data class SearchRank(
     val match: SearchMatchPriority,
 )
 
-private fun Item.searchRank(query: String): SearchRank? {
+@JvmInline
+private value class SearchQuery(val value: String)
+
+private fun Item.searchRank(query: SearchQuery): SearchRank? {
     name.matchPriority(query)?.let { return SearchRank(SearchFieldPriority.Name, it) }
     tags.mapNotNull { it.matchPriority(query) }.minOrNull()?.let {
         return SearchRank(SearchFieldPriority.Tag, it)
@@ -573,12 +588,12 @@ private fun Item.searchRank(query: String): SearchRank? {
     return null
 }
 
-private fun String.matchPriority(query: String): SearchMatchPriority? {
+private fun String.matchPriority(query: SearchQuery): SearchMatchPriority? {
     val candidate = tagKey().value
     return when {
-        candidate == query -> SearchMatchPriority.Exact
-        candidate.startsWith(query) -> SearchMatchPriority.Prefix
-        query in candidate -> SearchMatchPriority.Substring
+        candidate == query.value -> SearchMatchPriority.Exact
+        candidate.startsWith(query.value) -> SearchMatchPriority.Prefix
+        query.value in candidate -> SearchMatchPriority.Substring
         else -> null
     }
 }

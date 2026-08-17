@@ -125,6 +125,7 @@ class InventoryControllerTest {
             listOf("Our Home", "Garage", "Cabinet", "Drill"),
             result.itemPath.map(Item::name),
         )
+        assertEquals("Our Home → Garage → Cabinet → Drill", result.itemPathText)
 
         controller.openSearchResult(result.item.id)
 

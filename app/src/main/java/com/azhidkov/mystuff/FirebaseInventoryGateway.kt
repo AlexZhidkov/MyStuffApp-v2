@@ -4,6 +4,7 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.FirebaseApp
 import com.google.firebase.storage.FirebaseStorage
+import java.util.UUID
 
 class FirebaseInventoryGateway internal constructor(
     private val store: InventoryDocumentStore,
@@ -41,19 +42,19 @@ class FirebaseInventoryGateway internal constructor(
             return
         }
         val itemId = store.newItemId(householdId)
-        val locations = photo?.let { photoStore.locations(householdId, itemId) }
+        val photoRevision = photo?.let { photoStore.newRevision(householdId, itemId) }
         createItemDocument(
             householdId = householdId,
             parentItemId = parentItemId,
             creator = creator,
             itemId = itemId,
             details = details,
-            photoLocations = locations,
+            photoLocations = photoRevision?.locations,
         ) { result ->
             try {
                 result.onSuccess {
-                    if (photo != null) {
-                        photoStore.uploadInBackground(householdId, itemId, photo)
+                    if (photo != null && photoRevision != null) {
+                        photoStore.uploadInBackground(photoRevision, photo)
                     }
                 }
             } catch (_: RuntimeException) {
@@ -86,15 +87,20 @@ class FirebaseInventoryGateway internal constructor(
                 full = null,
                 thumbnail = null,
                 afterDocumentUpdate = {
-                    photoStore.deleteInBackground(householdId, listOf(item.id))
+                    photoStore.deleteInBackground(
+                        StoredItemPhotoLocations(
+                            full = item.photoUrl,
+                            thumbnail = item.photoThumbnailUrl,
+                        ),
+                    )
                 },
             )
-            is ItemPhotoUpdate.Replaced -> photoStore.locations(householdId, item.id).let {
+            is ItemPhotoUpdate.Replaced -> photoStore.newRevision(householdId, item.id).let {
                 ItemPhotoUpdatePlan(
-                    full = it.full,
-                    thumbnail = it.thumbnail,
+                    full = it.locations.full,
+                    thumbnail = it.locations.thumbnail,
                     afterDocumentUpdate = {
-                        photoStore.uploadInBackground(householdId, item.id, photoUpdate.photo)
+                        photoStore.uploadInBackground(it, photoUpdate.photo)
                     },
                 )
             }
@@ -172,15 +178,14 @@ private data class ItemPhotoUpdatePlan(
 )
 
 internal interface InventoryPhotoStore {
-    fun locations(householdId: String, itemId: String): ItemPhotoLocations
+    fun newRevision(householdId: String, itemId: String): ItemPhotoRevision
 
     fun uploadInBackground(
-        householdId: String,
-        itemId: String,
+        revision: ItemPhotoRevision,
         photo: ItemPhoto,
     )
 
-    fun deleteInBackground(householdId: String, itemIds: Collection<String>)
+    fun deleteInBackground(locations: StoredItemPhotoLocations)
 }
 
 private fun firebaseInventoryPhotoStore(): InventoryPhotoStore {
@@ -194,9 +199,23 @@ private fun firebaseInventoryPhotoStore(): InventoryPhotoStore {
 internal fun photoStoragePath(
     householdId: String,
     itemId: String,
+    revisionId: UUID,
     variant: ItemPhotoVariant,
-): String = "households/$householdId/items/$itemId" +
+): String = "households/$householdId/items/$itemId-$revisionId" +
     variant.fileSuffix
+
+internal data class ItemPhotoRevision(
+    val locations: ItemPhotoLocations,
+    val fullStoragePath: String,
+    val thumbnailStoragePath: String,
+)
+
+internal data class StoredItemPhotoLocations(
+    val full: String?,
+    val thumbnail: String?,
+) {
+    fun presentLocations(): List<String> = listOfNotNull(full, thumbnail)
+}
 
 internal data class InventoryItemDocument(
     val id: String,

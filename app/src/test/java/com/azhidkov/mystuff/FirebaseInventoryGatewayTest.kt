@@ -30,11 +30,11 @@ class FirebaseInventoryGatewayTest {
 
         val created = result?.getOrThrow()
         assertEquals(
-            "gs://mystuff/households/household-1/items/item-1.webp",
+            "gs://mystuff/households/household-1/items/item-1-11111111-1111-1111-1111-111111111111.webp",
             created?.photoUrl,
         )
         assertEquals(
-            "gs://mystuff/households/household-1/items/item-1-thumb.webp",
+            "gs://mystuff/households/household-1/items/item-1-11111111-1111-1111-1111-111111111111-thumb.webp",
             created?.photoThumbnailUrl,
         )
         assertEquals(created?.photoUrl, documents.createdData?.get("photoUrl"))
@@ -47,12 +47,12 @@ class FirebaseInventoryGatewayTest {
                 QueuedPhotoUpload(
                     ItemPhotoVariant.Full,
                     "content://mystuff/cropped.webp",
-                    "households/household-1/items/item-1.webp",
+                    "households/household-1/items/item-1-11111111-1111-1111-1111-111111111111.webp",
                 ),
                 QueuedPhotoUpload(
                     ItemPhotoVariant.Thumbnail,
                     "content://mystuff/cropped-thumb.webp",
-                    "households/household-1/items/item-1-thumb.webp",
+                    "households/household-1/items/item-1-11111111-1111-1111-1111-111111111111-thumb.webp",
                 ),
             ),
             photos.uploads,
@@ -79,7 +79,7 @@ class FirebaseInventoryGatewayTest {
 
         assertEquals("item-1", result?.getOrThrow()?.id)
         assertEquals(
-            "gs://mystuff/households/household-1/items/item-1.webp",
+            "gs://mystuff/households/household-1/items/item-1-11111111-1111-1111-1111-111111111111.webp",
             result?.getOrThrow()?.photoUrl,
         )
     }
@@ -103,6 +103,33 @@ class FirebaseInventoryGatewayTest {
             listOf("Our Home", "Garage", "Cabinet"),
             result?.getOrThrow()?.pathTo("cabinet")?.map(Item::name),
         )
+    }
+
+    @Test
+    fun `observed legacy photo locations load without migration`() {
+        val legacyPhoto = "gs://mystuff/households/household-1/items/item-1.webp"
+        val legacyThumbnail = "gs://mystuff/households/household-1/items/item-1-thumb.webp"
+        val household = inventoryHousehold()
+        val store = FakeInventoryDocumentStore(
+            documents = listOf(
+                itemDocument("household-1", "Our Home", null),
+                itemDocument(
+                    id = "item-1",
+                    name = "Drill",
+                    parentItemId = "household-1",
+                    photoUrl = legacyPhoto,
+                    photoThumbnailUrl = legacyThumbnail,
+                ),
+            ),
+        )
+        val gateway = FirebaseInventoryGateway(store, FakeInventoryPhotoStore())
+        var result: Result<Inventory>? = null
+
+        gateway.observe(household) { result = it }
+
+        val observed = result?.getOrThrow()?.item("item-1")
+        assertEquals(legacyPhoto, observed?.photoUrl)
+        assertEquals(legacyThumbnail, observed?.photoThumbnailUrl)
     }
 
     @Test
@@ -214,7 +241,7 @@ class FirebaseInventoryGatewayTest {
     }
 
     @Test
-    fun `replacing an Item photo supersedes both stored variants`() {
+    fun `replacing an Item photo publishes a new revision without deleting the old revision`() {
         val store = FakeInventoryDocumentStore()
         val photos = FakeInventoryPhotoStore()
         val gateway = FirebaseInventoryGateway(store, photos)
@@ -237,11 +264,20 @@ class FirebaseInventoryGatewayTest {
         ) { result = it }
 
         assertEquals(
-            "gs://mystuff/households/household-1/items/item-1.webp",
+            "gs://mystuff/households/household-1/items/item-1-11111111-1111-1111-1111-111111111111.webp",
             result?.getOrThrow()?.photoUrl,
+        )
+        assertEquals(
+            result?.getOrThrow()?.photoUrl,
+            store.updatedData?.get("photoUrl"),
+        )
+        assertEquals(
+            result?.getOrThrow()?.photoThumbnailUrl,
+            store.updatedData?.get("photoThumbnailUrl"),
         )
         assertEquals(2, photos.uploads.size)
         assertEquals("content://new.webp", photos.uploads.first().sourceUri)
+        assertTrue(photos.deletedLocations.isEmpty())
     }
 
     @Test
@@ -267,7 +303,10 @@ class FirebaseInventoryGatewayTest {
 
         assertNull(result?.getOrThrow()?.photoUrl)
         assertNull(result?.getOrThrow()?.photoThumbnailUrl)
-        assertEquals(listOf("item-1"), photos.deletedItemIds)
+        assertEquals(
+            listOf("gs://old/full.webp", "gs://old/thumb.webp"),
+            photos.deletedLocations,
+        )
     }
 }
 
@@ -287,33 +326,36 @@ private class FakeInventoryPhotoStore(
     private val enqueueFailure: Throwable? = null,
 ) : InventoryPhotoStore {
     val uploads = mutableListOf<QueuedPhotoUpload>()
-    val deletedItemIds = mutableListOf<String>()
+    val deletedLocations = mutableListOf<String>()
 
-    override fun locations(householdId: String, itemId: String) = ItemPhotoLocations(
-        full = "gs://mystuff/households/$householdId/items/$itemId.webp",
-        thumbnail = "gs://mystuff/households/$householdId/items/$itemId-thumb.webp",
+    override fun newRevision(householdId: String, itemId: String) = ItemPhotoRevision(
+        locations = ItemPhotoLocations(
+            full = "gs://mystuff/households/$householdId/items/$itemId-$REVISION.webp",
+            thumbnail = "gs://mystuff/households/$householdId/items/$itemId-$REVISION-thumb.webp",
+        ),
+        fullStoragePath = "households/$householdId/items/$itemId-$REVISION.webp",
+        thumbnailStoragePath = "households/$householdId/items/$itemId-$REVISION-thumb.webp",
     )
 
     override fun uploadInBackground(
-        householdId: String,
-        itemId: String,
+        revision: ItemPhotoRevision,
         photo: ItemPhoto,
     ) {
         enqueueFailure?.let { throw it }
         uploads += QueuedPhotoUpload(
             ItemPhotoVariant.Full,
             photo.uri,
-            "households/$householdId/items/$itemId.webp",
+            revision.fullStoragePath,
         )
         uploads += QueuedPhotoUpload(
             ItemPhotoVariant.Thumbnail,
             photo.thumbnailUri,
-            "households/$householdId/items/$itemId-thumb.webp",
+            revision.thumbnailStoragePath,
         )
     }
 
-    override fun deleteInBackground(householdId: String, itemIds: Collection<String>) {
-        deletedItemIds += itemIds
+    override fun deleteInBackground(locations: StoredItemPhotoLocations) {
+        deletedLocations += locations.presentLocations()
     }
 }
 
@@ -364,18 +406,22 @@ private fun itemDocument(
     id: String,
     name: String,
     parentItemId: String?,
+    photoUrl: String? = null,
+    photoThumbnailUrl: String? = null,
 ) = InventoryItemDocument(
     id = id,
     data = mapOf(
         "householdId" to "household-1",
         "name" to name,
         "parentItemId" to parentItemId,
-        "photoUrl" to null,
-        "photoThumbnailUrl" to null,
+        "photoUrl" to photoUrl,
+        "photoThumbnailUrl" to photoThumbnailUrl,
         "description" to null,
         "tags" to emptyList<String>(),
     ),
 )
+
+private const val REVISION = "11111111-1111-1111-1111-111111111111"
 
 private fun inventoryHousehold() = Household(
     id = "household-1",

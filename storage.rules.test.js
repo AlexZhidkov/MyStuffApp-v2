@@ -38,8 +38,9 @@ after(async () => {
 });
 
 test("only a Household Member can access the two expected Item WebP variants", async () => {
-  const fullPath = "households/household-1/items/item-1.webp";
-  const thumbnailPath = "households/household-1/items/item-1-thumb.webp";
+  const revision = "11111111-1111-1111-1111-111111111111";
+  const fullPath = `households/household-1/items/item-1-${revision}.webp`;
+  const thumbnailPath = `households/household-1/items/item-1-${revision}-thumb.webp`;
   const webPMetadata = { contentType: "image/webp" };
   const memberStorage = testEnvironment.authenticatedContext("member-1").storage();
   const nonMemberStorage = testEnvironment.authenticatedContext("member-2").storage();
@@ -76,8 +77,25 @@ test("only a Household Member can access the two expected Item WebP variants", a
   await assertSucceeds(deleteObject(ref(memberStorage, thumbnailPath)));
 });
 
+test("a Household Member can access legacy unversioned Item photo variants", async () => {
+  const memberStorage = testEnvironment.authenticatedContext("member-1").storage();
+  const webPMetadata = { contentType: "image/webp" };
+
+  await assertSucceeds(uploadBytes(
+    ref(memberStorage, "households/household-1/items/item-1.webp"),
+    new Uint8Array([1]),
+    webPMetadata,
+  ));
+  await assertSucceeds(uploadBytes(
+    ref(memberStorage, "households/household-1/items/item-1-thumb.webp"),
+    new Uint8Array([1]),
+    webPMetadata,
+  ));
+});
+
 test("Item photo storage rejects legacy formats names MIME types and oversized variants", async () => {
   const memberStorage = testEnvironment.authenticatedContext("member-1").storage();
+  const revision = "11111111-1111-1111-1111-111111111111";
 
   await assertFails(uploadBytes(
     ref(memberStorage, "households/household-1/items/item-1/photo.jpg"),
@@ -90,17 +108,17 @@ test("Item photo storage rejects legacy formats names MIME types and oversized v
     { contentType: "image/png" },
   ));
   await assertFails(uploadBytes(
-    ref(memberStorage, "households/household-1/items/item-1.webp"),
+    ref(memberStorage, `households/household-1/items/item-1-${revision}.webp`),
     new Uint8Array([1]),
     { contentType: "image/jpeg" },
   ));
   await assertFails(uploadBytes(
-    ref(memberStorage, "households/household-1/items/item-1.webp"),
+    ref(memberStorage, `households/household-1/items/item-1-${revision}.webp`),
     new Uint8Array(2 * 1024 * 1024 + 1),
     { contentType: "image/webp" },
   ));
   await assertFails(uploadBytes(
-    ref(memberStorage, "households/household-1/items/item-1-thumb.webp"),
+    ref(memberStorage, `households/household-1/items/item-1-${revision}-thumb.webp`),
     new Uint8Array(256 * 1024 + 1),
     { contentType: "image/webp" },
   ));

@@ -16,6 +16,7 @@ import com.google.android.gms.tasks.Tasks
 import com.google.firebase.storage.FirebaseStorage
 import com.google.firebase.storage.StorageException
 import com.google.firebase.storage.StorageMetadata
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 internal sealed interface PhotoTransferTask {
@@ -85,39 +86,57 @@ internal interface PhotoTransferQueue {
 internal class BackgroundInventoryPhotoStore(
     bucketUrl: String,
     private val queue: PhotoTransferQueue,
+    private val newRevisionId: () -> UUID = UUID::randomUUID,
 ) : InventoryPhotoStore {
     private val bucketUrl = bucketUrl.trimEnd('/')
 
-    override fun locations(householdId: String, itemId: String): ItemPhotoLocations =
-        ItemPhotoLocations(
-            full = "$bucketUrl/${photoStoragePath(householdId, itemId, ItemPhotoVariant.Full)}",
-            thumbnail = "$bucketUrl/${photoStoragePath(
-                householdId,
-                itemId,
-                ItemPhotoVariant.Thumbnail,
-            )}",
+    override fun newRevision(householdId: String, itemId: String): ItemPhotoRevision {
+        val revisionId = newRevisionId()
+        val fullStoragePath = photoStoragePath(
+            householdId,
+            itemId,
+            revisionId,
+            ItemPhotoVariant.Full,
         )
+        val thumbnailStoragePath = photoStoragePath(
+            householdId,
+            itemId,
+            revisionId,
+            ItemPhotoVariant.Thumbnail,
+        )
+        return ItemPhotoRevision(
+            locations = ItemPhotoLocations(
+                full = "$bucketUrl/$fullStoragePath",
+                thumbnail = "$bucketUrl/$thumbnailStoragePath",
+            ),
+            fullStoragePath = fullStoragePath,
+            thumbnailStoragePath = thumbnailStoragePath,
+        )
+    }
 
-    override fun uploadInBackground(householdId: String, itemId: String, photo: ItemPhoto) {
+    override fun uploadInBackground(revision: ItemPhotoRevision, photo: ItemPhoto) {
         queue.replace(
             PhotoTransferTask.Upload(
-                photoStoragePath(householdId, itemId, ItemPhotoVariant.Full),
+                revision.fullStoragePath,
                 photo.uri,
             ),
         )
         queue.replace(
             PhotoTransferTask.Upload(
-                photoStoragePath(householdId, itemId, ItemPhotoVariant.Thumbnail),
+                revision.thumbnailStoragePath,
                 photo.thumbnailUri,
             ),
         )
     }
 
-    override fun deleteInBackground(householdId: String, itemIds: Collection<String>) {
-        itemIds.forEach { itemId ->
-            ItemPhotoVariant.entries.forEach { variant ->
-                queue.replace(PhotoTransferTask.Delete(photoStoragePath(householdId, itemId, variant)))
+    override fun deleteInBackground(locations: StoredItemPhotoLocations) {
+        locations.presentLocations().forEach { location ->
+            require(location.startsWith("$bucketUrl/")) {
+                "Item photo location does not belong to the configured Firebase Storage bucket"
             }
+            queue.replace(
+                PhotoTransferTask.Delete(location.removePrefix("$bucketUrl/")),
+            )
         }
     }
 }

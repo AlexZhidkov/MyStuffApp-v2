@@ -13,6 +13,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -27,6 +28,7 @@ import com.azhidkov.mystuff.Item
 import com.azhidkov.mystuff.ItemPhoto
 import com.azhidkov.mystuff.R
 import com.google.firebase.storage.FirebaseStorage
+import java.io.File
 import java.nio.ByteBuffer
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -112,25 +114,24 @@ internal fun rememberLocalPhotoBitmap(photo: ItemPhoto): State<Bitmap?> {
 private fun rememberStoredPhotoBitmap(
     location: String,
     presentation: ItemPhotoPresentation,
-): State<Bitmap?> = produceState(
-    initialValue = null,
-    key1 = location,
-    key2 = presentation,
-) {
-    var retryDelayMillis = INITIAL_PHOTO_RETRY_DELAY_MILLIS
-    while (value == null) {
-        value = runCatching {
-            loadStoredPhotoBitmap(
-                location = location,
-                maxBytes = when (presentation) {
-                    ItemPhotoPresentation.Detail -> MAX_FULL_PHOTO_DOWNLOAD_BYTES
-                    ItemPhotoPresentation.Compact -> MAX_THUMBNAIL_DOWNLOAD_BYTES
-                },
-            )
-        }.getOrNull()
-        if (value == null) {
-            delay(retryDelayMillis)
-            retryDelayMillis = (retryDelayMillis * 2).coerceAtMost(MAX_PHOTO_RETRY_DELAY_MILLIS)
+): State<Bitmap?> {
+    val context = LocalContext.current.applicationContext
+    val loader = storedPhotoBitmapLoader(context)
+    return key(location, presentation) {
+        produceState(
+            initialValue = loader.memoryValue(location, presentation),
+            key1 = location,
+            key2 = presentation,
+        ) {
+            var retryDelayMillis = INITIAL_PHOTO_RETRY_DELAY_MILLIS
+            while (value == null) {
+                value = runCatching { loader.load(location, presentation) }.getOrNull()
+                if (value == null) {
+                    delay(retryDelayMillis)
+                    retryDelayMillis =
+                        (retryDelayMillis * 2).coerceAtMost(MAX_PHOTO_RETRY_DELAY_MILLIS)
+                }
+            }
         }
     }
 }
@@ -140,17 +141,42 @@ private suspend fun loadLocalPhotoBitmap(context: Context, photo: ItemPhoto): Bi
         decodePhoto(ImageDecoder.createSource(context.contentResolver, photo.uri.toUri()))
     }
 
-private suspend fun loadStoredPhotoBitmap(location: String, maxBytes: Long): Bitmap {
-    val bytes = suspendCoroutine<ByteArray> { continuation ->
+private suspend fun downloadStoredPhotoBytes(location: String, maxBytes: Long): ByteArray =
+    suspendCoroutine { continuation ->
         FirebaseStorage.getInstance()
             .getReferenceFromUrl(location)
             .getBytes(maxBytes)
             .addOnSuccessListener(continuation::resume)
             .addOnFailureListener(continuation::resumeWithException)
     }
-    return withContext(Dispatchers.IO) {
+
+private suspend fun decodeStoredPhotoBitmap(bytes: ByteArray): Bitmap =
+    withContext(Dispatchers.IO) {
         decodePhoto(ImageDecoder.createSource(ByteBuffer.wrap(bytes)))
     }
+
+private fun storedPhotoBitmapLoader(context: Context): StoredPhotoLoader<Bitmap> =
+    StoredPhotoBitmapLoaderHolder.loader ?: synchronized(StoredPhotoBitmapLoaderHolder) {
+        StoredPhotoBitmapLoaderHolder.loader ?: StoredPhotoLoader(
+            thumbnails = ThumbnailCache(
+                directory = File(context.cacheDir, THUMBNAIL_CACHE_DIRECTORY),
+                memory = SizedLruMemoryCache(
+                    maxSizeBytes = thumbnailMemoryCacheMaxBytes(Runtime.getRuntime().maxMemory()),
+                    sizeOf = Bitmap::getAllocationByteCount,
+                ),
+                download = { location ->
+                    downloadStoredPhotoBytes(location, MAX_THUMBNAIL_DOWNLOAD_BYTES)
+                },
+                decode = ::decodeStoredPhotoBitmap,
+            ),
+            download = ::downloadStoredPhotoBytes,
+            decode = ::decodeStoredPhotoBitmap,
+        ).also { StoredPhotoBitmapLoaderHolder.loader = it }
+    }
+
+private object StoredPhotoBitmapLoaderHolder {
+    @Volatile
+    var loader: StoredPhotoLoader<Bitmap>? = null
 }
 
 private fun decodePhoto(source: ImageDecoder.Source): Bitmap =
@@ -167,7 +193,6 @@ private fun decodePhoto(source: ImageDecoder.Source): Bitmap =
     }
 
 private const val MAX_DECODED_PHOTO_SIDE = 2_048
-private const val MAX_FULL_PHOTO_DOWNLOAD_BYTES = 2L * 1024 * 1024
-private const val MAX_THUMBNAIL_DOWNLOAD_BYTES = 256L * 1024
+private const val THUMBNAIL_CACHE_DIRECTORY = "item-thumbnails"
 private const val INITIAL_PHOTO_RETRY_DELAY_MILLIS = 2_000L
 private const val MAX_PHOTO_RETRY_DELAY_MILLIS = 30_000L

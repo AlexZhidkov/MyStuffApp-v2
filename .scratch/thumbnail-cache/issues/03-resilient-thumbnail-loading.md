@@ -4,13 +4,13 @@
 
 **Blocked by:** 02 — Cache viewed Item thumbnails.
 
-**Status:** ready-for-agent
+**Status:** implemented
 
-- [ ] A cached thumbnail remains visible without network connectivity or Firebase validation.
-- [ ] Reading from disk or downloading shows a neutral loading placeholder rather than reporting that the photo is unavailable.
-- [ ] A confirmed load failure shows the existing unavailable state without blocking Inventory browsing or search.
-- [ ] A failed cache miss retries exponentially while its compact view remains visible, using the existing retry bounds.
-- [ ] Failed downloads and partial files are never committed to the disk cache.
-- [ ] A cached file that is missing, truncated, or cannot be decoded is deleted and downloaded again automatically.
-- [ ] If writing a successfully downloaded thumbnail to disk fails, it still displays and remains eligible for the current session's memory cache.
-- [ ] Automated checks cover offline hits, loading and unavailable presentation, retry, corrupt-entry recovery, partial-write protection, and best-effort disk writes.
+- [x] A cached thumbnail remains visible without network connectivity or Firebase validation.
+- [x] Reading from disk or downloading shows a neutral loading placeholder rather than reporting that the photo is unavailable.
+- [x] A confirmed load failure shows the existing unavailable state without blocking Inventory browsing or search.
+- [x] A failed cache miss retries exponentially while its compact view remains visible, using the existing retry bounds.
+- [x] Failed downloads and partial files are never committed to the disk cache.
+- [x] A cached file that is missing, truncated, or cannot be decoded is deleted and downloaded again automatically.
+- [x] If writing a successfully downloaded thumbnail to disk fails, it still displays and remains eligible for the current session's memory cache.
+- [x] Automated checks cover offline hits, loading and unavailable presentation, retry, corrupt-entry recovery, partial-write protection, and best-effort disk writes.

@@ -35,6 +35,7 @@ import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
 import kotlin.math.max
 import kotlin.math.roundToInt
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -42,6 +43,48 @@ import kotlinx.coroutines.withContext
 internal enum class ItemPhotoPresentation {
     Detail,
     Compact,
+}
+
+internal sealed interface PhotoLoadState<out T> {
+    data object Loading : PhotoLoadState<Nothing>
+
+    data object Unavailable : PhotoLoadState<Nothing>
+
+    data class Available<T>(val value: T) : PhotoLoadState<T>
+}
+
+internal fun photoUnavailableText(state: PhotoLoadState<*>): Int? =
+    if (state is PhotoLoadState.Unavailable) R.string.item_photo_unavailable else null
+
+internal fun <T> photoLoadStateForPresentation(
+    state: PhotoLoadState<T>,
+    presentation: ItemPhotoPresentation,
+): PhotoLoadState<T> =
+    if (presentation == ItemPhotoPresentation.Detail && state is PhotoLoadState.Loading) {
+        PhotoLoadState.Unavailable
+    } else {
+        state
+    }
+
+internal suspend fun <T> loadPhotoWithRetry(
+    load: suspend () -> T,
+    wait: suspend (Long) -> Unit,
+    onState: (PhotoLoadState<T>) -> Unit,
+) {
+    var retryDelayMillis = INITIAL_PHOTO_RETRY_DELAY_MILLIS
+    while (true) {
+        onState(PhotoLoadState.Loading)
+        try {
+            onState(PhotoLoadState.Available(load()))
+            return
+        } catch (failure: Exception) {
+            if (failure is CancellationException) throw failure
+            onState(PhotoLoadState.Unavailable)
+            wait(retryDelayMillis)
+            retryDelayMillis =
+                (retryDelayMillis * 2).coerceAtMost(MAX_PHOTO_RETRY_DELAY_MILLIS)
+        }
+    }
 }
 
 internal fun storedPhotoLocation(item: Item, presentation: ItemPhotoPresentation): String? =
@@ -56,7 +99,10 @@ internal fun LocalItemPhoto(
     modifier: Modifier = Modifier,
 ) {
     val bitmap by rememberLocalPhotoBitmap(photo)
-    PhotoBitmap(bitmap, modifier)
+    PhotoBitmap(
+        state = bitmap?.let { PhotoLoadState.Available(it) } ?: PhotoLoadState.Unavailable,
+        modifier = modifier,
+    )
 }
 
 @Composable
@@ -66,13 +112,13 @@ internal fun StoredItemPhoto(
     modifier: Modifier = Modifier,
 ) {
     val location = requireNotNull(storedPhotoLocation(item, presentation))
-    val bitmap by rememberStoredPhotoBitmap(location, presentation)
-    PhotoBitmap(bitmap, modifier)
+    val state by rememberStoredPhotoBitmap(location, presentation)
+    PhotoBitmap(state, modifier)
 }
 
 @Composable
 private fun PhotoBitmap(
-    bitmap: Bitmap?,
+    state: PhotoLoadState<Bitmap>,
     modifier: Modifier,
 ) {
     Box(
@@ -84,18 +130,22 @@ private fun PhotoBitmap(
             ),
         contentAlignment = Alignment.Center,
     ) {
-        bitmap?.let {
+        if (state is PhotoLoadState.Available) {
             Image(
-                bitmap = it.asImageBitmap(),
+                bitmap = state.value.asImageBitmap(),
                 contentDescription = stringResource(R.string.item_photo),
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
             )
-        } ?: Text(
-            text = stringResource(R.string.item_photo_unavailable),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        } else {
+            photoUnavailableText(state)?.let { message ->
+                Text(
+                    text = stringResource(message),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
     }
 }
 
@@ -114,23 +164,28 @@ internal fun rememberLocalPhotoBitmap(photo: ItemPhoto): State<Bitmap?> {
 private fun rememberStoredPhotoBitmap(
     location: String,
     presentation: ItemPhotoPresentation,
-): State<Bitmap?> {
+): State<PhotoLoadState<Bitmap>> {
     val context = LocalContext.current.applicationContext
     val loader = storedPhotoBitmapLoader(context)
     return key(location, presentation) {
         produceState(
-            initialValue = loader.memoryValue(location, presentation),
+            initialValue = photoLoadStateForPresentation(
+                state = loader.memoryValue(location, presentation)
+                    ?.let { PhotoLoadState.Available(it) }
+                    ?: PhotoLoadState.Loading,
+                presentation = presentation,
+            ),
             key1 = location,
             key2 = presentation,
         ) {
-            var retryDelayMillis = INITIAL_PHOTO_RETRY_DELAY_MILLIS
-            while (value == null) {
-                value = runCatching { loader.load(location, presentation) }.getOrNull()
-                if (value == null) {
-                    delay(retryDelayMillis)
-                    retryDelayMillis =
-                        (retryDelayMillis * 2).coerceAtMost(MAX_PHOTO_RETRY_DELAY_MILLIS)
-                }
+            if (value !is PhotoLoadState.Available) {
+                loadPhotoWithRetry(
+                    load = { loader.load(location, presentation) },
+                    wait = { delay(it) },
+                    onState = {
+                        value = photoLoadStateForPresentation(it, presentation)
+                    },
+                )
             }
         }
     }

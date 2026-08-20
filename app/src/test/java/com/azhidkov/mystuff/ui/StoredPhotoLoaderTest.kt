@@ -44,7 +44,7 @@ class StoredPhotoLoaderTest {
     }
 
     @Test
-    fun `compact thumbnail disk hit after restart promotes to memory without Firebase`() = runBlocking {
+    fun `cached compact thumbnail remains available offline without Firebase validation`() = runBlocking {
         withTemporaryDirectory { cacheDirectory ->
             var firebaseRequests = 0
             val firstLoader = compactLoader(
@@ -76,6 +76,115 @@ class StoredPhotoLoaderTest {
                 restartedLoader.load(VERSIONED_THUMBNAIL_LOCATION, ItemPhotoPresentation.Compact),
             )
             assertEquals(1, firebaseRequests)
+        }
+    }
+
+    @Test
+    fun `corrupt cached thumbnail is deleted and downloaded again`() = runBlocking {
+        withTemporaryDirectory { cacheDirectory ->
+            val cacheFile = cacheDirectory.resolve(
+                thumbnailCacheFileName(VERSIONED_THUMBNAIL_LOCATION),
+            )
+            cacheFile.writeText("truncated")
+            var firebaseRequests = 0
+            val loader = StoredPhotoLoader(
+                thumbnails = ThumbnailCache(
+                    directory = cacheDirectory,
+                    memory = SizedLruMemoryCache(maxSizeBytes = 1_024, sizeOf = String::length),
+                    download = {
+                        firebaseRequests += 1
+                        "valid-webp".encodeToByteArray()
+                    },
+                    decode = { bytes ->
+                        bytes.decodeToString().also { decoded ->
+                            check(decoded == "valid-webp") { "Thumbnail cannot be decoded" }
+                        }
+                    },
+                ),
+                download = { _, _ -> error("detail loader should not be used") },
+                decode = { error("detail decoder should not be used") },
+            )
+
+            assertEquals(
+                "valid-webp",
+                loader.load(VERSIONED_THUMBNAIL_LOCATION, ItemPhotoPresentation.Compact),
+            )
+            assertEquals(1, firebaseRequests)
+            assertEquals("valid-webp", cacheFile.readText())
+        }
+    }
+
+    @Test
+    fun `downloaded thumbnail is not committed until it decodes successfully`() = runBlocking {
+        withTemporaryDirectory { cacheDirectory ->
+            val loader = StoredPhotoLoader(
+                thumbnails = ThumbnailCache(
+                    directory = cacheDirectory,
+                    memory = SizedLruMemoryCache(maxSizeBytes = 1_024, sizeOf = String::length),
+                    download = { "corrupt-download".encodeToByteArray() },
+                    decode = { error("Thumbnail cannot be decoded") },
+                ),
+                download = { _, _ -> error("detail loader should not be used") },
+                decode = { error("detail decoder should not be used") },
+            )
+
+            val result = runCatching {
+                loader.load(VERSIONED_THUMBNAIL_LOCATION, ItemPhotoPresentation.Compact)
+            }
+
+            assertTrue(result.isFailure)
+            assertFalse(
+                cacheDirectory.resolve(
+                    thumbnailCacheFileName(VERSIONED_THUMBNAIL_LOCATION),
+                ).exists(),
+            )
+        }
+    }
+
+    @Test
+    fun `failed thumbnail download leaves no disk cache entry`() = runBlocking {
+        withTemporaryDirectory { cacheDirectory ->
+            val loader = compactLoader(cacheDirectory) {
+                error("No network connectivity")
+            }
+
+            val result = runCatching {
+                loader.load(VERSIONED_THUMBNAIL_LOCATION, ItemPhotoPresentation.Compact)
+            }
+
+            assertTrue(result.isFailure)
+            assertTrue(cacheDirectory.listFiles().orEmpty().isEmpty())
+        }
+    }
+
+    @Test
+    fun `partial disk write is discarded while decoded thumbnail remains available`() = runBlocking {
+        withTemporaryDirectory { cacheDirectory ->
+            val memory = SizedLruMemoryCache(maxSizeBytes = 1_024, sizeOf = String::length)
+            val loader = StoredPhotoLoader(
+                thumbnails = ThumbnailCache(
+                    directory = cacheDirectory,
+                    memory = memory,
+                    download = { "valid-webp".encodeToByteArray() },
+                    decode = ByteArray::decodeToString,
+                    writeTemporaryFile = { temporaryFile, _ ->
+                        temporaryFile.writeText("partial")
+                        error("Disk is full")
+                    },
+                ),
+                download = { _, _ -> error("detail loader should not be used") },
+                decode = { error("detail decoder should not be used") },
+            )
+
+            assertEquals(
+                "valid-webp",
+                loader.load(VERSIONED_THUMBNAIL_LOCATION, ItemPhotoPresentation.Compact),
+            )
+            assertEquals(
+                "valid-webp",
+                loader.memoryValue(VERSIONED_THUMBNAIL_LOCATION, ItemPhotoPresentation.Compact),
+            )
+            assertTrue(cacheDirectory.listFiles().orEmpty().isEmpty())
         }
     }
 

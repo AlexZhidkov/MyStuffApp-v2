@@ -1,7 +1,11 @@
 package com.azhidkov.mystuff.ui
 
 import java.io.File
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -49,21 +53,55 @@ internal class ThumbnailCache<T>(
     private val memory: ThumbnailMemoryCache<T>,
     private val download: suspend (String) -> ByteArray,
     private val decode: suspend (ByteArray) -> T,
+    private val writeTemporaryFile: (File, ByteArray) -> Unit = File::writeBytes,
 ) {
     fun memoryValue(location: String): T? = memory.get(location)
 
     suspend fun load(location: String): T = memory.get(location) ?: withContext(Dispatchers.IO) {
         memory.get(location) ?: run {
             val cacheFile = directory.resolve(thumbnailCacheFileName(location))
-            val bytes = if (cacheFile.isFile) {
-                cacheFile.readBytes()
-            } else {
-                download(location).also { downloaded ->
-                    directory.mkdirs()
-                    cacheFile.writeBytes(downloaded)
+            if (cacheFile.isFile) {
+                try {
+                    return@withContext decode(cacheFile.readBytes()).also { decoded ->
+                        memory.put(location, decoded)
+                    }
+                } catch (failure: Exception) {
+                    if (failure is CancellationException) throw failure
+                    cacheFile.delete()
                 }
             }
-            decode(bytes).also { decoded -> memory.put(location, decoded) }
+            val bytes = download(location)
+            val decoded = decode(bytes)
+            try {
+                writeAtomically(cacheFile, bytes)
+            } catch (_: Exception) {
+                // Disk caching is best effort; the decoded thumbnail remains useful in memory.
+            }
+            decoded.also { memory.put(location, it) }
+        }
+    }
+
+    private fun writeAtomically(cacheFile: File, bytes: ByteArray) {
+        directory.mkdirs()
+        val temporaryFile = File.createTempFile(cacheFile.name, ".part", directory)
+        try {
+            writeTemporaryFile(temporaryFile, bytes)
+            try {
+                Files.move(
+                    temporaryFile.toPath(),
+                    cacheFile.toPath(),
+                    StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING,
+                )
+            } catch (_: AtomicMoveNotSupportedException) {
+                Files.move(
+                    temporaryFile.toPath(),
+                    cacheFile.toPath(),
+                    StandardCopyOption.REPLACE_EXISTING,
+                )
+            }
+        } finally {
+            temporaryFile.delete()
         }
     }
 }

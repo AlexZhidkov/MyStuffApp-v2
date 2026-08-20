@@ -20,6 +20,10 @@ _Avoid_: Administrator, superuser
 One named node in the Household tree. An Item may represent an area, container, belonging, or counted group; every Item except the Household has exactly one Parent Item and any Item may have Child Items.
 _Avoid_: Stuff, asset, product, location
 
+**Item Photo**:
+An optional photo associated with an Item other than the Household.
+_Avoid_: Item image, full-size image
+
 **Parent Item**:
 The single Item directly above another Item in the Household tree.
 _Avoid_: Location, folder, container

@@ -245,6 +245,59 @@ class StoredPhotoLoaderTest {
     }
 
     @Test
+    fun `cache-only thumbnail miss never requests Firebase`() = runBlocking {
+        withTemporaryDirectory { cacheDirectory ->
+            var thumbnailRequests = 0
+            val loader = StoredPhotoLoader(
+                thumbnails = ThumbnailCache(
+                    directory = cacheDirectory,
+                    memory = SizedLruMemoryCache(maxSizeBytes = 1_024, sizeOf = String::length),
+                    download = {
+                        thumbnailRequests += 1
+                        "downloaded-thumbnail".encodeToByteArray()
+                    },
+                    decode = ByteArray::decodeToString,
+                ),
+                download = { _, _ -> error("detail loader should not be used") },
+                decode = { error("detail decoder should not be used") },
+            )
+
+            assertNull(loader.cachedThumbnailValue(VERSIONED_THUMBNAIL_LOCATION))
+            assertEquals(0, thumbnailRequests)
+            assertTrue(cacheDirectory.listFiles().orEmpty().isEmpty())
+        }
+    }
+
+    @Test
+    fun `cache-only thumbnail hit decodes disk without requesting Firebase`() = runBlocking {
+        withTemporaryDirectory { cacheDirectory ->
+            cacheDirectory.resolve(
+                thumbnailCacheFileName(VERSIONED_THUMBNAIL_LOCATION),
+            ).writeText("disk-thumbnail")
+            var thumbnailRequests = 0
+            val loader = StoredPhotoLoader(
+                thumbnails = ThumbnailCache(
+                    directory = cacheDirectory,
+                    memory = SizedLruMemoryCache(maxSizeBytes = 1_024, sizeOf = String::length),
+                    download = {
+                        thumbnailRequests += 1
+                        "downloaded-thumbnail".encodeToByteArray()
+                    },
+                    decode = ByteArray::decodeToString,
+                ),
+                download = { _, _ -> error("detail loader should not be used") },
+                decode = { error("detail decoder should not be used") },
+            )
+
+            assertEquals(
+                "disk-thumbnail",
+                loader.cachedThumbnailValue(VERSIONED_THUMBNAIL_LOCATION),
+            )
+            assertEquals(0, thumbnailRequests)
+        }
+    }
+
+    @Test
     fun `decoded thumbnail memory cache is LRU and capped at one eighth heap`() {
         assertEquals(128L, thumbnailMemoryCacheMaxBytes(1_024L))
         val memory = SizedLruMemoryCache(maxSizeBytes = 6, sizeOf = String::length)

@@ -57,19 +57,26 @@ internal class ThumbnailCache<T>(
 ) {
     fun memoryValue(location: String): T? = memory.get(location)
 
-    suspend fun load(location: String): T = memory.get(location) ?: withContext(Dispatchers.IO) {
-        memory.get(location) ?: run {
-            val cacheFile = directory.resolve(thumbnailCacheFileName(location))
-            if (cacheFile.isFile) {
+    suspend fun cachedValue(location: String): T? =
+        memory.get(location) ?: withContext(Dispatchers.IO) {
+            memory.get(location) ?: run {
+                val cacheFile = directory.resolve(thumbnailCacheFileName(location))
+                if (!cacheFile.isFile) return@run null
                 try {
-                    return@withContext decode(cacheFile.readBytes()).also { decoded ->
+                    decode(cacheFile.readBytes()).also { decoded ->
                         memory.put(location, decoded)
                     }
                 } catch (failure: Exception) {
                     if (failure is CancellationException) throw failure
                     cacheFile.delete()
+                    null
                 }
             }
+        }
+
+    suspend fun load(location: String): T = cachedValue(location) ?: withContext(Dispatchers.IO) {
+        memory.get(location) ?: run {
+            val cacheFile = directory.resolve(thumbnailCacheFileName(location))
             val bytes = download(location)
             val decoded = decode(bytes)
             try {
@@ -111,6 +118,10 @@ internal class StoredPhotoLoader<T>(
     private val download: suspend (location: String, maxBytes: Long) -> ByteArray,
     private val decode: suspend (ByteArray) -> T,
 ) {
+    fun thumbnailMemoryValue(location: String): T? = thumbnails.memoryValue(location)
+
+    suspend fun cachedThumbnailValue(location: String): T? = thumbnails.cachedValue(location)
+
     fun memoryValue(location: String, presentation: ItemPhotoPresentation): T? =
         when (presentation) {
             ItemPhotoPresentation.Compact -> thumbnails.memoryValue(location)

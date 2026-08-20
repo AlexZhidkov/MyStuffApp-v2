@@ -30,28 +30,51 @@ class ItemPhotoPresentationTest {
     }
 
     @Test
-    fun `compact loading is neutral while failures and detail loading report unavailable`() {
+    fun `loading is neutral while a confirmed failure reports unavailable`() {
         assertNull(
-            photoUnavailableText(
-                photoLoadStateForPresentation(
-                    PhotoLoadState.Loading,
-                    ItemPhotoPresentation.Compact,
-                ),
-            ),
+            photoUnavailableText(PhotoLoadState.Loading),
         )
         assertEquals(
             R.string.item_photo_unavailable,
             photoUnavailableText(PhotoLoadState.Unavailable),
         )
-        assertEquals(
-            R.string.item_photo_unavailable,
-            photoUnavailableText(
-                photoLoadStateForPresentation(
-                    PhotoLoadState.Loading,
-                    ItemPhotoPresentation.Detail,
-                ),
-            ),
-        )
         assertNull(photoUnavailableText(PhotoLoadState.Available("decoded-photo")))
+    }
+
+    @Test
+    fun `cached preview remains visible through full photo loading and failures`() {
+        val preview = PhotoLoadState.Available("thumbnail", PhotoResolution.Preview)
+
+        assertEquals(
+            preview,
+            detailStateWithFullLoad(preview, PhotoLoadState.Loading),
+        )
+        assertEquals(
+            preview,
+            detailStateWithFullLoad(preview, PhotoLoadState.Unavailable),
+        )
+    }
+
+    @Test
+    fun `full photo replaces preview and cannot be overwritten by a late cache result`() {
+        val preview = PhotoLoadState.Available("thumbnail", PhotoResolution.Preview)
+        val full = detailStateWithFullLoad(
+            preview,
+            PhotoLoadState.Available("full-photo"),
+        )
+
+        assertEquals(
+            PhotoLoadState.Available("full-photo", PhotoResolution.Full),
+            full,
+        )
+        assertEquals(full, detailStateWithPreview(full, "late-thumbnail"))
+    }
+
+    @Test
+    fun `confirmed full photo failure is visible when no preview exists`() {
+        assertEquals(
+            PhotoLoadState.Unavailable,
+            detailStateWithFullLoad(PhotoLoadState.Loading, PhotoLoadState.Unavailable),
+        )
     }
 }

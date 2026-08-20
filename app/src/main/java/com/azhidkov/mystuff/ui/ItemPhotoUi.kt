@@ -3,6 +3,8 @@ package com.azhidkov.mystuff.ui
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.ImageDecoder
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -38,6 +40,7 @@ import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 internal enum class ItemPhotoPresentation {
@@ -50,20 +53,43 @@ internal sealed interface PhotoLoadState<out T> {
 
     data object Unavailable : PhotoLoadState<Nothing>
 
-    data class Available<T>(val value: T) : PhotoLoadState<T>
+    data class Available<T>(
+        val value: T,
+        val resolution: PhotoResolution = PhotoResolution.Full,
+    ) : PhotoLoadState<T>
+}
+
+internal enum class PhotoResolution {
+    Preview,
+    Full,
 }
 
 internal fun photoUnavailableText(state: PhotoLoadState<*>): Int? =
     if (state is PhotoLoadState.Unavailable) R.string.item_photo_unavailable else null
 
-internal fun <T> photoLoadStateForPresentation(
-    state: PhotoLoadState<T>,
-    presentation: ItemPhotoPresentation,
+internal fun <T> detailStateWithPreview(
+    current: PhotoLoadState<T>,
+    preview: T,
 ): PhotoLoadState<T> =
-    if (presentation == ItemPhotoPresentation.Detail && state is PhotoLoadState.Loading) {
-        PhotoLoadState.Unavailable
+    if (
+        current is PhotoLoadState.Available &&
+        current.resolution == PhotoResolution.Full
+    ) {
+        current
     } else {
-        state
+        PhotoLoadState.Available(preview, PhotoResolution.Preview)
+    }
+
+internal fun <T> detailStateWithFullLoad(
+    current: PhotoLoadState<T>,
+    fullLoad: PhotoLoadState<T>,
+): PhotoLoadState<T> =
+    when {
+        fullLoad is PhotoLoadState.Available ->
+            PhotoLoadState.Available(fullLoad.value, PhotoResolution.Full)
+        current is PhotoLoadState.Available &&
+            current.resolution == PhotoResolution.Preview -> current
+        else -> fullLoad
     }
 
 internal suspend fun <T> loadPhotoWithRetry(
@@ -112,7 +138,10 @@ internal fun StoredItemPhoto(
     modifier: Modifier = Modifier,
 ) {
     val location = requireNotNull(storedPhotoLocation(item, presentation))
-    val state by rememberStoredPhotoBitmap(location, presentation)
+    val previewLocation = item.photoThumbnailUrl.takeIf {
+        presentation == ItemPhotoPresentation.Detail
+    }
+    val state by rememberStoredPhotoBitmap(location, previewLocation, presentation)
     PhotoBitmap(state, modifier)
 }
 
@@ -131,12 +160,18 @@ private fun PhotoBitmap(
         contentAlignment = Alignment.Center,
     ) {
         if (state is PhotoLoadState.Available) {
-            Image(
-                bitmap = state.value.asImageBitmap(),
-                contentDescription = stringResource(R.string.item_photo),
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-            )
+            Crossfade(
+                targetState = state,
+                animationSpec = tween(FULL_PHOTO_CROSSFADE_MILLIS),
+                label = "Item photo resolution",
+            ) { available ->
+                Image(
+                    bitmap = available.value.asImageBitmap(),
+                    contentDescription = stringResource(R.string.item_photo),
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                )
+            }
         } else {
             photoUnavailableText(state)?.let { message ->
                 Text(
@@ -163,28 +198,49 @@ internal fun rememberLocalPhotoBitmap(photo: ItemPhoto): State<Bitmap?> {
 @Composable
 private fun rememberStoredPhotoBitmap(
     location: String,
+    previewLocation: String?,
     presentation: ItemPhotoPresentation,
 ): State<PhotoLoadState<Bitmap>> {
     val context = LocalContext.current.applicationContext
     val loader = storedPhotoBitmapLoader(context)
-    return key(location, presentation) {
+    return key(location, previewLocation, presentation) {
+        val initialValue = when (presentation) {
+            ItemPhotoPresentation.Detail -> previewLocation
+                ?.let(loader::thumbnailMemoryValue)
+                ?.let { PhotoLoadState.Available(it, PhotoResolution.Preview) }
+                ?: PhotoLoadState.Loading
+            ItemPhotoPresentation.Compact -> loader.memoryValue(location, presentation)
+                ?.let { PhotoLoadState.Available(it) }
+                ?: PhotoLoadState.Loading
+        }
         produceState(
-            initialValue = photoLoadStateForPresentation(
-                state = loader.memoryValue(location, presentation)
-                    ?.let { PhotoLoadState.Available(it) }
-                    ?: PhotoLoadState.Loading,
-                presentation = presentation,
-            ),
+            initialValue = initialValue,
             key1 = location,
             key2 = presentation,
         ) {
-            if (value !is PhotoLoadState.Available) {
+            if (presentation == ItemPhotoPresentation.Detail) {
+                if (
+                    previewLocation != null &&
+                    value !is PhotoLoadState.Available
+                ) {
+                    launch {
+                        loader.cachedThumbnailValue(previewLocation)?.let { preview ->
+                            value = detailStateWithPreview(value, preview)
+                        }
+                    }
+                }
                 loadPhotoWithRetry(
                     load = { loader.load(location, presentation) },
                     wait = { delay(it) },
-                    onState = {
-                        value = photoLoadStateForPresentation(it, presentation)
+                    onState = { fullLoad ->
+                        value = detailStateWithFullLoad(value, fullLoad)
                     },
+                )
+            } else if (value !is PhotoLoadState.Available) {
+                loadPhotoWithRetry(
+                    load = { loader.load(location, presentation) },
+                    wait = { delay(it) },
+                    onState = { value = it },
                 )
             }
         }
@@ -248,6 +304,7 @@ private fun decodePhoto(source: ImageDecoder.Source): Bitmap =
     }
 
 private const val MAX_DECODED_PHOTO_SIDE = 2_048
+private const val FULL_PHOTO_CROSSFADE_MILLIS = 200
 private const val THUMBNAIL_CACHE_DIRECTORY = "item-thumbnails"
 private const val INITIAL_PHOTO_RETRY_DELAY_MILLIS = 2_000L
 private const val MAX_PHOTO_RETRY_DELAY_MILLIS = 30_000L

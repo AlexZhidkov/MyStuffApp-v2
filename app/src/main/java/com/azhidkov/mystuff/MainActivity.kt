@@ -18,6 +18,7 @@ import com.azhidkov.mystuff.ui.HouseholdEntryScreen
 import com.azhidkov.mystuff.ui.HouseholdRootScreen
 import com.azhidkov.mystuff.ui.SignInScreen
 import com.azhidkov.mystuff.ui.theme.MyStuffTheme
+import java.io.File
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -30,6 +31,9 @@ class MainActivity : ComponentActivity() {
         )
         val invitationGateway = FirebaseInvitationGateway()
         val inventoryGateway = FirebaseInventoryGateway()
+        val rootChildItemCache = FileRootChildItemCache(
+            File(cacheDir, ROOT_CHILD_ITEM_CACHE_DIRECTORY),
+        )
         setContent {
             var sessionState by remember { mutableStateOf(sessionController.state) }
             DisposableEffect(sessionController) {
@@ -48,6 +52,7 @@ class MainActivity : ComponentActivity() {
                     onCreateHousehold = sessionController::createHousehold,
                     invitationGateway = invitationGateway,
                     inventoryGateway = inventoryGateway,
+                    rootChildItemCache = rootChildItemCache,
                 )
             }
         }
@@ -61,6 +66,7 @@ private fun MyStuffApp(
     onCreateHousehold: (String) -> Unit,
     invitationGateway: InvitationGateway,
     inventoryGateway: InventoryGateway,
+    rootChildItemCache: RootChildItemCache,
 ) {
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -96,6 +102,7 @@ private fun MyStuffApp(
                         household = household,
                         identity = identity,
                         gateway = inventoryGateway,
+                        rootChildItemCache = rootChildItemCache,
                     )
                 }
                 var inventoryState by remember(inventoryController) {
@@ -131,3 +138,5 @@ private fun MyStuffApp(
         }
     }
 }
+
+private const val ROOT_CHILD_ITEM_CACHE_DIRECTORY = "root-child-items"

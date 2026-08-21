@@ -162,13 +162,26 @@ data class InventoryUiState(
         }
 }
 
-class InventoryController(
+class InventoryController internal constructor(
     private val household: Household,
     private val identity: AuthenticatedIdentity,
     private val gateway: InventoryGateway,
+    private val rootChildItemCache: RootChildItemCache,
 ) : InventoryActions, AutoCloseable {
+    constructor(
+        household: Household,
+        identity: AuthenticatedIdentity,
+        gateway: InventoryGateway,
+    ) : this(household, identity, gateway, NoRootChildItemCache)
+
+    private val cachedInventory = runCatching {
+        rootChildItemCache.load(household.id)?.let { rootChildItems ->
+            Inventory.from(household, listOf(household.rootItem) + rootChildItems)
+        }
+    }.getOrNull()
+
     var state = InventoryUiState(
-        inventory = Inventory.from(household, listOf(household.rootItem)),
+        inventory = cachedInventory ?: Inventory.from(household, listOf(household.rootItem)),
         selectedItemId = household.rootItem.id,
         loading = true,
     )
@@ -178,6 +191,12 @@ class InventoryController(
 
     private val subscription = gateway.observe(household) { result ->
         result.onSuccess { inventory ->
+            runCatching {
+                rootChildItemCache.store(
+                    householdId = household.id,
+                    items = inventory.childrenOf(inventory.rootItemId),
+                )
+            }
             val selectedItemId = state.selectedItemId.takeIf(inventory::contains)
                 ?: inventory.rootItemId
             updateState(

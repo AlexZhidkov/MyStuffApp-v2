@@ -8,6 +8,47 @@ import org.junit.Test
 
 class InventoryControllerTest {
     @Test
+    fun `cached root Child Items are available before the live Inventory loads`() {
+        val household = household()
+        val cachedGarage = item(
+            id = "garage",
+            name = "Garage",
+            parentItemId = household.id,
+            photoThumbnailUrl = "gs://mystuff/garage-thumb.webp",
+            description = "West side",
+            tags = listOf("Storage"),
+        )
+        val controller = InventoryController(
+            household = household,
+            identity = identity(),
+            gateway = FakeInventoryGateway(inventory(), emitInitialInventory = false),
+            rootChildItemCache = RecordingRootChildItemCache(listOf(cachedGarage)),
+        )
+
+        assertEquals(listOf(cachedGarage), controller.state.childItems)
+        assertTrue(controller.state.loading)
+    }
+
+    @Test
+    fun `live Inventory refresh caches only root Child Items`() {
+        val household = household()
+        val garage = item("garage", "Garage", household.id)
+        val cabinet = item("cabinet", "Cabinet", garage.id)
+        val cache = RecordingRootChildItemCache()
+
+        InventoryController(
+            household = household,
+            identity = identity(),
+            gateway = FakeInventoryGateway(
+                Inventory.from(household, listOf(household.rootItem, garage, cabinet)),
+            ),
+            rootChildItemCache = cache,
+        )
+
+        assertEquals(listOf(garage), cache.storedItems)
+    }
+
+    @Test
     fun `Household search matches normalized substrings and excludes its root Item`() {
         val household = household()
         val controller = InventoryController(
@@ -549,6 +590,7 @@ class InventoryControllerTest {
 
 private class FakeInventoryGateway(
     initialInventory: Inventory,
+    private val emitInitialInventory: Boolean = true,
 ) : InventoryGateway {
     private var inventory = initialInventory
     private var observer: ((Result<Inventory>) -> Unit)? = null
@@ -573,7 +615,7 @@ private class FakeInventoryGateway(
         onResult: (Result<Inventory>) -> Unit,
     ): InventorySubscription {
         observer = onResult
-        onResult(Result.success(inventory))
+        if (emitInitialInventory) onResult(Result.success(inventory))
         return InventorySubscription { observer = null }
     }
 
@@ -651,6 +693,19 @@ private class FakeInventoryGateway(
         )
         inventory = inventory.withItem(updated)
         onResult(Result.success(updated))
+    }
+}
+
+private class RecordingRootChildItemCache(
+    private val loadedItems: List<Item>? = null,
+) : RootChildItemCache {
+    var storedItems: List<Item>? = null
+        private set
+
+    override fun load(householdId: String): List<Item>? = loadedItems
+
+    override fun store(householdId: String, items: List<Item>) {
+        storedItems = items
     }
 }
 

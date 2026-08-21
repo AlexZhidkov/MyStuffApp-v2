@@ -24,6 +24,10 @@ _Avoid_: Stuff, asset, product, location
 An optional photo associated with an Item other than the Household.
 _Avoid_: Item image, full-size image
 
+**Description Generation**:
+A Member-requested replacement for an Item's Description inferred by an LLM from the Item Photo while preserving facts supplied in the existing Description.
+_Avoid_: AI description, description suggestion
+
 **Parent Item**:
 The single Item directly above another Item in the Household tree.
 _Avoid_: Location, folder, container

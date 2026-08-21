@@ -1,7 +1,6 @@
 package com.azhidkov.mystuff
 
 import android.content.Context
-import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
@@ -29,17 +28,24 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.storage.FirebaseStorage
 import com.google.firebase.storage.StorageException
+import java.io.File
 import java.io.IOException
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.runBlocking
+import org.json.JSONArray
+import org.json.JSONObject
 
 internal data class DescriptionGenerationRequest(
     val householdId: String,
     val item: Item,
-    val requestingMemberId: String,
-    val requestingMemberDisplayName: String,
+    val requestingMember: RequestingMemberAttribution,
     val deviceLanguage: String,
+)
+
+internal data class RequestingMemberAttribution(
+    val id: String,
+    val displayName: String,
 )
 
 internal fun interface InventoryDescriptionGenerationWork {
@@ -63,7 +69,16 @@ internal enum class DescriptionGenerationOutcome {
     PermanentGenerationFailure,
 }
 
-internal interface DescriptionGenerationPhoto
+internal enum class DescriptionGenerationFailureCategory {
+    Connectivity,
+    Throttling,
+    RemoteService,
+    Permanent,
+}
+
+internal data class DescriptionGenerationPhoto(
+    val bytes: ByteArray,
+)
 
 internal data class DescriptionGenerationModelInput(
     val photo: DescriptionGenerationPhoto,
@@ -79,8 +94,7 @@ internal interface DescriptionGenerationItemStore {
         householdId: String,
         itemId: String,
         description: String,
-        requestingMemberId: String,
-        requestingMemberDisplayName: String,
+        requestingMember: RequestingMemberAttribution,
     ): DescriptionGenerationStep<Unit>
 }
 
@@ -146,8 +160,7 @@ internal class DescriptionGenerationWorkflow(
                 householdId = request.householdId,
                 itemId = request.item.id,
                 description = generated,
-                requestingMemberId = request.requestingMemberId,
-                requestingMemberDisplayName = request.requestingMemberDisplayName,
+                requestingMember = request.requestingMember,
             )
         ) {
             is DescriptionGenerationStep.Success -> DescriptionGenerationOutcome.Success
@@ -177,22 +190,33 @@ internal class WorkManagerInventoryDescriptionGenerationWork(
     context: Context,
 ) : InventoryDescriptionGenerationWork {
     private val workManager = WorkManager.getInstance(context)
+    private val requestStore = DescriptionGenerationRequestStore(context.noBackupFilesDir)
 
     override fun submit(request: DescriptionGenerationRequest) {
-        val work = OneTimeWorkRequestBuilder<InventoryDescriptionGenerationWorker>()
-            .setInputData(request.toWorkData())
-            .setConstraints(
-                Constraints.Builder()
-                    .setRequiredNetworkType(NetworkType.CONNECTED)
-                    .build(),
-            )
-            .setBackoffCriteria(
-                BackoffPolicy.EXPONENTIAL,
-                WorkRequest.MIN_BACKOFF_MILLIS,
-                TimeUnit.MILLISECONDS,
-            )
-            .build()
-        workManager.enqueue(work)
+        val requestFile = requestStore.write(request)
+        try {
+            val work = OneTimeWorkRequestBuilder<InventoryDescriptionGenerationWorker>()
+                .setInputData(
+                    Data.Builder()
+                        .putString(WORK_REQUEST_FILE, requestFile.absolutePath)
+                        .build(),
+                )
+                .setConstraints(
+                    Constraints.Builder()
+                        .setRequiredNetworkType(NetworkType.CONNECTED)
+                        .build(),
+                )
+                .setBackoffCriteria(
+                    BackoffPolicy.EXPONENTIAL,
+                    WorkRequest.MIN_BACKOFF_MILLIS,
+                    TimeUnit.MILLISECONDS,
+                )
+                .build()
+            workManager.enqueue(work)
+        } catch (failure: RuntimeException) {
+            requestStore.delete(requestFile)
+            throw failure
+        }
     }
 }
 
@@ -201,14 +225,23 @@ internal class InventoryDescriptionGenerationWorker(
     workerParameters: WorkerParameters,
 ) : Worker(appContext, workerParameters) {
     override fun doWork(): Result {
-        val request = descriptionGenerationRequestFromWorkData(inputData)
-            ?: return Result.failure(failureData(DescriptionGenerationOutcome.PermanentSaveFailure))
+        val requestStore = DescriptionGenerationRequestStore(applicationContext.noBackupFilesDir)
+        val requestFile = inputData.getString(WORK_REQUEST_FILE)?.let(::File)
+        val request = requestFile?.let(requestStore::read)
+        if (request == null) {
+            requestFile?.let(requestStore::delete)
+            return Result.failure(failureData(DescriptionGenerationOutcome.PermanentSaveFailure))
+        }
         val workflow = DescriptionGenerationWorkflow(
             itemStore = FirebaseDescriptionGenerationItemStore(),
             photoLoader = FirebaseDescriptionGenerationPhotoLoader(),
             generator = FirebaseGeminiDescriptionGenerator(),
         )
-        return when (val outcome = workflow.run(request)) {
+        val outcome = workflow.run(request)
+        if (outcome != DescriptionGenerationOutcome.Retry) {
+            requestStore.delete(requestFile)
+        }
+        return when (outcome) {
             DescriptionGenerationOutcome.Success -> Result.success()
             DescriptionGenerationOutcome.Retry -> Result.retry()
             DescriptionGenerationOutcome.PermanentSaveFailure,
@@ -217,10 +250,6 @@ internal class InventoryDescriptionGenerationWorker(
         }
     }
 }
-
-private data class BitmapDescriptionGenerationPhoto(
-    val bitmap: Bitmap,
-) : DescriptionGenerationPhoto
 
 private class FirebaseDescriptionGenerationItemStore(
     private val firestore: FirebaseFirestore = FirebaseFirestore.getInstance(),
@@ -239,8 +268,8 @@ private class FirebaseDescriptionGenerationItemStore(
                     ITEM_TAGS_FIELD to item.tags,
                     ITEM_WEB_URL_FIELD to item.webUrl,
                     ITEM_UPDATED_AT_FIELD to FieldValue.serverTimestamp(),
-                    ITEM_UPDATED_BY_ID_FIELD to request.requestingMemberId,
-                    ITEM_UPDATED_BY_DISPLAY_NAME_FIELD to request.requestingMemberDisplayName,
+                    ITEM_UPDATED_BY_ID_FIELD to request.requestingMember.id,
+                    ITEM_UPDATED_BY_DISPLAY_NAME_FIELD to request.requestingMember.displayName,
                 ),
             ),
         )
@@ -250,16 +279,15 @@ private class FirebaseDescriptionGenerationItemStore(
         householdId: String,
         itemId: String,
         description: String,
-        requestingMemberId: String,
-        requestingMemberDisplayName: String,
+        requestingMember: RequestingMemberAttribution,
     ): DescriptionGenerationStep<Unit> = firebaseStep {
         Tasks.await(
             itemDocument(householdId, itemId).update(
                 mapOf(
                     ITEM_DESCRIPTION_FIELD to description,
                     ITEM_UPDATED_AT_FIELD to FieldValue.serverTimestamp(),
-                    ITEM_UPDATED_BY_ID_FIELD to requestingMemberId,
-                    ITEM_UPDATED_BY_DISPLAY_NAME_FIELD to requestingMemberDisplayName,
+                    ITEM_UPDATED_BY_ID_FIELD to requestingMember.id,
+                    ITEM_UPDATED_BY_DISPLAY_NAME_FIELD to requestingMember.displayName,
                 ),
             ),
         )
@@ -280,9 +308,7 @@ private class FirebaseDescriptionGenerationPhotoLoader(
             val bytes = Tasks.await(
                 storage.getReferenceFromUrl(location).getBytes(MAX_INLINE_PHOTO_BYTES),
             )
-            val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                ?: throw InvalidStoredItemPhotoException()
-            BitmapDescriptionGenerationPhoto(bitmap)
+            DescriptionGenerationPhoto(bytes)
         }
 }
 
@@ -290,13 +316,13 @@ private class FirebaseGeminiDescriptionGenerator : DescriptionGenerator {
     override fun generate(
         input: DescriptionGenerationModelInput,
     ): DescriptionGenerationStep<String> {
-        val photo = input.photo as? BitmapDescriptionGenerationPhoto
+        val bitmap = BitmapFactory.decodeByteArray(input.photo.bytes, 0, input.photo.bytes.size)
             ?: return DescriptionGenerationStep.PermanentFailure
         return try {
             val model = Firebase.ai(backend = GenerativeBackend.googleAI())
                 .generativeModel(DESCRIPTION_GENERATION_MODEL)
             val prompt = content {
-                image(photo.bitmap)
+                image(bitmap)
                 text(input.prompt)
             }
             val response = runBlocking { model.generateContent(prompt) }
@@ -304,12 +330,10 @@ private class FirebaseGeminiDescriptionGenerator : DescriptionGenerator {
         } catch (failure: Exception) {
             failure.toDescriptionGenerationFailure()
         } finally {
-            photo.bitmap.recycle()
+            bitmap.recycle()
         }
     }
 }
-
-private class InvalidStoredItemPhotoException : IllegalStateException()
 
 private fun <T> firebaseStep(block: () -> T): DescriptionGenerationStep<T> = try {
     DescriptionGenerationStep.Success(block())
@@ -317,80 +341,138 @@ private fun <T> firebaseStep(block: () -> T): DescriptionGenerationStep<T> = try
     failure.toDescriptionGenerationFailure()
 }
 
-private fun Throwable.toDescriptionGenerationFailure(): DescriptionGenerationStep<Nothing> =
-    if (unwrapExecutionFailure().isRetryableRemoteFailure()) {
+internal fun classifyDescriptionGenerationFailure(
+    failure: Throwable,
+): DescriptionGenerationStep<Nothing> = classifyDescriptionGenerationFailure(
+    failure.unwrapExecutionFailure().descriptionGenerationFailureCategory(),
+)
+
+internal fun classifyDescriptionGenerationFailure(
+    category: DescriptionGenerationFailureCategory,
+): DescriptionGenerationStep<Nothing> =
+    if (category != DescriptionGenerationFailureCategory.Permanent) {
         DescriptionGenerationStep.RetryableFailure
     } else {
         DescriptionGenerationStep.PermanentFailure
     }
 
+private fun Throwable.toDescriptionGenerationFailure(): DescriptionGenerationStep<Nothing> =
+    classifyDescriptionGenerationFailure(this)
+
 private fun Throwable.unwrapExecutionFailure(): Throwable =
     if (this is ExecutionException && cause != null) requireNotNull(cause) else this
 
-private fun Throwable.isRetryableRemoteFailure(): Boolean = when (this) {
+private fun Throwable.descriptionGenerationFailureCategory():
+    DescriptionGenerationFailureCategory = when (this) {
     is IOException,
     is InterruptedException,
     is FirebaseNetworkException,
+    -> DescriptionGenerationFailureCategory.Connectivity
     is FirebaseTooManyRequestsException,
     is QuotaExceededException,
+    -> DescriptionGenerationFailureCategory.Throttling
     is RequestTimeoutException,
     is ServerException,
     is ServiceConnectionHandshakeFailedException,
     is UnknownException,
+    -> DescriptionGenerationFailureCategory.RemoteService
+    is FirebaseFirestoreException -> if (code.isRetryable()) {
+        DescriptionGenerationFailureCategory.RemoteService
+    } else {
+        DescriptionGenerationFailureCategory.Permanent
+    }
+    is StorageException -> if (errorCode.isRetryableStorageError()) {
+        DescriptionGenerationFailureCategory.RemoteService
+    } else {
+        DescriptionGenerationFailureCategory.Permanent
+    }
+    else -> DescriptionGenerationFailureCategory.Permanent
+}
+
+private fun FirebaseFirestoreException.Code.isRetryable(): Boolean = when (this) {
+    FirebaseFirestoreException.Code.ABORTED,
+    FirebaseFirestoreException.Code.CANCELLED,
+    FirebaseFirestoreException.Code.DEADLINE_EXCEEDED,
+    FirebaseFirestoreException.Code.INTERNAL,
+    FirebaseFirestoreException.Code.RESOURCE_EXHAUSTED,
+    FirebaseFirestoreException.Code.UNAVAILABLE,
+    FirebaseFirestoreException.Code.UNKNOWN,
     -> true
-    is FirebaseFirestoreException -> code in setOf(
-        FirebaseFirestoreException.Code.ABORTED,
-        FirebaseFirestoreException.Code.CANCELLED,
-        FirebaseFirestoreException.Code.DEADLINE_EXCEEDED,
-        FirebaseFirestoreException.Code.INTERNAL,
-        FirebaseFirestoreException.Code.RESOURCE_EXHAUSTED,
-        FirebaseFirestoreException.Code.UNAVAILABLE,
-        FirebaseFirestoreException.Code.UNKNOWN,
-    )
-    is StorageException -> errorCode in setOf(
-        StorageException.ERROR_RETRY_LIMIT_EXCEEDED,
-        StorageException.ERROR_QUOTA_EXCEEDED,
-        StorageException.ERROR_UNKNOWN,
-    )
     else -> false
 }
 
-private fun DescriptionGenerationRequest.toWorkData(): Data = Data.Builder()
-    .putString(WORK_HOUSEHOLD_ID, householdId)
-    .putString(WORK_ITEM_ID, item.id)
-    .putString(WORK_ITEM_NAME, item.name)
-    .putString(WORK_PARENT_ITEM_ID, item.parentItemId)
-    .putString(WORK_PHOTO_URL, item.photoUrl)
-    .putString(WORK_PHOTO_THUMBNAIL_URL, item.photoThumbnailUrl)
-    .putString(WORK_DESCRIPTION, item.description)
-    .putStringArray(WORK_TAGS, item.tags.toTypedArray())
-    .putString(WORK_WEB_URL, item.webUrl)
-    .putString(WORK_REQUESTING_MEMBER_ID, requestingMemberId)
-    .putString(WORK_REQUESTING_MEMBER_DISPLAY_NAME, requestingMemberDisplayName)
-    .putString(WORK_DEVICE_LANGUAGE, deviceLanguage)
-    .build()
+private fun Int.isRetryableStorageError(): Boolean = when (this) {
+    StorageException.ERROR_RETRY_LIMIT_EXCEEDED,
+    StorageException.ERROR_QUOTA_EXCEEDED,
+    StorageException.ERROR_UNKNOWN,
+    -> true
+    else -> false
+}
 
-private fun descriptionGenerationRequestFromWorkData(
-    data: Data,
-): DescriptionGenerationRequest? = runCatching {
+private class DescriptionGenerationRequestStore(baseDirectory: File) {
+    private val directory = File(baseDirectory, DESCRIPTION_GENERATION_REQUEST_DIRECTORY)
+
+    fun write(request: DescriptionGenerationRequest): File {
+        check(directory.mkdirs() || directory.isDirectory) {
+            "Description Generation request storage is unavailable"
+        }
+        return File.createTempFile(DESCRIPTION_GENERATION_REQUEST_PREFIX, ".json", directory)
+            .also { file -> file.writeText(request.toJson().toString()) }
+    }
+
+    fun read(file: File): DescriptionGenerationRequest? = resolve(file)?.let { resolved ->
+        runCatching { descriptionGenerationRequestFromJson(JSONObject(resolved.readText())) }
+            .getOrNull()
+    }
+
+    fun delete(file: File) {
+        resolve(file)?.delete()
+    }
+
+    private fun resolve(file: File): File? = runCatching {
+        val expectedDirectory = directory.canonicalFile
+        file.canonicalFile.takeIf { candidate -> candidate.parentFile == expectedDirectory }
+    }.getOrNull()
+}
+
+private fun DescriptionGenerationRequest.toJson(): JSONObject = JSONObject()
+    .put(JSON_HOUSEHOLD_ID, householdId)
+    .put(JSON_ITEM_ID, item.id)
+    .put(JSON_ITEM_NAME, item.name)
+    .put(JSON_PARENT_ITEM_ID, requireNotNull(item.parentItemId))
+    .put(JSON_PHOTO_URL, requireNotNull(item.photoUrl))
+    .put(JSON_PHOTO_THUMBNAIL_URL, item.photoThumbnailUrl ?: JSONObject.NULL)
+    .put(JSON_DESCRIPTION, item.description ?: JSONObject.NULL)
+    .put(JSON_TAGS, JSONArray(item.tags))
+    .put(JSON_WEB_URL, item.webUrl ?: JSONObject.NULL)
+    .put(JSON_REQUESTING_MEMBER_ID, requestingMember.id)
+    .put(JSON_REQUESTING_MEMBER_DISPLAY_NAME, requestingMember.displayName)
+    .put(JSON_DEVICE_LANGUAGE, deviceLanguage)
+
+private fun descriptionGenerationRequestFromJson(json: JSONObject) =
     DescriptionGenerationRequest(
-        householdId = requireNotNull(data.getString(WORK_HOUSEHOLD_ID)),
+        householdId = json.getString(JSON_HOUSEHOLD_ID),
         item = Item(
-            id = requireNotNull(data.getString(WORK_ITEM_ID)),
-            name = requireNotNull(data.getString(WORK_ITEM_NAME)),
-            parentItemId = requireNotNull(data.getString(WORK_PARENT_ITEM_ID)),
-            photoUrl = requireNotNull(data.getString(WORK_PHOTO_URL)),
-            photoThumbnailUrl = data.getString(WORK_PHOTO_THUMBNAIL_URL),
-            description = data.getString(WORK_DESCRIPTION),
-            tags = requireNotNull(data.getStringArray(WORK_TAGS)).toList(),
-            webUrl = data.getString(WORK_WEB_URL),
+            id = json.getString(JSON_ITEM_ID),
+            name = json.getString(JSON_ITEM_NAME),
+            parentItemId = json.getString(JSON_PARENT_ITEM_ID),
+            photoUrl = json.getString(JSON_PHOTO_URL),
+            photoThumbnailUrl = json.nullableString(JSON_PHOTO_THUMBNAIL_URL),
+            description = json.nullableString(JSON_DESCRIPTION),
+            tags = json.getJSONArray(JSON_TAGS).let { tags ->
+                List(tags.length(), tags::getString)
+            },
+            webUrl = json.nullableString(JSON_WEB_URL),
         ),
-        requestingMemberId = requireNotNull(data.getString(WORK_REQUESTING_MEMBER_ID)),
-        requestingMemberDisplayName =
-            requireNotNull(data.getString(WORK_REQUESTING_MEMBER_DISPLAY_NAME)),
-        deviceLanguage = requireNotNull(data.getString(WORK_DEVICE_LANGUAGE)),
+        requestingMember = RequestingMemberAttribution(
+            id = json.getString(JSON_REQUESTING_MEMBER_ID),
+            displayName = json.getString(JSON_REQUESTING_MEMBER_DISPLAY_NAME),
+        ),
+        deviceLanguage = json.getString(JSON_DEVICE_LANGUAGE),
     )
-}.getOrNull()
+
+private fun JSONObject.nullableString(key: String): String? =
+    if (isNull(key)) null else getString(key)
 
 private fun failureData(outcome: DescriptionGenerationOutcome): Data = Data.Builder()
     .putString(WORK_FAILURE_OUTCOME, outcome.name)
@@ -409,16 +491,19 @@ private const val ITEM_WEB_URL_FIELD = "webUrl"
 private const val ITEM_UPDATED_AT_FIELD = "updatedAt"
 private const val ITEM_UPDATED_BY_ID_FIELD = "updatedById"
 private const val ITEM_UPDATED_BY_DISPLAY_NAME_FIELD = "updatedByDisplayName"
-private const val WORK_HOUSEHOLD_ID = "household-id"
-private const val WORK_ITEM_ID = "item-id"
-private const val WORK_ITEM_NAME = "item-name"
-private const val WORK_PARENT_ITEM_ID = "parent-item-id"
-private const val WORK_PHOTO_URL = "photo-url"
-private const val WORK_PHOTO_THUMBNAIL_URL = "photo-thumbnail-url"
-private const val WORK_DESCRIPTION = "description"
-private const val WORK_TAGS = "tags"
-private const val WORK_WEB_URL = "web-url"
-private const val WORK_REQUESTING_MEMBER_ID = "requesting-member-id"
-private const val WORK_REQUESTING_MEMBER_DISPLAY_NAME = "requesting-member-display-name"
-private const val WORK_DEVICE_LANGUAGE = "device-language"
+private const val DESCRIPTION_GENERATION_REQUEST_DIRECTORY = "description-generation-work"
+private const val DESCRIPTION_GENERATION_REQUEST_PREFIX = "request-"
+private const val WORK_REQUEST_FILE = "request-file"
 private const val WORK_FAILURE_OUTCOME = "failure-outcome"
+private const val JSON_HOUSEHOLD_ID = "householdId"
+private const val JSON_ITEM_ID = "itemId"
+private const val JSON_ITEM_NAME = "itemName"
+private const val JSON_PARENT_ITEM_ID = "parentItemId"
+private const val JSON_PHOTO_URL = "photoUrl"
+private const val JSON_PHOTO_THUMBNAIL_URL = "photoThumbnailUrl"
+private const val JSON_DESCRIPTION = "description"
+private const val JSON_TAGS = "tags"
+private const val JSON_WEB_URL = "webUrl"
+private const val JSON_REQUESTING_MEMBER_ID = "requestingMemberId"
+private const val JSON_REQUESTING_MEMBER_DISPLAY_NAME = "requestingMemberDisplayName"
+private const val JSON_DEVICE_LANGUAGE = "deviceLanguage"

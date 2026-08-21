@@ -1,5 +1,7 @@
 package com.azhidkov.mystuff
 
+import java.io.IOException
+import java.util.concurrent.ExecutionException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
@@ -110,6 +112,36 @@ class InventoryDescriptionGenerationWorkTest {
     }
 
     @Test
+    fun `remote failure classifier retries connectivity throttling and service failures`() {
+        val retryableCategories = listOf(
+            DescriptionGenerationFailureCategory.Connectivity,
+            DescriptionGenerationFailureCategory.Throttling,
+            DescriptionGenerationFailureCategory.RemoteService,
+        )
+
+        retryableCategories.forEach { category ->
+            assertEquals(
+                DescriptionGenerationStep.RetryableFailure,
+                classifyDescriptionGenerationFailure(category),
+            )
+        }
+        assertEquals(
+            DescriptionGenerationStep.RetryableFailure,
+            classifyDescriptionGenerationFailure(IOException("offline")),
+        )
+        assertEquals(
+            DescriptionGenerationStep.RetryableFailure,
+            classifyDescriptionGenerationFailure(
+                ExecutionException(IOException("wrapped offline failure")),
+            ),
+        )
+        assertEquals(
+            DescriptionGenerationStep.PermanentFailure,
+            classifyDescriptionGenerationFailure(DescriptionGenerationFailureCategory.Permanent),
+        )
+    }
+
+    @Test
     fun `workflow distinguishes permanent Save and Description Generation failures`() {
         val saveFailure = DescriptionGenerationWorkflow(
             RecordingDescriptionGenerationItemStore(
@@ -179,10 +211,9 @@ private class RecordingDescriptionGenerationItemStore(
         householdId: String,
         itemId: String,
         description: String,
-        requestingMemberId: String,
-        requestingMemberDisplayName: String,
+        requestingMember: RequestingMemberAttribution,
     ): DescriptionGenerationStep<Unit> {
-        events += "patch:$description:$requestingMemberId:$requestingMemberDisplayName"
+        events += "patch:$description:${requestingMember.id}:${requestingMember.displayName}"
         if (patchOutcome is DescriptionGenerationStep.Success) {
             patchedDescriptions += description
             currentDescription = description
@@ -230,7 +261,7 @@ private class FixedDescriptionGenerator(
     override fun generate(input: DescriptionGenerationModelInput) = output
 }
 
-private object FakeDescriptionGenerationPhoto : DescriptionGenerationPhoto
+private val FakeDescriptionGenerationPhoto = DescriptionGenerationPhoto(byteArrayOf(1, 2, 3))
 
 private fun workflow(
     store: RecordingDescriptionGenerationItemStore,
@@ -262,7 +293,6 @@ private fun descriptionGenerationRequest() = DescriptionGenerationRequest(
         tags = listOf("Power Tools"),
         webUrl = "https://example.com/drill",
     ),
-    requestingMemberId = "member-1",
-    requestingMemberDisplayName = "Alex",
+    requestingMember = RequestingMemberAttribution("member-1", "Alex"),
     deviceLanguage = "fr-FR",
 )

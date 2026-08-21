@@ -540,8 +540,10 @@ class InventoryController internal constructor(
             DescriptionGenerationRequest(
                 householdId = household.id,
                 item = submitted,
-                requestingMemberId = identity.id,
-                requestingMemberDisplayName = identity.attributionDisplayName(),
+                requestingMember = RequestingMemberAttribution(
+                    id = identity.id,
+                    displayName = identity.attributionDisplayName(),
+                ),
                 deviceLanguage = deviceLanguage(),
             ),
         )

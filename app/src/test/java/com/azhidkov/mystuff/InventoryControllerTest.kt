@@ -609,6 +609,127 @@ class InventoryControllerTest {
         assertEquals("Item saved.", controller.state.successMessage)
     }
 
+    @Test
+    fun `Member submits a complete existing-photo draft and sees it optimistically`() {
+        val household = household()
+        val existing = item(
+            id = "drill",
+            name = "Drill",
+            parentItemId = household.id,
+            photoUrl = "gs://mystuff/households/household-1/items/drill-revision.webp",
+            photoThumbnailUrl = "gs://mystuff/households/household-1/items/drill-revision-thumb.webp",
+            description = "Old description",
+            tags = listOf("Corded"),
+            webUrl = "https://example.com/old-drill",
+        )
+        val work = RecordingDescriptionGenerationWork()
+        val controller = InventoryController(
+            household = household,
+            identity = identity(),
+            gateway = FakeInventoryGateway(
+                Inventory.from(household, listOf(household.rootItem, existing)),
+            ),
+            rootChildItemCache = NoRootChildItemCache,
+            descriptionGenerationWork = work,
+            deviceLanguage = { "en-AU" },
+        )
+        controller.openItem(existing.id)
+        controller.beginEditItem()
+        controller.changeItemName("  Hammer Drill  ")
+        controller.changeItemDescription("Member facts")
+        controller.changeItemWebUrl("  https://example.com/hammer-drill  ")
+        controller.removeTag("Corded")
+        controller.changeTagInput("Power Tools")
+        controller.addTag()
+
+        assertTrue(controller.state.canGenerateDescription)
+
+        controller.saveAndGenerateDescription()
+
+        assertEquals(
+            DescriptionGenerationRequest(
+                householdId = household.id,
+                item = existing.copy(
+                    name = "Hammer Drill",
+                    description = "Member facts",
+                    tags = listOf("Power Tools"),
+                    webUrl = "https://example.com/hammer-drill",
+                ),
+                requestingMemberId = "member-1",
+                requestingMemberDisplayName = "Alex",
+                deviceLanguage = "en-AU",
+            ),
+            work.requests.single(),
+        )
+        assertNull(controller.state.itemDraft)
+        assertFalse(controller.state.operationInProgress)
+        assertEquals("Hammer Drill", controller.state.selectedItem.name)
+        assertEquals("Member facts", controller.state.selectedItem.description)
+        assertEquals(listOf("Power Tools"), controller.state.selectedItem.tags)
+        assertEquals("https://example.com/hammer-drill", controller.state.selectedItem.webUrl)
+        assertNull(controller.state.successMessage)
+        assertNull(controller.state.errorMessage)
+    }
+
+    @Test
+    fun `Description Generation stays unavailable without an unchanged stored Item Photo`() {
+        val household = household()
+        val itemWithoutPhoto = item("drill", "Drill", household.id)
+        val controller = InventoryController(
+            household = household,
+            identity = identity(),
+            gateway = FakeInventoryGateway(
+                Inventory.from(household, listOf(household.rootItem, itemWithoutPhoto)),
+            ),
+        )
+
+        controller.beginAddItem()
+        assertFalse(controller.state.canGenerateDescription)
+        controller.closeItemForm()
+
+        controller.openItem(itemWithoutPhoto.id)
+        controller.beginEditItem()
+        assertFalse(controller.state.canGenerateDescription)
+
+        controller.beginReplaceItemPhoto()
+        controller.resolveCameraPermission(granted = true)
+        controller.photoCaptured(ItemPhoto("content://captured.jpg"))
+        controller.useCroppedPhoto(ItemPhoto("content://new.webp", "content://new-thumb.webp"))
+        assertFalse(controller.state.canGenerateDescription)
+    }
+
+    @Test
+    fun `invalid Description Generation draft stays open and submits no work`() {
+        val household = household()
+        val existing = item(
+            id = "drill",
+            name = "Drill",
+            parentItemId = household.id,
+            photoUrl = "gs://mystuff/households/household-1/items/drill.webp",
+        )
+        val work = RecordingDescriptionGenerationWork()
+        val controller = InventoryController(
+            household = household,
+            identity = identity(),
+            gateway = FakeInventoryGateway(
+                Inventory.from(household, listOf(household.rootItem, existing)),
+            ),
+            rootChildItemCache = NoRootChildItemCache,
+            descriptionGenerationWork = work,
+        )
+        controller.openItem(existing.id)
+        controller.beginEditItem()
+        controller.changeItemDescription("🏠".repeat(2_001))
+
+        controller.saveAndGenerateDescription()
+
+        assertEquals(
+            "Descriptions can contain at most 2,000 characters.",
+            controller.state.itemDraft?.descriptionError,
+        )
+        assertTrue(work.requests.isEmpty())
+    }
+
     @Test(expected = InvalidInventoryException::class)
     fun `Inventory rejects a disconnected Item`() {
         Inventory.from(
@@ -752,6 +873,14 @@ private class RecordingRootChildItemCache(
 
     override fun store(householdId: String, items: List<Item>) {
         storedItems = items
+    }
+}
+
+private class RecordingDescriptionGenerationWork : InventoryDescriptionGenerationWork {
+    val requests = mutableListOf<DescriptionGenerationRequest>()
+
+    override fun submit(request: DescriptionGenerationRequest) {
+        requests += request
     }
 }
 

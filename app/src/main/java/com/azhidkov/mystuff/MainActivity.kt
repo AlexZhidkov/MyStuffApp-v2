@@ -31,6 +31,9 @@ class MainActivity : ComponentActivity() {
         )
         val invitationGateway = FirebaseInvitationGateway()
         val inventoryGateway = FirebaseInventoryGateway()
+        val descriptionGenerationWork = WorkManagerInventoryDescriptionGenerationWork(
+            applicationContext,
+        )
         val rootChildItemCache = FileRootChildItemCache(
             File(cacheDir, ROOT_CHILD_ITEM_CACHE_DIRECTORY),
         )
@@ -53,6 +56,7 @@ class MainActivity : ComponentActivity() {
                     invitationGateway = invitationGateway,
                     inventoryGateway = inventoryGateway,
                     rootChildItemCache = rootChildItemCache,
+                    descriptionGenerationWork = descriptionGenerationWork,
                 )
             }
         }
@@ -67,6 +71,7 @@ private fun MyStuffApp(
     invitationGateway: InvitationGateway,
     inventoryGateway: InventoryGateway,
     rootChildItemCache: RootChildItemCache,
+    descriptionGenerationWork: InventoryDescriptionGenerationWork,
 ) {
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -103,6 +108,7 @@ private fun MyStuffApp(
                         identity = identity,
                         gateway = inventoryGateway,
                         rootChildItemCache = rootChildItemCache,
+                        descriptionGenerationWork = descriptionGenerationWork,
                     )
                 }
                 var inventoryState by remember(inventoryController) {

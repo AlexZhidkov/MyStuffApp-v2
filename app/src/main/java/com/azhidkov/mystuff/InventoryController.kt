@@ -75,6 +75,7 @@ interface InventoryActions {
     fun addSuggestedTag(tag: String)
     fun removeTag(tag: String)
     fun saveItem()
+    fun saveAndGenerateDescription()
 }
 
 data class InventorySearchResult(
@@ -124,6 +125,15 @@ data class InventoryUiState(
     val errorMessage: String? = null,
     val successMessage: String? = null,
 ) {
+    val canGenerateDescription: Boolean
+        get() {
+            val draft = itemDraft ?: return false
+            val editingItemId = draft.editingItemId ?: return false
+            if (draft.photo != null || draft.photoRemoved || !inventory.contains(editingItemId)) {
+                return false
+            }
+            return inventory.item(editingItemId).photoUrl != null
+        }
     val itemFormStage: ItemFormStage?
         get() = itemDraft?.stage
     val selectedItem: Item
@@ -172,6 +182,9 @@ class InventoryController internal constructor(
     private val identity: AuthenticatedIdentity,
     private val gateway: InventoryGateway,
     private val rootChildItemCache: RootChildItemCache,
+    private val descriptionGenerationWork: InventoryDescriptionGenerationWork =
+        NoInventoryDescriptionGenerationWork,
+    private val deviceLanguage: () -> String = { java.util.Locale.getDefault().toLanguageTag() },
 ) : InventoryActions, AutoCloseable {
     constructor(
         household: Household,
@@ -454,55 +467,9 @@ class InventoryController internal constructor(
     override fun saveItem() {
         val draft = state.itemDraft ?: return
         if (state.operationInProgress) return
-        val name = draft.name.trimUnicodeWhitespace()
-        val nameError = when {
-            name.isEmpty() -> "Enter an Item name."
-            name.codePointCount(0, name.length) > ItemFormPolicy.MAX_ITEM_NAME_LENGTH ->
-                "Item names can contain at most " +
-                    "${ItemFormPolicy.MAX_ITEM_NAME_LENGTH} characters."
-            else -> null
-        }
-        if (nameError != null) {
-            updateState(state.copy(itemDraft = draft.copy(nameError = nameError)))
-            return
-        }
-        val descriptionError = if (
-            draft.description.codePointCount(0, draft.description.length) >
-                ItemFormPolicy.MAX_DESCRIPTION_LENGTH
-        ) {
-            "Descriptions can contain at most " +
-                "${java.lang.String.format(
-                    java.util.Locale.ROOT,
-                    "%,d",
-                    ItemFormPolicy.MAX_DESCRIPTION_LENGTH,
-                )} characters."
-        } else {
-            null
-        }
-        if (descriptionError != null) {
-            updateState(state.copy(itemDraft = draft.copy(descriptionError = descriptionError)))
-            return
-        }
-        val webUrl = draft.webUrl.trimUnicodeWhitespace()
-        val webUrlError = webUrl.takeIf(String::isNotEmpty)?.webUrlValidationFailure()
-        if (webUrlError != null) {
-            updateState(state.copy(itemDraft = draft.copy(webUrlError = webUrlError)))
-            return
-        }
-        if (!state.inventory.contains(draft.parentItemId)) {
-            updateState(
-                state.copy(errorMessage = "The Parent Item is no longer in this Household."),
-            )
-            return
-        }
+        val details = validateAndNormalize(draft) ?: return
 
         updateState(state.copy(operationInProgress = true, errorMessage = null))
-        val details = ItemDetails(
-            name = name,
-            description = draft.description.takeIf(String::isNotEmpty),
-            tags = draft.tags,
-            webUrl = webUrl.takeIf(String::isNotEmpty),
-        )
         val onResult: (Result<Item>) -> Unit = { result ->
             result.onSuccess { savedItem ->
                 updateState(
@@ -555,6 +522,91 @@ class InventoryController internal constructor(
                 onResult = onResult,
             )
         }
+    }
+
+    override fun saveAndGenerateDescription() {
+        val draft = state.itemDraft ?: return
+        if (state.operationInProgress || !state.canGenerateDescription) return
+        val details = validateAndNormalize(draft) ?: return
+
+        val existing = state.inventory.item(requireNotNull(draft.editingItemId))
+        val submitted = existing.copy(
+            name = details.name,
+            description = details.description,
+            tags = details.tags,
+            webUrl = details.webUrl,
+        )
+        descriptionGenerationWork.submit(
+            DescriptionGenerationRequest(
+                householdId = household.id,
+                item = submitted,
+                requestingMemberId = identity.id,
+                requestingMemberDisplayName = identity.attributionDisplayName(),
+                deviceLanguage = deviceLanguage(),
+            ),
+        )
+        updateState(
+            state.copy(
+                inventory = state.inventory.withItem(submitted),
+                selectedItemId = submitted.id,
+                itemDraft = null,
+                operationInProgress = false,
+                errorMessage = null,
+                successMessage = null,
+            ),
+        )
+    }
+
+    private fun validateAndNormalize(draft: ItemFormState): ItemDetails? {
+        val name = draft.name.trimUnicodeWhitespace()
+        val nameError = when {
+            name.isEmpty() -> "Enter an Item name."
+            name.codePointCount(0, name.length) > ItemFormPolicy.MAX_ITEM_NAME_LENGTH ->
+                "Item names can contain at most " +
+                    "${ItemFormPolicy.MAX_ITEM_NAME_LENGTH} characters."
+            else -> null
+        }
+        if (nameError != null) {
+            updateState(state.copy(itemDraft = draft.copy(nameError = nameError)))
+            return null
+        }
+        if (
+            draft.description.codePointCount(0, draft.description.length) >
+            ItemFormPolicy.MAX_DESCRIPTION_LENGTH
+        ) {
+            updateState(
+                state.copy(
+                    itemDraft = draft.copy(
+                        descriptionError = "Descriptions can contain at most " +
+                            "${java.lang.String.format(
+                                java.util.Locale.ROOT,
+                                "%,d",
+                                ItemFormPolicy.MAX_DESCRIPTION_LENGTH,
+                            )} characters.",
+                    ),
+                ),
+            )
+            return null
+        }
+        val webUrl = draft.webUrl.trimUnicodeWhitespace()
+        val webUrlError = webUrl.takeIf(String::isNotEmpty)?.webUrlValidationFailure()
+        if (webUrlError != null) {
+            updateState(state.copy(itemDraft = draft.copy(webUrlError = webUrlError)))
+            return null
+        }
+        if (!state.inventory.contains(draft.parentItemId)) {
+            updateState(
+                state.copy(errorMessage = "The Parent Item is no longer in this Household."),
+            )
+            return null
+        }
+
+        return ItemDetails(
+            name = name,
+            description = draft.description.takeIf(String::isNotEmpty),
+            tags = draft.tags,
+            webUrl = webUrl.takeIf(String::isNotEmpty),
+        )
     }
 
     override fun close() {

@@ -55,6 +55,30 @@ async function seedHouseholdMember() {
   });
 }
 
+async function seedOtherHousehold() {
+  await testEnvironment.withSecurityRulesDisabled(async (context) => {
+    const database = context.firestore();
+    await setDoc(doc(database, "memberships/member-3"), {
+      householdId: "household-2",
+      role: "owner",
+    });
+    await setDoc(doc(database, "households/household-2"), {
+      name: "Other Home",
+      ownerMemberId: "member-3",
+      rootItemId: "household-2",
+      createdAt: serverTimestamp(),
+    });
+    await setDoc(
+      doc(database, "households/household-2/items/household-2"),
+      rootItemData("household-2", "Other Home"),
+    );
+    await setDoc(
+      doc(database, "households/household-2/items/item-2"),
+      childItemData("Saw", "household-2", { householdId: "household-2" }),
+    );
+  });
+}
+
 async function seedInvitation(
   invitationId = "invitation-1",
   data = invitationData(),
@@ -421,6 +445,70 @@ test("Household Member can update Child Item details with fresh attribution", as
   const updated = (await getDoc(reference)).data();
   assert.equal(updated.createdById, "member-1");
   assert.equal(updated.updatedById, "member-2");
+});
+
+test("Household Member can perform the full Save and generated Description patch", async () => {
+  await seedHousehold();
+  await seedHouseholdMember();
+  await testEnvironment.withSecurityRulesDisabled(async (context) => {
+    await setDoc(
+      doc(context.firestore(), "households/household-1/items/item-1"),
+      childItemData("Drill", "household-1"),
+    );
+  });
+  const database = testEnvironment.authenticatedContext("member-2").firestore();
+  const reference = doc(database, "households/household-1/items/item-1");
+
+  await assertSucceeds(updateDoc(reference, {
+    name: "Hammer Drill",
+    photoUrl: "gs://mystuff/households/household-1/items/item-1-revision.webp",
+    photoThumbnailUrl:
+      "gs://mystuff/households/household-1/items/item-1-revision-thumb.webp",
+    description: "Member facts",
+    tags: ["Power Tools"],
+    webUrl: "https://example.com/hammer-drill",
+    updatedAt: serverTimestamp(),
+    updatedById: "member-2",
+    updatedByDisplayName: "Sam",
+  }));
+  await assertSucceeds(updateDoc(reference, {
+    description: "Generated replacement",
+    updatedAt: serverTimestamp(),
+    updatedById: "member-2",
+    updatedByDisplayName: "Sam",
+  }));
+
+  const updated = (await getDoc(reference)).data();
+  assert.equal(updated.name, "Hammer Drill");
+  assert.equal(updated.description, "Generated replacement");
+  assert.equal(updated.createdById, "member-1");
+  assert.equal(updated.updatedById, "member-2");
+});
+
+test("Household Member cannot run Description Generation writes across Households", async () => {
+  await seedHousehold();
+  await seedHouseholdMember();
+  await seedOtherHousehold();
+  const database = testEnvironment.authenticatedContext("member-2").firestore();
+  const reference = doc(database, "households/household-2/items/item-2");
+
+  await assertFails(updateDoc(reference, {
+    name: "Circular Saw",
+    photoUrl: "gs://mystuff/households/household-2/items/item-2.webp",
+    photoThumbnailUrl: null,
+    description: "Member facts",
+    tags: ["Power Tools"],
+    webUrl: null,
+    updatedAt: serverTimestamp(),
+    updatedById: "member-2",
+    updatedByDisplayName: "Sam",
+  }));
+  await assertFails(updateDoc(reference, {
+    description: "Generated replacement",
+    updatedAt: serverTimestamp(),
+    updatedById: "member-2",
+    updatedByDisplayName: "Sam",
+  }));
 });
 
 test("Child Item update cannot change creation attribution Parent Item or root fields", async () => {

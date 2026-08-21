@@ -337,7 +337,7 @@ private fun Map<String, Any?>.inventoryNullableString(key: String): String? {
     return value
 }
 
-private fun AuthenticatedIdentity.attributionDisplayName(): String =
+internal fun AuthenticatedIdentity.attributionDisplayName(): String =
     displayName?.takeIf(String::isNotBlank)
         ?: email?.takeIf(String::isNotBlank)
         ?: "Household Member"

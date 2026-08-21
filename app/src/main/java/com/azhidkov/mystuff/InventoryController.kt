@@ -33,6 +33,7 @@ data class ItemDetails(
     val name: String,
     val description: String?,
     val tags: List<String>,
+    val webUrl: String? = null,
 )
 
 internal object ItemFormPolicy {
@@ -40,6 +41,7 @@ internal object ItemFormPolicy {
     const val MAX_DESCRIPTION_LENGTH = 2_000
     const val MAX_TAG_COUNT = 20
     const val MAX_TAG_LENGTH = 40
+    const val MAX_WEB_URL_LENGTH = 2_048
 }
 
 sealed interface ItemPhotoUpdate {
@@ -67,6 +69,7 @@ interface InventoryActions {
     fun closeItemForm()
     fun changeItemName(name: String)
     fun changeItemDescription(description: String)
+    fun changeItemWebUrl(webUrl: String)
     fun changeTagInput(tag: String)
     fun addTag()
     fun addSuggestedTag(tag: String)
@@ -100,10 +103,12 @@ data class ItemFormState(
     val stage: ItemFormStage = ItemFormStage.CameraPermission,
     val photo: ItemPhoto? = null,
     val description: String = "",
+    val webUrl: String = "",
     val tags: List<String> = emptyList(),
     val tagInput: String = "",
     val nameError: String? = null,
     val descriptionError: String? = null,
+    val webUrlError: String? = null,
     val tagError: String? = null,
     val editingItemId: String? = null,
     val photoRemoved: Boolean = false,
@@ -287,6 +292,7 @@ class InventoryController internal constructor(
                     parentItemId = item.parentItemId ?: return,
                     stage = ItemFormStage.Details,
                     description = item.description.orEmpty(),
+                    webUrl = item.webUrl.orEmpty(),
                     tags = item.tags,
                     editingItemId = item.id,
                 ),
@@ -394,6 +400,11 @@ class InventoryController internal constructor(
         )
     }
 
+    override fun changeItemWebUrl(webUrl: String) {
+        val draft = state.itemDraft ?: return
+        updateState(state.copy(itemDraft = draft.copy(webUrl = webUrl, webUrlError = null)))
+    }
+
     override fun changeTagInput(tag: String) {
         val draft = state.itemDraft ?: return
         updateState(state.copy(itemDraft = draft.copy(tagInput = tag, tagError = null)))
@@ -472,6 +483,12 @@ class InventoryController internal constructor(
             updateState(state.copy(itemDraft = draft.copy(descriptionError = descriptionError)))
             return
         }
+        val webUrl = draft.webUrl.trimUnicodeWhitespace()
+        val webUrlError = webUrl.takeIf(String::isNotEmpty)?.webUrlValidationFailure()
+        if (webUrlError != null) {
+            updateState(state.copy(itemDraft = draft.copy(webUrlError = webUrlError)))
+            return
+        }
         if (!state.inventory.contains(draft.parentItemId)) {
             updateState(
                 state.copy(errorMessage = "The Parent Item is no longer in this Household."),
@@ -484,6 +501,7 @@ class InventoryController internal constructor(
             name = name,
             description = draft.description.takeIf(String::isNotEmpty),
             tags = draft.tags,
+            webUrl = webUrl.takeIf(String::isNotEmpty),
         )
         val onResult: (Result<Item>) -> Unit = { result ->
             result.onSuccess { savedItem ->
@@ -638,5 +656,24 @@ internal fun ItemDetails.validationFailure(): String? {
         return "Invalid Item Tags."
     }
     if (tags.distinctBy(String::tagKey).size != tags.size) return "Invalid Item Tags."
+    webUrl?.webUrlValidationFailure()?.let { return it }
     return null
+}
+
+private fun String.webUrlValidationFailure(): String? {
+    if (
+        this != trimUnicodeWhitespace() ||
+        codePointCount(0, length) > ItemFormPolicy.MAX_WEB_URL_LENGTH
+    ) {
+        return "Enter a valid web URL of at most ${ItemFormPolicy.MAX_WEB_URL_LENGTH} characters."
+    }
+    val valid = runCatching {
+        val uri = java.net.URI(this)
+        uri.scheme in setOf("http", "https") && !uri.host.isNullOrBlank()
+    }.getOrDefault(false)
+    return if (valid) {
+        null
+    } else {
+        "Enter a valid web URL beginning with http:// or https://."
+    }
 }

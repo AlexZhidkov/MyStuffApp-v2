@@ -1,5 +1,7 @@
 package com.azhidkov.mystuff.ui
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -15,10 +17,13 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -36,8 +41,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.azhidkov.mystuff.HouseholdInvitation
 import com.azhidkov.mystuff.InvitationStatus
@@ -234,11 +242,34 @@ fun HouseholdRootScreen(
                     )
                 }
                 item {
-                    Text(
-                        text = inventoryState.selectedItem.name,
-                        style = MaterialTheme.typography.headlineLarge,
-                        fontWeight = FontWeight.Bold,
-                    )
+                    val webUrl = inventoryState.selectedItem.webUrl?.takeIf(String::isNotBlank)
+                    val context = LocalContext.current
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = inventoryState.selectedItem.name,
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.headlineLarge,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        webUrl?.let { url ->
+                            IconButton(
+                                onClick = {
+                                    context.startActivity(
+                                        Intent(Intent.ACTION_VIEW, Uri.parse(url)),
+                                    )
+                                },
+                            ) {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_web),
+                                    contentDescription = stringResource(R.string.open_item_web_url),
+                                )
+                            }
+                        }
+                    }
                 }
                 item {
                     Text(
@@ -519,6 +550,24 @@ private fun ItemFormScreen(
                         )
                     },
                     isError = draft.descriptionError != null,
+                )
+            }
+            item {
+                OutlinedTextField(
+                    value = draft.webUrl,
+                    onValueChange = actions::changeItemWebUrl,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = formEnabled,
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                    label = { Text(stringResource(R.string.item_web_url)) },
+                    supportingText = {
+                        Text(
+                            draft.webUrlError
+                                ?: stringResource(R.string.item_web_url_supporting_text),
+                        )
+                    },
+                    isError = draft.webUrlError != null,
                 )
             }
             item {

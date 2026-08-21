@@ -27,7 +27,7 @@ Currently implemented:
 - Transactional Household creation with one root Item and an Owner membership
 - Automatic reopening of an existing Household after sign-in
 - Owner-only, seven-day Household invitations with revocation and link replacement
-- Child Item creation and editing with names, descriptions, Tags, and camera-first
+- Child Item creation and editing with names, descriptions, web URLs, Tags, and camera-first
   optional mobile-sized WebP photos and thumbnails
 - Independent persistent background upload and retry for each Item photo variant
 - Deep Inventory browsing and Household search with immediate Child Items and complete Item Paths

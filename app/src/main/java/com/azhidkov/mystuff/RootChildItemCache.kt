@@ -84,6 +84,7 @@ internal class FileRootChildItemCache(
                                 repeat(tagCount) { add(input.readUTF()) }
                             },
                             photoThumbnailUrl = input.readNullableString(),
+                            webUrl = input.readNullableString(),
                         ),
                     )
                 }
@@ -116,6 +117,7 @@ internal class FileRootChildItemCache(
                     output.writeInt(item.tags.size)
                     item.tags.forEach(output::writeUTF)
                     output.writeNullableString(item.photoThumbnailUrl)
+                    output.writeNullableString(item.webUrl)
                 }
             }
             try {
@@ -158,4 +160,4 @@ private val rootChildItemCacheWriter = Executors.newSingleThreadExecutor { task 
 }
 
 private const val CACHE_MAGIC = 0x4D595354
-private const val CACHE_VERSION = 1
+private const val CACHE_VERSION = 2

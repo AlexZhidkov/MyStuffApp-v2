@@ -133,6 +133,32 @@ class FirebaseInventoryGatewayTest {
     }
 
     @Test
+    fun `observed Item documents retain optional web URLs`() {
+        val household = inventoryHousehold()
+        val store = FakeInventoryDocumentStore(
+            documents = listOf(
+                itemDocument("household-1", "Our Home", null),
+                itemDocument(
+                    id = "item-1",
+                    name = "Drill",
+                    parentItemId = "household-1",
+                    webUrl = "https://example.com/drill",
+                ),
+            ),
+        )
+        val gateway = FirebaseInventoryGateway(store, FakeInventoryPhotoStore())
+        var result: Result<Inventory>? = null
+
+        gateway.observe(household) { result = it }
+
+        assertEquals(
+            "https://example.com/drill",
+            result?.getOrThrow()?.item("item-1")?.webUrl,
+        )
+        assertNull(result?.getOrThrow()?.item("household-1")?.webUrl)
+    }
+
+    @Test
     fun `creating an Item writes its generated identity current Parent Item and attribution`() {
         val timestamp = Any()
         val store = FakeInventoryDocumentStore(serverTimestamp = timestamp)
@@ -147,6 +173,7 @@ class FirebaseInventoryGatewayTest {
                 name = "Drill",
                 description = "18V cordless",
                 tags = listOf("Power Tools"),
+                webUrl = "https://example.com/drill",
             ),
             photo = null,
         ) { result = it }
@@ -161,6 +188,7 @@ class FirebaseInventoryGatewayTest {
                 "photoThumbnailUrl" to null,
                 "description" to "18V cordless",
                 "tags" to listOf("Power Tools"),
+                "webUrl" to "https://example.com/drill",
                 "createdAt" to timestamp,
                 "updatedAt" to timestamp,
                 "createdById" to "member-1",
@@ -177,6 +205,7 @@ class FirebaseInventoryGatewayTest {
                 "garage",
                 description = "18V cordless",
                 tags = listOf("Power Tools"),
+                webUrl = "https://example.com/drill",
             ),
             result?.getOrThrow(),
         )
@@ -197,6 +226,7 @@ class FirebaseInventoryGatewayTest {
                 name = "Hammer Drill",
                 description = "18V cordless",
                 tags = listOf("Power Tools"),
+                webUrl = "https://example.com/hammer-drill",
             ),
             photoUpdate = ItemPhotoUpdate.Unchanged,
         ) { result = it }
@@ -208,6 +238,7 @@ class FirebaseInventoryGatewayTest {
                 "photoThumbnailUrl" to null,
                 "description" to "18V cordless",
                 "tags" to listOf("Power Tools"),
+                "webUrl" to "https://example.com/hammer-drill",
                 "updatedAt" to timestamp,
                 "updatedById" to "member-2",
                 "updatedByDisplayName" to "Sam",
@@ -216,6 +247,7 @@ class FirebaseInventoryGatewayTest {
         )
         assertEquals("Hammer Drill", result?.getOrThrow()?.name)
         assertEquals(listOf("Power Tools"), result?.getOrThrow()?.tags)
+        assertEquals("https://example.com/hammer-drill", result?.getOrThrow()?.webUrl)
     }
 
     @Test
@@ -408,17 +440,19 @@ private fun itemDocument(
     parentItemId: String?,
     photoUrl: String? = null,
     photoThumbnailUrl: String? = null,
+    webUrl: String? = null,
 ) = InventoryItemDocument(
     id = id,
-    data = mapOf(
-        "householdId" to "household-1",
-        "name" to name,
-        "parentItemId" to parentItemId,
-        "photoUrl" to photoUrl,
-        "photoThumbnailUrl" to photoThumbnailUrl,
-        "description" to null,
-        "tags" to emptyList<String>(),
-    ),
+    data = buildMap {
+        put("householdId", "household-1")
+        put("name", name)
+        put("parentItemId", parentItemId)
+        put("photoUrl", photoUrl)
+        put("photoThumbnailUrl", photoThumbnailUrl)
+        put("description", null)
+        put("tags", emptyList<String>())
+        webUrl?.let { put("webUrl", it) }
+    },
 )
 
 private const val REVISION = "11111111-1111-1111-1111-111111111111"
@@ -443,6 +477,7 @@ private fun inventoryItem(
     photoThumbnailUrl: String? = null,
     description: String? = null,
     tags: List<String> = emptyList(),
+    webUrl: String? = null,
 ) = Item(
     id = id,
     name = name,
@@ -451,4 +486,5 @@ private fun inventoryItem(
     photoThumbnailUrl = photoThumbnailUrl,
     description = description,
     tags = tags,
+    webUrl = webUrl,
 )

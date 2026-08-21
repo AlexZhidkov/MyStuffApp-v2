@@ -31,6 +31,9 @@
     <string name="item_name_supporting_text">1–100 characters</string>
     <string name="item_description">Description (optional)</string>
     <string name="item_description_supporting_text">%1$d/%2$d characters</string>
+    <string name="item_web_url">Web URL (optional)</string>
+    <string name="item_web_url_supporting_text">Include http:// or https://</string>
+    <string name="open_item_web_url">Open Item web page</string>
     <string name="item_tags">Tags (optional)</string>
     <string name="item_tag">New Tag</string>
     <string name="item_tag_supporting_text">1–%1$d characters; up to %2$d Tags</string>

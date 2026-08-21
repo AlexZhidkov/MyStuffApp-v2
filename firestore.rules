@@ -153,6 +153,16 @@ service cloud.firestore {
         );
     }
 
+    function validWebUrl(webUrl) {
+      return webUrl == null
+        || (
+          webUrl is string
+          && webUrl.matches(
+            '^https?://[^\\s]{1,1000}[^\\s]{0,1000}[^\\s]{0,40}$'
+          )
+        );
+    }
+
     function validTag(tag) {
       return tag is string
         && tag.matches('^[^\\s\\p{Z}](.{0,38}[^\\s\\p{Z}])?$');
@@ -202,6 +212,7 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly([
           'householdId', 'name', 'parentItemId', 'photoUrl',
           'photoThumbnailUrl', 'description', 'tags', 'createdAt',
+          'webUrl',
           'updatedAt', 'createdById',
           'createdByDisplayName', 'updatedById', 'updatedByDisplayName'
         ])
@@ -210,6 +221,7 @@ service cloud.firestore {
         && request.resource.data.parentItemId == null
         && validPhotoLocations(request.resource.data)
         && request.resource.data.description == null
+        && request.resource.data.get('webUrl', null) == null
         && request.resource.data.tags is list
         && request.resource.data.tags.size() == 0
         && request.resource.data.createdAt == request.time
@@ -227,6 +239,7 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly([
           'householdId', 'name', 'parentItemId', 'photoUrl',
           'photoThumbnailUrl', 'description', 'tags', 'createdAt',
+          'webUrl',
           'updatedAt', 'createdById',
           'createdByDisplayName', 'updatedById', 'updatedByDisplayName'
         ])
@@ -236,6 +249,7 @@ service cloud.firestore {
         && exists(itemPath(householdId, request.resource.data.parentItemId))
         && validPhotoLocations(request.resource.data)
         && validDescription(request.resource.data.description)
+        && validWebUrl(request.resource.data.get('webUrl', null))
         && validTags(request.resource.data.tags)
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedAt == request.time
@@ -252,11 +266,13 @@ service cloud.firestore {
         && resource.data.parentItemId is string
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'name', 'photoUrl', 'photoThumbnailUrl', 'description', 'tags',
+          'webUrl',
           'updatedAt', 'updatedById', 'updatedByDisplayName'
         ])
         && validName(request.resource.data.name)
         && validPhotoLocations(request.resource.data)
         && validDescription(request.resource.data.description)
+        && validWebUrl(request.resource.data.get('webUrl', null))
         && validTags(request.resource.data.tags)
         && request.resource.data.updatedAt == request.time
         && request.resource.data.updatedById == request.auth.uid

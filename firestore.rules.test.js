@@ -162,6 +162,7 @@ function rootItemData(householdId, name) {
     name,
     parentItemId: null,
     photoUrl: null,
+    webUrl: null,
     description: null,
     tags: [],
     createdAt: serverTimestamp(),
@@ -179,6 +180,7 @@ function childItemData(name, parentItemId, overrides = {}) {
     name,
     parentItemId,
     photoUrl: null,
+    webUrl: null,
     description: null,
     tags: [],
     createdAt: serverTimestamp(),
@@ -285,6 +287,24 @@ test("Member can create a Child Item with an optional photo URL", async () => {
     doc(database, "households/household-1/items/item-1"),
     childItemData("Drill", "household-1", {
       photoUrl: "https://photos.example/item-1.jpg",
+    }),
+  ));
+});
+
+test("Child Item accepts an optional HTTP web URL and rejects other schemes", async () => {
+  await seedHousehold();
+  const database = testEnvironment.authenticatedContext("member-1").firestore();
+
+  await assertSucceeds(setDoc(
+    doc(database, "households/household-1/items/item-1"),
+    childItemData("Drill", "household-1", {
+      webUrl: "https://example.com/products/drill",
+    }),
+  ));
+  await assertFails(setDoc(
+    doc(database, "households/household-1/items/item-2"),
+    childItemData("Saw", "household-1", {
+      webUrl: "javascript:alert(1)",
     }),
   ));
 });

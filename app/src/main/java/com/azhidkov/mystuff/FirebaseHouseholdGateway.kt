@@ -74,6 +74,7 @@ internal data class HouseholdDocuments(
                             ?.map { it as? String ?: throw HouseholdDataException() }
                     }
                     ?: throw HouseholdDataException(),
+                webUrl = rootItem.nullableString(WEB_URL),
             ),
         )
     }
@@ -219,6 +220,7 @@ private fun newHouseholdDocuments(
             PHOTO_URL to null,
             DESCRIPTION to null,
             TAGS to emptyList<String>(),
+            WEB_URL to null,
             CREATED_AT to serverTimestamp,
             UPDATED_AT to serverTimestamp,
             CREATED_BY_ID to owner.id,
@@ -251,6 +253,7 @@ private const val PARENT_ITEM_ID = "parentItemId"
 private const val PHOTO_URL = "photoUrl"
 private const val DESCRIPTION = "description"
 private const val TAGS = "tags"
+private const val WEB_URL = "webUrl"
 private const val CREATED_AT = "createdAt"
 private const val UPDATED_AT = "updatedAt"
 private const val CREATED_BY_ID = "createdById"

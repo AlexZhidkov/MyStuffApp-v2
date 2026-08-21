@@ -109,6 +109,7 @@ class FirebaseInventoryGateway internal constructor(
             name = details.name,
             description = details.description,
             tags = details.tags,
+            webUrl = details.webUrl,
             photoUrl = photoPlan.full,
             photoThumbnailUrl = photoPlan.thumbnail,
         )
@@ -118,6 +119,7 @@ class FirebaseInventoryGateway internal constructor(
             PHOTO_THUMBNAIL_URL to updated.photoThumbnailUrl,
             DESCRIPTION to updated.description,
             TAGS to updated.tags,
+            WEB_URL to updated.webUrl,
             UPDATED_AT to store.serverTimestamp,
             UPDATED_BY_ID to updater.id,
             UPDATED_BY_DISPLAY_NAME to updater.attributionDisplayName(),
@@ -148,6 +150,7 @@ class FirebaseInventoryGateway internal constructor(
             description = details.description,
             tags = details.tags,
             photoThumbnailUrl = photoLocations?.thumbnail,
+            webUrl = details.webUrl,
         )
         val displayName = creator.attributionDisplayName()
         val data = mapOf(
@@ -158,6 +161,7 @@ class FirebaseInventoryGateway internal constructor(
             PHOTO_THUMBNAIL_URL to photoLocations?.thumbnail,
             DESCRIPTION to item.description,
             TAGS to item.tags,
+            WEB_URL to item.webUrl,
             CREATED_AT to store.serverTimestamp,
             UPDATED_AT to store.serverTimestamp,
             CREATED_BY_ID to creator.id,
@@ -238,6 +242,7 @@ internal data class InventoryItemDocument(
                 }
                 ?: throw InvalidInventoryException(),
             photoThumbnailUrl = data.inventoryNullableString(PHOTO_THUMBNAIL_URL),
+            webUrl = data.inventoryNullableString(WEB_URL),
         )
     }
 }
@@ -346,6 +351,7 @@ private const val PHOTO_URL = "photoUrl"
 private const val PHOTO_THUMBNAIL_URL = "photoThumbnailUrl"
 private const val DESCRIPTION = "description"
 private const val TAGS = "tags"
+private const val WEB_URL = "webUrl"
 private const val CREATED_AT = "createdAt"
 private const val UPDATED_AT = "updatedAt"
 private const val CREATED_BY_ID = "createdById"

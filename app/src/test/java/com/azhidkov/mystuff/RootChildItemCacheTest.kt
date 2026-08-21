@@ -17,6 +17,7 @@ class RootChildItemCacheTest {
             description = "West side",
             tags = listOf("Storage", "Tools"),
             photoThumbnailUrl = "gs://mystuff/garage-thumb.webp",
+            webUrl = "https://example.com/garage",
         )
         FileRootChildItemCache(directory) { task -> task() }
             .store("household-1", listOf(item))

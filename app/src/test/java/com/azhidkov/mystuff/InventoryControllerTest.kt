@@ -423,6 +423,46 @@ class InventoryControllerTest {
     }
 
     @Test
+    fun `Member can create an Item with a web URL and blank URLs stay absent`() {
+        val gateway = FakeInventoryGateway(inventory())
+        val controller = InventoryController(household(), identity(), gateway)
+        controller.beginAddItem()
+        controller.cameraUnavailable()
+        controller.changeItemName("Drill")
+        controller.changeItemWebUrl("  https://example.com/drill  ")
+
+        controller.saveItem()
+
+        assertEquals("https://example.com/drill", gateway.createdDetails?.webUrl)
+        assertEquals("https://example.com/drill", controller.state.childItems.single().webUrl)
+
+        controller.beginAddItem()
+        controller.cameraUnavailable()
+        controller.changeItemName("Saw")
+        controller.saveItem()
+
+        assertNull(gateway.createdDetails?.webUrl)
+    }
+
+    @Test
+    fun `Item form rejects a web URL that a browser should not open`() {
+        val gateway = FakeInventoryGateway(inventory())
+        val controller = InventoryController(household(), identity(), gateway)
+        controller.beginAddItem()
+        controller.cameraUnavailable()
+        controller.changeItemName("Drill")
+        controller.changeItemWebUrl("javascript:alert(1)")
+
+        controller.saveItem()
+
+        assertEquals(
+            "Enter a valid web URL beginning with http:// or https://.",
+            controller.state.itemDraft?.webUrlError,
+        )
+        assertNull(gateway.createdDetails)
+    }
+
+    @Test
     fun `Item descriptions and Tags enforce their Unicode character and count limits`() {
         val controller = InventoryController(household(), identity(), FakeInventoryGateway(inventory()))
         controller.beginAddItem()
@@ -507,6 +547,7 @@ class InventoryControllerTest {
             photoThumbnailUrl = "gs://mystuff/households/household-1/items/drill-thumb.webp",
             description = "Old description",
             tags = listOf("Corded"),
+            webUrl = "https://example.com/old-drill",
         )
         val gateway = FakeInventoryGateway(
             Inventory.from(household, listOf(household.rootItem, existing)),
@@ -516,9 +557,11 @@ class InventoryControllerTest {
         controller.beginEditItem()
         assertEquals("Old description", controller.state.itemDraft?.description)
         assertEquals(listOf("Corded"), controller.state.itemDraft?.tags)
+        assertEquals("https://example.com/old-drill", controller.state.itemDraft?.webUrl)
 
         controller.changeItemName("Hammer Drill")
         controller.changeItemDescription("New description")
+        controller.changeItemWebUrl("https://example.com/hammer-drill")
         controller.removeTag("corded")
         controller.changeTagInput("Power Tools")
         controller.addTag()
@@ -541,6 +584,7 @@ class InventoryControllerTest {
         assertEquals("Hammer Drill", controller.state.selectedItem.name)
         assertEquals("New description", controller.state.selectedItem.description)
         assertEquals(listOf("Power Tools"), controller.state.selectedItem.tags)
+        assertEquals("https://example.com/hammer-drill", controller.state.selectedItem.webUrl)
         assertEquals("Item saved.", controller.state.successMessage)
         assertEquals(2, gateway.updateAttempts)
     }
@@ -643,6 +687,7 @@ private class FakeInventoryGateway(
             },
             description = details.description,
             tags = details.tags,
+            webUrl = details.webUrl,
         )
         val complete: () -> Unit = {
             inventory = inventory.withItem(created)
@@ -678,6 +723,7 @@ private class FakeInventoryGateway(
             name = details.name,
             description = details.description,
             tags = details.tags,
+            webUrl = details.webUrl,
             photoUrl = when (photoUpdate) {
                 ItemPhotoUpdate.Unchanged -> item.photoUrl
                 ItemPhotoUpdate.Removed -> null
@@ -734,6 +780,7 @@ private fun item(
     photoThumbnailUrl: String? = null,
     description: String? = null,
     tags: List<String> = emptyList(),
+    webUrl: String? = null,
 ) = Item(
     id = id,
     name = name,
@@ -742,4 +789,5 @@ private fun item(
     description = description,
     tags = tags,
     photoThumbnailUrl = photoThumbnailUrl,
+    webUrl = webUrl,
 )

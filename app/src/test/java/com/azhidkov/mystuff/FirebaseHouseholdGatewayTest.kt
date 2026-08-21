@@ -38,6 +38,7 @@ class FirebaseHouseholdGatewayTest {
                 "name" to "Our Home",
                 "parentItemId" to null,
                 "photoUrl" to null,
+                "webUrl" to null,
                 "description" to null,
                 "tags" to emptyList<String>(),
                 "createdAt" to timestamp,

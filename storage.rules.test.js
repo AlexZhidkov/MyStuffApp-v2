@@ -37,7 +37,7 @@ after(async () => {
   await testEnvironment.cleanup();
 });
 
-test("only a Household Member can access the two expected Item WebP variants", async () => {
+test("only a Household Member can transfer a captured immutable photo revision", async () => {
   const revision = "11111111-1111-1111-1111-111111111111";
   const fullPath = `households/household-1/items/item-1-${revision}.webp`;
   const thumbnailPath = `households/household-1/items/item-1-${revision}-thumb.webp`;

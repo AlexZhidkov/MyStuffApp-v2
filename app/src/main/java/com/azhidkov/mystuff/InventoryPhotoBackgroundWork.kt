@@ -115,16 +115,19 @@ internal class BackgroundInventoryPhotoStore(
     }
 
     override fun uploadInBackground(revision: ItemPhotoRevision, photo: ItemPhoto) {
+        queueUpload(revision.fullStoragePath, photo.uri)
+        queueUpload(revision.thumbnailStoragePath, photo.thumbnailUri)
+    }
+
+    override fun uploadThumbnailInBackground(revision: ItemPhotoRevision, photo: ItemPhoto) {
+        queueUpload(revision.thumbnailStoragePath, photo.thumbnailUri)
+    }
+
+    private fun queueUpload(storagePath: String, sourceUri: String) {
         queue.replace(
             PhotoTransferTask.Upload(
-                revision.fullStoragePath,
-                photo.uri,
-            ),
-        )
-        queue.replace(
-            PhotoTransferTask.Upload(
-                revision.thumbnailStoragePath,
-                photo.thumbnailUri,
+                storagePath,
+                sourceUri,
             ),
         )
     }

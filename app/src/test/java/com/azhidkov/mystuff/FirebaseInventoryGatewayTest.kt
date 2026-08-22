@@ -386,6 +386,18 @@ private class FakeInventoryPhotoStore(
         )
     }
 
+    override fun uploadThumbnailInBackground(
+        revision: ItemPhotoRevision,
+        photo: ItemPhoto,
+    ) {
+        enqueueFailure?.let { throw it }
+        uploads += QueuedPhotoUpload(
+            ItemPhotoVariant.Thumbnail,
+            photo.thumbnailUri,
+            revision.thumbnailStoragePath,
+        )
+    }
+
     override fun deleteInBackground(locations: StoredItemPhotoLocations) {
         deletedLocations += locations.presentLocations()
     }

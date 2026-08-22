@@ -189,10 +189,15 @@ internal interface InventoryPhotoStore {
         photo: ItemPhoto,
     )
 
+    fun uploadThumbnailInBackground(
+        revision: ItemPhotoRevision,
+        photo: ItemPhoto,
+    )
+
     fun deleteInBackground(locations: StoredItemPhotoLocations)
 }
 
-private fun firebaseInventoryPhotoStore(): InventoryPhotoStore {
+internal fun firebaseInventoryPhotoStore(): InventoryPhotoStore {
     val storage = FirebaseStorage.getInstance()
     return BackgroundInventoryPhotoStore(
         bucketUrl = storage.reference.toString(),

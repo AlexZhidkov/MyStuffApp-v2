@@ -2,6 +2,7 @@ package com.azhidkov.mystuff
 
 import android.content.Context
 import android.graphics.BitmapFactory
+import androidx.core.net.toUri
 import androidx.lifecycle.Observer
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
@@ -30,8 +31,10 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.storage.FirebaseStorage
 import com.google.firebase.storage.StorageException
+import com.google.firebase.storage.StorageMetadata
 import java.io.DataInputStream
 import java.io.DataOutputStream
+import java.io.EOFException
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.ExecutionException
@@ -43,6 +46,14 @@ internal data class DescriptionGenerationRequest(
     val item: Item,
     val requestingMember: RequestingMemberAttribution,
     val deviceLanguage: String,
+    val replacementPhoto: DescriptionGenerationReplacementPhoto? = null,
+)
+
+internal data class DescriptionGenerationReplacementPhoto(
+    val fullStoragePath: String,
+    val thumbnailStoragePath: String,
+    val fullSourceUri: String,
+    val thumbnailSourceUri: String,
 )
 
 internal data class RequestingMemberAttribution(
@@ -66,8 +77,57 @@ internal data class DescriptionGenerationWorkState(
     val completed: List<CompletedDescriptionGeneration> = emptyList(),
 )
 
+internal class DescriptionGenerationRequestCapture(
+    private val photoStore: InventoryPhotoStore,
+) {
+    fun capture(
+        request: DescriptionGenerationRequest,
+        replacementPhoto: ItemPhoto?,
+    ): DescriptionGenerationRequest {
+        if (replacementPhoto == null) return request
+        val revision = photoStore.newRevision(request.householdId, request.item.id)
+        return request.copy(
+            item = request.item.copy(
+                photoUrl = revision.locations.full,
+                photoThumbnailUrl = revision.locations.thumbnail,
+            ),
+            replacementPhoto = DescriptionGenerationReplacementPhoto(
+                fullStoragePath = revision.fullStoragePath,
+                thumbnailStoragePath = revision.thumbnailStoragePath,
+                fullSourceUri = replacementPhoto.uri,
+                thumbnailSourceUri = replacementPhoto.thumbnailUri,
+            ),
+        )
+    }
+
+    fun uploadThumbnailInBackground(request: DescriptionGenerationRequest) {
+        val replacement = request.replacementPhoto ?: return
+        try {
+            photoStore.uploadThumbnailInBackground(
+                revision = ItemPhotoRevision(
+                    locations = ItemPhotoLocations(
+                        full = requireNotNull(request.item.photoUrl),
+                        thumbnail = requireNotNull(request.item.photoThumbnailUrl),
+                    ),
+                    fullStoragePath = replacement.fullStoragePath,
+                    thumbnailStoragePath = replacement.thumbnailStoragePath,
+                ),
+                photo = ItemPhoto(
+                    uri = replacement.fullSourceUri,
+                    thumbnailUri = replacement.thumbnailSourceUri,
+                ),
+            )
+        } catch (_: RuntimeException) {
+            // Thumbnail transfer remains independent from Description Generation submission.
+        }
+    }
+}
+
 internal interface InventoryDescriptionGenerationWork {
-    fun submit(request: DescriptionGenerationRequest): String
+    fun submit(
+        request: DescriptionGenerationRequest,
+        replacementPhoto: ItemPhoto? = null,
+    ): PendingDescriptionGeneration
 
     fun observe(onChanged: (DescriptionGenerationWorkState) -> Unit): InventorySubscription
 
@@ -75,7 +135,10 @@ internal interface InventoryDescriptionGenerationWork {
 }
 
 internal object NoInventoryDescriptionGenerationWork : InventoryDescriptionGenerationWork {
-    override fun submit(request: DescriptionGenerationRequest) = ""
+    override fun submit(
+        request: DescriptionGenerationRequest,
+        replacementPhoto: ItemPhoto?,
+    ) = PendingDescriptionGeneration("", request)
 
     override fun observe(
         onChanged: (DescriptionGenerationWorkState) -> Unit,
@@ -136,6 +199,19 @@ internal fun interface DescriptionGenerationPhotoLoader {
     fun load(location: String): DescriptionGenerationStep<DescriptionGenerationPhoto>
 }
 
+internal fun interface DescriptionGenerationFullPhotoUploader {
+    fun upload(photo: DescriptionGenerationReplacementPhoto): DescriptionGenerationStep<Unit>
+}
+
+internal interface DescriptionGenerationUploadedPhotoLedger {
+    fun isUploaded(): Boolean
+    fun markUploaded()
+}
+
+internal fun interface DescriptionGenerationLocalPhotoSourceCleaner {
+    fun clean(sourceUri: String)
+}
+
 internal fun interface DescriptionGenerator {
     fun generate(input: DescriptionGenerationModelInput): DescriptionGenerationStep<String>
 }
@@ -144,6 +220,12 @@ internal class DescriptionGenerationWorkflow(
     private val itemStore: DescriptionGenerationItemStore,
     private val photoLoader: DescriptionGenerationPhotoLoader,
     private val generator: DescriptionGenerator,
+    private val fullPhotoUploader: DescriptionGenerationFullPhotoUploader =
+        DescriptionGenerationFullPhotoUploader { DescriptionGenerationStep.PermanentFailure },
+    private val uploadedPhotoLedger: DescriptionGenerationUploadedPhotoLedger =
+        EmptyDescriptionGenerationUploadedPhotoLedger,
+    private val localPhotoSourceCleaner: DescriptionGenerationLocalPhotoSourceCleaner =
+        DescriptionGenerationLocalPhotoSourceCleaner {},
 ) {
     fun run(request: DescriptionGenerationRequest): DescriptionGenerationOutcome {
         when (itemStore.saveDraft(request)) {
@@ -152,6 +234,21 @@ internal class DescriptionGenerationWorkflow(
                 return DescriptionGenerationOutcome.Retry
             DescriptionGenerationStep.PermanentFailure ->
                 return DescriptionGenerationOutcome.PermanentSaveFailure
+        }
+
+        request.replacementPhoto?.let { replacement ->
+            if (!uploadedPhotoLedger.isUploaded()) {
+                when (fullPhotoUploader.upload(replacement)) {
+                    is DescriptionGenerationStep.Success -> {
+                        uploadedPhotoLedger.markUploaded()
+                        localPhotoSourceCleaner.clean(replacement.fullSourceUri)
+                    }
+                    DescriptionGenerationStep.RetryableFailure ->
+                        return DescriptionGenerationOutcome.Retry
+                    DescriptionGenerationStep.PermanentFailure ->
+                        return DescriptionGenerationOutcome.PermanentPhotoFailure
+                }
+            }
         }
 
         val photo = when (
@@ -205,6 +302,12 @@ internal class DescriptionGenerationWorkflow(
     }
 }
 
+private object EmptyDescriptionGenerationUploadedPhotoLedger :
+    DescriptionGenerationUploadedPhotoLedger {
+    override fun isUploaded() = false
+    override fun markUploaded() = Unit
+}
+
 internal fun descriptionGenerationPrompt(
     existingDescription: String?,
     deviceLanguage: String,
@@ -225,6 +328,7 @@ internal class WorkManagerInventoryDescriptionGenerationWork(
 ) : InventoryDescriptionGenerationWork {
     private val workManager = WorkManager.getInstance(context)
     private val workStore = DescriptionGenerationWorkStore(context.noBackupFilesDir)
+    private val requestCapture = DescriptionGenerationRequestCapture(firebaseInventoryPhotoStore())
     private val observers = mutableSetOf<(DescriptionGenerationWorkState) -> Unit>()
     private val workInfoObserver = Observer<List<WorkInfo>> { emitState() }
 
@@ -233,14 +337,18 @@ internal class WorkManagerInventoryDescriptionGenerationWork(
             .observeForever(workInfoObserver)
     }
 
-    override fun submit(request: DescriptionGenerationRequest): String {
-        val id = workStore.enqueue(request)
+    override fun submit(
+        request: DescriptionGenerationRequest,
+        replacementPhoto: ItemPhoto?,
+    ): PendingDescriptionGeneration {
+        val capturedRequest = requestCapture.capture(request, replacementPhoto)
+        val id = workStore.enqueue(capturedRequest)
         try {
             val work = OneTimeWorkRequestBuilder<InventoryDescriptionGenerationWorker>()
                 .setInputData(
                     Data.Builder()
                         .putString(WORK_REQUEST_ID, id)
-                        .putString(WORK_HOUSEHOLD_ID, request.householdId)
+                        .putString(WORK_HOUSEHOLD_ID, capturedRequest.householdId)
                         .build(),
                 )
                 .setConstraints(
@@ -260,8 +368,9 @@ internal class WorkManagerInventoryDescriptionGenerationWork(
             workStore.discardPending(id)
             throw failure
         }
+        requestCapture.uploadThumbnailInBackground(capturedRequest)
         emitState()
-        return id
+        return PendingDescriptionGeneration(id, capturedRequest)
     }
 
     override fun observe(
@@ -304,6 +413,11 @@ internal class InventoryDescriptionGenerationWorker(
             itemStore = FirebaseDescriptionGenerationItemStore(),
             photoLoader = FirebaseDescriptionGenerationPhotoLoader(),
             generator = FirebaseGeminiDescriptionGenerator(),
+            fullPhotoUploader = FirebaseDescriptionGenerationFullPhotoUploader(),
+            uploadedPhotoLedger = workStore.uploadedPhotoLedger(requestId),
+            localPhotoSourceCleaner = AndroidDescriptionGenerationLocalPhotoSourceCleaner(
+                applicationContext,
+            ),
         )
         val outcome = workflow.run(request)
         if (outcome != DescriptionGenerationOutcome.Retry) {
@@ -382,6 +496,38 @@ private class FirebaseDescriptionGenerationPhotoLoader(
             )
             DescriptionGenerationPhoto(bytes)
         }
+}
+
+private class FirebaseDescriptionGenerationFullPhotoUploader(
+    private val storage: FirebaseStorage = FirebaseStorage.getInstance(),
+) : DescriptionGenerationFullPhotoUploader {
+    private val webPMetadata = StorageMetadata.Builder()
+        .setContentType(DESCRIPTION_GENERATION_WEBP_CONTENT_TYPE)
+        .build()
+
+    override fun upload(
+        photo: DescriptionGenerationReplacementPhoto,
+    ): DescriptionGenerationStep<Unit> = firebaseStep {
+        val upload = storage.reference
+            .child(photo.fullStoragePath)
+            .putFile(photo.fullSourceUri.toUri(), webPMetadata)
+        try {
+            Tasks.await(upload).let { }
+        } catch (failure: InterruptedException) {
+            upload.cancel()
+            throw failure
+        }
+    }
+}
+
+private class AndroidDescriptionGenerationLocalPhotoSourceCleaner(
+    private val context: Context,
+) : DescriptionGenerationLocalPhotoSourceCleaner {
+    override fun clean(sourceUri: String) {
+        runCatching {
+            context.contentResolver.delete(sourceUri.toUri(), null, null)
+        }
+    }
 }
 
 private class FirebaseGeminiDescriptionGenerator(
@@ -506,6 +652,11 @@ internal class DescriptionGenerationWorkStore(baseDirectory: File) {
     fun pendingRequest(id: String): DescriptionGenerationRequest? =
         readRequest(resolve(pendingDirectory, id))
 
+    fun uploadedPhotoLedger(id: String): DescriptionGenerationUploadedPhotoLedger =
+        FileDescriptionGenerationUploadedPhotoLedger(
+            marker = resolveWithExtension(pendingDirectory, id, UPLOADED_PHOTO_MARKER_EXTENSION),
+        )
+
     fun complete(
         id: String,
         outcome: DescriptionGenerationOutcome,
@@ -552,6 +703,11 @@ internal class DescriptionGenerationWorkStore(baseDirectory: File) {
 
     fun discardPending(id: String) {
         resolve(pendingDirectory, id)?.delete()
+        resolveWithExtension(
+            pendingDirectory,
+            id,
+            UPLOADED_PHOTO_MARKER_EXTENSION,
+        )?.delete()
     }
 
     private fun readCompleted(file: File): CompletedDescriptionGeneration? = runCatching {
@@ -576,15 +732,36 @@ internal class DescriptionGenerationWorkStore(baseDirectory: File) {
         .sortedWith(compareBy(File::lastModified, File::getName))
 
     private fun resolve(directory: File, id: String): File? = runCatching {
+        resolveWithExtension(directory, id, "bin")
+    }.getOrNull()
+
+    private fun resolveWithExtension(
+        directory: File,
+        id: String,
+        extension: String,
+    ): File? {
         val expectedDirectory = directory.canonicalFile
-        File(directory, "$id.bin").canonicalFile.takeIf { candidate ->
+        return File(directory, "$id.$extension").canonicalFile.takeIf { candidate ->
             candidate.parentFile == expectedDirectory
         }
-    }.getOrNull()
+    }
 
     private fun ensureDirectory(directory: File) {
         check(directory.mkdirs() || directory.isDirectory) {
             "Description Generation work storage is unavailable"
+        }
+    }
+}
+
+private class FileDescriptionGenerationUploadedPhotoLedger(
+    private val marker: File?,
+) : DescriptionGenerationUploadedPhotoLedger {
+    override fun isUploaded(): Boolean = marker?.isFile == true
+
+    override fun markUploaded() {
+        val file = requireNotNull(marker)
+        check(file.createNewFile() || file.isFile) {
+            "Description Generation photo checkpoint storage is unavailable"
         }
     }
 }
@@ -603,23 +780,47 @@ private fun DataOutputStream.writeRequest(request: DescriptionGenerationRequest)
     writeUTF(request.requestingMember.id)
     writeUTF(request.requestingMember.displayName)
     writeUTF(request.deviceLanguage)
+    writeBoolean(request.replacementPhoto != null)
+    request.replacementPhoto?.let { replacement ->
+        writeUTF(replacement.fullStoragePath)
+        writeUTF(replacement.thumbnailStoragePath)
+        writeUTF(replacement.fullSourceUri)
+        writeUTF(replacement.thumbnailSourceUri)
+    }
 }
 
-private fun DataInputStream.readRequest() = DescriptionGenerationRequest(
-    householdId = readUTF(),
-    item = Item(
-        id = readUTF(),
-        name = readUTF(),
-        parentItemId = readNullableString(),
-        photoUrl = readNullableString(),
-        photoThumbnailUrl = readNullableString(),
-        description = readNullableString(),
-        tags = List(readInt()) { readUTF() },
-        webUrl = readNullableString(),
-    ),
-    requestingMember = RequestingMemberAttribution(readUTF(), readUTF()),
-    deviceLanguage = readUTF(),
-)
+private fun DataInputStream.readRequest(): DescriptionGenerationRequest {
+    val request = DescriptionGenerationRequest(
+        householdId = readUTF(),
+        item = Item(
+            id = readUTF(),
+            name = readUTF(),
+            parentItemId = readNullableString(),
+            photoUrl = readNullableString(),
+            photoThumbnailUrl = readNullableString(),
+            description = readNullableString(),
+            tags = List(readInt()) { readUTF() },
+            webUrl = readNullableString(),
+        ),
+        requestingMember = RequestingMemberAttribution(readUTF(), readUTF()),
+        deviceLanguage = readUTF(),
+    )
+    val replacement = try {
+        if (readBoolean()) {
+            DescriptionGenerationReplacementPhoto(
+                fullStoragePath = readUTF(),
+                thumbnailStoragePath = readUTF(),
+                fullSourceUri = readUTF(),
+                thumbnailSourceUri = readUTF(),
+            )
+        } else {
+            null
+        }
+    } catch (_: EOFException) {
+        null
+    }
+    return request.copy(replacementPhoto = replacement)
+}
 
 private fun DataOutputStream.writeNullableString(value: String?) {
     writeBoolean(value != null)
@@ -649,7 +850,9 @@ private const val DESCRIPTION_GENERATION_WORK_DIRECTORY = "description-generatio
 private const val DESCRIPTION_GENERATION_PENDING_DIRECTORY = "pending"
 private const val DESCRIPTION_GENERATION_COMPLETED_DIRECTORY = "completed"
 private const val DESCRIPTION_GENERATION_REQUEST_PREFIX = "request-"
+private const val UPLOADED_PHOTO_MARKER_EXTENSION = "uploaded"
 private const val DESCRIPTION_GENERATION_WORK_TAG = "description-generation"
 private const val WORK_REQUEST_ID = "request-id"
 private const val WORK_HOUSEHOLD_ID = "household-id"
 private const val WORK_FAILURE_OUTCOME = "failure-outcome"
+private const val DESCRIPTION_GENERATION_WEBP_CONTENT_TYPE = "image/webp"

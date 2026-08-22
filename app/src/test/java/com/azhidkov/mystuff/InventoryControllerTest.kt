@@ -697,6 +697,9 @@ class InventoryControllerTest {
         controller.beginEditItem()
         controller.changeItemName("Hammer Drill")
         controller.changeItemDescription("Member facts")
+        controller.changeItemWebUrl(" https://example.com/hammer-drill ")
+        controller.changeTagInput("Power Tools")
+        controller.addTag()
 
         controller.saveAndGenerateDescription()
         gateway.emit(
@@ -712,6 +715,11 @@ class InventoryControllerTest {
 
         assertEquals("Hammer Drill", controller.state.selectedItem.name)
         assertEquals("Member facts", controller.state.selectedItem.description)
+        assertEquals(listOf("Power Tools"), controller.state.selectedItem.tags)
+        assertEquals(
+            "https://example.com/hammer-drill",
+            controller.state.selectedItem.webUrl,
+        )
         assertEquals("Saw", controller.state.inventory.item("saw").name)
         assertNull(controller.state.deferredError)
         assertNull(controller.state.successMessage)
@@ -873,7 +881,7 @@ class InventoryControllerTest {
         val inventory = Inventory.from(household, listOf(household.rootItem, existing))
         val work = RecordingDescriptionGenerationWork()
         val submission = work.submit(descriptionGenerationRequestFor(existing))
-        work.complete(submission, DescriptionGenerationOutcome.PermanentGenerationFailure)
+        work.complete(submission.id, DescriptionGenerationOutcome.PermanentGenerationFailure)
 
         val firstController = InventoryController(
             household = household,
@@ -923,7 +931,7 @@ class InventoryControllerTest {
             description = "Member facts",
         )
         val work = RecordingDescriptionGenerationWork()
-        val id = work.submit(descriptionGenerationRequestFor(submitted))
+        val id = work.submit(descriptionGenerationRequestFor(submitted)).id
         work.complete(
             id,
             DescriptionGenerationOutcome.Success,
@@ -949,7 +957,7 @@ class InventoryControllerTest {
     }
 
     @Test
-    fun `Description Generation stays unavailable without an unchanged stored Item Photo`() {
+    fun `replacement Item Photo enables Description Generation until it is removed`() {
         val household = household()
         val itemWithoutPhoto = item("drill", "Drill", household.id)
         val controller = InventoryController(
@@ -972,7 +980,65 @@ class InventoryControllerTest {
         controller.resolveCameraPermission(granted = true)
         controller.photoCaptured(ItemPhoto("content://captured.jpg"))
         controller.useCroppedPhoto(ItemPhoto("content://new.webp", "content://new-thumb.webp"))
+        assertTrue(controller.state.canGenerateDescription)
+
+        controller.removeItemPhoto()
+
         assertFalse(controller.state.canGenerateDescription)
+    }
+
+    @Test
+    fun `replacement photo submission closes Edit and presents one captured immutable revision`() {
+        val household = household()
+        val existing = item(
+            id = "drill",
+            name = "Drill",
+            parentItemId = household.id,
+            photoUrl = "gs://mystuff/households/household-1/items/drill-old.webp",
+            photoThumbnailUrl =
+                "gs://mystuff/households/household-1/items/drill-old-thumb.webp",
+            description = "Old description",
+        )
+        val work = RecordingDescriptionGenerationWork()
+        val controller = InventoryController(
+            household = household,
+            identity = identity(),
+            gateway = FakeInventoryGateway(
+                Inventory.from(household, listOf(household.rootItem, existing)),
+            ),
+            rootChildItemCache = NoRootChildItemCache,
+            descriptionGenerationWork = work,
+            deviceLanguage = { "en-AU" },
+        )
+        controller.openItem(existing.id)
+        controller.beginEditItem()
+        controller.changeItemName("Hammer Drill")
+        controller.changeItemDescription("Member facts")
+        controller.beginReplaceItemPhoto()
+        controller.resolveCameraPermission(granted = true)
+        controller.photoCaptured(ItemPhoto("content://captured.jpg"))
+        controller.useCroppedPhoto(
+            ItemPhoto("content://new-full.webp", "content://new-thumb.webp"),
+        )
+
+        controller.saveAndGenerateDescription()
+
+        assertNull(controller.state.itemDraft)
+        assertEquals("Hammer Drill", controller.state.selectedItem.name)
+        assertEquals("Member facts", controller.state.selectedItem.description)
+        assertEquals(
+            "gs://mystuff/households/household-1/items/drill-$DESCRIPTION_REVISION.webp",
+            controller.state.selectedItem.photoUrl,
+        )
+        assertEquals(
+            "gs://mystuff/households/household-1/items/drill-$DESCRIPTION_REVISION-thumb.webp",
+            controller.state.selectedItem.photoThumbnailUrl,
+        )
+        assertEquals(
+            ItemPhoto("content://new-full.webp", "content://new-thumb.webp"),
+            work.replacementPhotos.single(),
+        )
+        assertEquals(controller.state.selectedItem, work.requests.single().item)
     }
 
     @Test
@@ -1160,17 +1226,35 @@ private class RecordingRootChildItemCache(
 
 private class RecordingDescriptionGenerationWork : InventoryDescriptionGenerationWork {
     val requests = mutableListOf<DescriptionGenerationRequest>()
+    val replacementPhotos = mutableListOf<ItemPhoto>()
     val pending = mutableListOf<PendingDescriptionGeneration>()
     val outcomes = mutableListOf<CompletedDescriptionGeneration>()
     val consumedOutcomes = mutableListOf<String>()
     private var observer: ((DescriptionGenerationWorkState) -> Unit)? = null
 
-    override fun submit(request: DescriptionGenerationRequest): String {
-        requests += request
+    override fun submit(
+        request: DescriptionGenerationRequest,
+        replacementPhoto: ItemPhoto?,
+    ): PendingDescriptionGeneration {
+        val capturedRequest = if (replacementPhoto == null) {
+            request
+        } else {
+            replacementPhotos += replacementPhoto
+            request.copy(
+                item = request.item.copy(
+                    photoUrl = "gs://mystuff/households/${request.householdId}/items/" +
+                        "${request.item.id}-$DESCRIPTION_REVISION.webp",
+                    photoThumbnailUrl = "gs://mystuff/households/${request.householdId}/items/" +
+                        "${request.item.id}-$DESCRIPTION_REVISION-thumb.webp",
+                ),
+            )
+        }
+        requests += capturedRequest
         val id = "request-${requests.size}"
-        pending += PendingDescriptionGeneration(id, request)
+        val submission = PendingDescriptionGeneration(id, capturedRequest)
+        pending += submission
         emit()
-        return id
+        return submission
     }
 
     override fun observe(
@@ -1208,6 +1292,8 @@ private fun descriptionGenerationRequestFor(item: Item) = DescriptionGenerationR
     requestingMember = RequestingMemberAttribution("member-1", "Alex"),
     deviceLanguage = "en-AU",
 )
+
+private const val DESCRIPTION_REVISION = "11111111-1111-1111-1111-111111111111"
 
 private fun household() = Household(
     id = "household-1",

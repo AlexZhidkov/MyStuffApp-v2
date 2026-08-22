@@ -131,10 +131,10 @@ data class InventoryUiState(
         get() {
             val draft = itemDraft ?: return false
             val editingItemId = draft.editingItemId ?: return false
-            if (draft.photo != null || draft.photoRemoved || !inventory.contains(editingItemId)) {
+            if (draft.photoRemoved || !inventory.contains(editingItemId)) {
                 return false
             }
-            return inventory.item(editingItemId).photoUrl != null
+            return draft.photo != null || inventory.item(editingItemId).photoUrl != null
         }
     val itemFormStage: ItemFormStage?
         get() = itemDraft?.stage
@@ -562,23 +562,25 @@ class InventoryController internal constructor(
         val details = validateAndNormalize(draft) ?: return
 
         val existing = state.inventory.item(requireNotNull(draft.editingItemId))
-        val submitted = existing.copy(
+        val capturedItem = existing.copy(
             name = details.name,
             description = details.description,
             tags = details.tags,
             webUrl = details.webUrl,
         )
-        descriptionGenerationWork.submit(
+        val submission = descriptionGenerationWork.submit(
             DescriptionGenerationRequest(
                 householdId = household.id,
-                item = submitted,
+                item = capturedItem,
                 requestingMember = RequestingMemberAttribution(
                     id = identity.id,
                     displayName = identity.attributionDisplayName(),
                 ),
                 deviceLanguage = deviceLanguage(),
             ),
+            replacementPhoto = draft.photo,
         )
+        val submitted = submission.request.item
         updateState(
             state.copy(
                 inventory = state.inventory.withItem(submitted),

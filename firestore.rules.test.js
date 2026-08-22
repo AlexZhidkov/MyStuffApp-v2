@@ -447,7 +447,7 @@ test("Household Member can update Child Item details with fresh attribution", as
   assert.equal(updated.updatedById, "member-2");
 });
 
-test("Household Member can perform the full Save and generated Description patch", async () => {
+test("Household Member can save a captured replacement revision and patch its Description", async () => {
   await seedHousehold();
   await seedHouseholdMember();
   await testEnvironment.withSecurityRulesDisabled(async (context) => {
@@ -458,12 +458,13 @@ test("Household Member can perform the full Save and generated Description patch
   });
   const database = testEnvironment.authenticatedContext("member-2").firestore();
   const reference = doc(database, "households/household-1/items/item-1");
+  const revision = "11111111-1111-1111-1111-111111111111";
 
   await assertSucceeds(updateDoc(reference, {
     name: "Hammer Drill",
-    photoUrl: "gs://mystuff/households/household-1/items/item-1-revision.webp",
+    photoUrl: `gs://mystuff/households/household-1/items/item-1-${revision}.webp`,
     photoThumbnailUrl:
-      "gs://mystuff/households/household-1/items/item-1-revision-thumb.webp",
+      `gs://mystuff/households/household-1/items/item-1-${revision}-thumb.webp`,
     description: "Member facts",
     tags: ["Power Tools"],
     webUrl: "https://example.com/hammer-drill",
@@ -485,17 +486,19 @@ test("Household Member can perform the full Save and generated Description patch
   assert.equal(updated.updatedById, "member-2");
 });
 
-test("Household Member cannot run Description Generation writes across Households", async () => {
+test("Household Member cannot save a replacement revision across Households", async () => {
   await seedHousehold();
   await seedHouseholdMember();
   await seedOtherHousehold();
   const database = testEnvironment.authenticatedContext("member-2").firestore();
   const reference = doc(database, "households/household-2/items/item-2");
+  const revision = "22222222-2222-2222-2222-222222222222";
 
   await assertFails(updateDoc(reference, {
     name: "Circular Saw",
-    photoUrl: "gs://mystuff/households/household-2/items/item-2.webp",
-    photoThumbnailUrl: null,
+    photoUrl: `gs://mystuff/households/household-2/items/item-2-${revision}.webp`,
+    photoThumbnailUrl:
+      `gs://mystuff/households/household-2/items/item-2-${revision}-thumb.webp`,
     description: "Member facts",
     tags: ["Power Tools"],
     webUrl: null,

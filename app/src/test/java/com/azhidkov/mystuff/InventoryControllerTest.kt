@@ -1,5 +1,7 @@
 package com.azhidkov.mystuff
 
+import com.azhidkov.mystuff.ui.presentDeferredInventoryError
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -743,28 +745,31 @@ class InventoryControllerTest {
         controller.saveAndGenerateDescription()
         val submission = work.pending.single()
 
-        work.complete(
-            submission.id,
-            DescriptionGenerationOutcome.Success,
-            generatedDescription = "A blue hammer drill.",
-        )
-
-        assertEquals("Hammer Drill", controller.state.selectedItem.name)
-        assertEquals("Member facts", controller.state.selectedItem.description)
-
         gateway.emit(
             Inventory.from(
                 household,
                 listOf(
                     household.rootItem,
-                    submission.request.item.copy(description = "A blue hammer drill."),
+                    submission.request.item.copy(
+                        description = "A blue hammer drill.",
+                        tags = listOf("Concurrent edit"),
+                    ),
                 ),
             ),
         )
 
+        assertEquals("Member facts", controller.state.selectedItem.description)
+
+        work.complete(
+            submission.id,
+            DescriptionGenerationOutcome.Success,
+        )
+
         assertEquals("A blue hammer drill.", controller.state.selectedItem.description)
+        assertEquals(listOf("Concurrent edit"), controller.state.selectedItem.tags)
         assertNull(controller.state.deferredError)
         assertNull(controller.state.successMessage)
+        assertEquals(listOf(submission.id), work.consumedOutcomes)
     }
 
     @Test
@@ -882,7 +887,18 @@ class InventoryControllerTest {
             "Item saved, but couldn't generate its description.",
             firstController.state.deferredError?.message,
         )
-        firstController.consumeDeferredError(requireNotNull(firstController.state.deferredError).id)
+        val presentedMessages = mutableListOf<String>()
+        runBlocking {
+            presentDeferredInventoryError(
+                error = requireNotNull(firstController.state.deferredError),
+                showSnackbar = { message -> presentedMessages += message },
+                consume = firstController::consumeDeferredError,
+            )
+        }
+        assertEquals(
+            listOf("Item saved, but couldn't generate its description."),
+            presentedMessages,
+        )
         firstController.close()
 
         val nextController = InventoryController(
@@ -894,6 +910,42 @@ class InventoryControllerTest {
         )
 
         assertNull(nextController.state.deferredError)
+    }
+
+    @Test
+    fun `success completed without an active controller releases its retained outcome`() {
+        val household = household()
+        val submitted = item(
+            id = "drill",
+            name = "Hammer Drill",
+            parentItemId = household.id,
+            photoUrl = "gs://mystuff/drill.webp",
+            description = "Member facts",
+        )
+        val work = RecordingDescriptionGenerationWork()
+        val id = work.submit(descriptionGenerationRequestFor(submitted))
+        work.complete(
+            id,
+            DescriptionGenerationOutcome.Success,
+        )
+
+        InventoryController(
+            household = household,
+            identity = identity(),
+            gateway = FakeInventoryGateway(
+                Inventory.from(
+                    household,
+                    listOf(
+                        household.rootItem,
+                        submitted.copy(description = "A blue hammer drill."),
+                    ),
+                ),
+            ),
+            rootChildItemCache = NoRootChildItemCache,
+            descriptionGenerationWork = work,
+        )
+
+        assertEquals(listOf(id), work.consumedOutcomes)
     }
 
     @Test
@@ -1138,11 +1190,10 @@ private class RecordingDescriptionGenerationWork : InventoryDescriptionGeneratio
     fun complete(
         id: String,
         outcome: DescriptionGenerationOutcome,
-        generatedDescription: String? = null,
     ) {
         val request = requireNotNull(pending.singleOrNull { it.id == id }).request
         pending.removeAll { it.id == id }
-        outcomes += CompletedDescriptionGeneration(id, request, outcome, generatedDescription)
+        outcomes += CompletedDescriptionGeneration(id, request, outcome)
         emit()
     }
 

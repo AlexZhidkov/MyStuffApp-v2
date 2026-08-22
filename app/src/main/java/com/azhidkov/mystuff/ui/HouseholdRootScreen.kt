@@ -52,6 +52,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.azhidkov.mystuff.DeferredInventoryError
 import com.azhidkov.mystuff.HouseholdInvitation
 import com.azhidkov.mystuff.InvitationStatus
 import com.azhidkov.mystuff.InvitationUiState
@@ -85,11 +86,11 @@ fun HouseholdRootScreen(
     val deferredError = inventoryState.deferredError
     LaunchedEffect(deferredError?.id) {
         deferredError?.let { error ->
-            try {
-                snackbarHostState.showSnackbar(error.message)
-            } finally {
-                inventoryActions.consumeDeferredError(error.id)
-            }
+            presentDeferredInventoryError(
+                error = error,
+                showSnackbar = snackbarHostState::showSnackbar,
+                consume = inventoryActions::consumeDeferredError,
+            )
         }
     }
     Box(modifier = Modifier.fillMaxSize()) {
@@ -109,6 +110,18 @@ fun HouseholdRootScreen(
                 .align(Alignment.BottomCenter)
                 .padding(24.dp),
         )
+    }
+}
+
+internal suspend fun presentDeferredInventoryError(
+    error: DeferredInventoryError,
+    showSnackbar: suspend (String) -> Unit,
+    consume: (String) -> Unit,
+) {
+    try {
+        showSnackbar(error.message)
+    } finally {
+        consume(error.id)
     }
 }
 

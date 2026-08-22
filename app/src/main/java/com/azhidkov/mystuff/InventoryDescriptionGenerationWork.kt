@@ -59,7 +59,6 @@ internal data class CompletedDescriptionGeneration(
     val id: String,
     val request: DescriptionGenerationRequest,
     val outcome: DescriptionGenerationOutcome,
-    val generatedDescription: String? = null,
 )
 
 internal data class DescriptionGenerationWorkState(
@@ -94,18 +93,15 @@ internal sealed interface DescriptionGenerationStep<out T> {
     data object PermanentFailure : DescriptionGenerationStep<Nothing>
 }
 
-internal enum class DescriptionGenerationOutcome {
+internal enum class DescriptionGenerationOutcome(
+    val deferredErrorMessage: String? = null,
+) {
     Success,
     Retry,
-    PermanentSaveFailure,
-    PermanentPhotoFailure,
-    PermanentGenerationFailure,
+    PermanentSaveFailure("Couldn't save the Item."),
+    PermanentPhotoFailure("Item saved, but couldn't upload its photo."),
+    PermanentGenerationFailure("Item saved, but couldn't generate its description."),
 }
-
-internal data class DescriptionGenerationRunResult(
-    val outcome: DescriptionGenerationOutcome,
-    val generatedDescription: String? = null,
-)
 
 internal enum class DescriptionGenerationFailureCategory {
     Connectivity,
@@ -149,18 +145,13 @@ internal class DescriptionGenerationWorkflow(
     private val photoLoader: DescriptionGenerationPhotoLoader,
     private val generator: DescriptionGenerator,
 ) {
-    fun run(request: DescriptionGenerationRequest): DescriptionGenerationOutcome =
-        runWithResult(request).outcome
-
-    fun runWithResult(request: DescriptionGenerationRequest): DescriptionGenerationRunResult {
+    fun run(request: DescriptionGenerationRequest): DescriptionGenerationOutcome {
         when (itemStore.saveDraft(request)) {
             is DescriptionGenerationStep.Success -> Unit
             DescriptionGenerationStep.RetryableFailure ->
-                return DescriptionGenerationRunResult(DescriptionGenerationOutcome.Retry)
+                return DescriptionGenerationOutcome.Retry
             DescriptionGenerationStep.PermanentFailure ->
-                return DescriptionGenerationRunResult(
-                    DescriptionGenerationOutcome.PermanentSaveFailure,
-                )
+                return DescriptionGenerationOutcome.PermanentSaveFailure
         }
 
         val photo = when (
@@ -168,11 +159,9 @@ internal class DescriptionGenerationWorkflow(
         ) {
             is DescriptionGenerationStep.Success -> loaded.value
             DescriptionGenerationStep.RetryableFailure ->
-                return DescriptionGenerationRunResult(DescriptionGenerationOutcome.Retry)
+                return DescriptionGenerationOutcome.Retry
             DescriptionGenerationStep.PermanentFailure ->
-                return DescriptionGenerationRunResult(
-                    DescriptionGenerationOutcome.PermanentPhotoFailure,
-                )
+                return DescriptionGenerationOutcome.PermanentPhotoFailure
         }
         val generated = when (
             val result = generator.generate(
@@ -189,22 +178,18 @@ internal class DescriptionGenerationWorkflow(
         ) {
             is DescriptionGenerationStep.Success -> result.value.trimUnicodeWhitespace()
             DescriptionGenerationStep.RetryableFailure ->
-                return DescriptionGenerationRunResult(DescriptionGenerationOutcome.Retry)
+                return DescriptionGenerationOutcome.Retry
             DescriptionGenerationStep.PermanentFailure ->
-                return DescriptionGenerationRunResult(
-                    DescriptionGenerationOutcome.PermanentGenerationFailure,
-                )
+                return DescriptionGenerationOutcome.PermanentGenerationFailure
         }
         if (
             generated.isEmpty() ||
             generated.codePointCount(0, generated.length) > ItemFormPolicy.MAX_DESCRIPTION_LENGTH
         ) {
-            return DescriptionGenerationRunResult(
-                DescriptionGenerationOutcome.PermanentGenerationFailure,
-            )
+            return DescriptionGenerationOutcome.PermanentGenerationFailure
         }
 
-        val outcome = when (
+        return when (
             itemStore.patchDescription(
                 householdId = request.householdId,
                 itemId = request.item.id,
@@ -217,12 +202,6 @@ internal class DescriptionGenerationWorkflow(
             DescriptionGenerationStep.PermanentFailure ->
                 DescriptionGenerationOutcome.PermanentGenerationFailure
         }
-        return DescriptionGenerationRunResult(
-            outcome = outcome,
-            generatedDescription = generated.takeIf {
-                outcome == DescriptionGenerationOutcome.Success
-            },
-        )
     }
 }
 
@@ -320,21 +299,20 @@ internal class InventoryDescriptionGenerationWorker(
             photoLoader = FirebaseDescriptionGenerationPhotoLoader(),
             generator = FirebaseGeminiDescriptionGenerator(),
         )
-        val result = workflow.runWithResult(request)
-        if (result.outcome != DescriptionGenerationOutcome.Retry) {
+        val outcome = workflow.run(request)
+        if (outcome != DescriptionGenerationOutcome.Retry) {
             workStore.complete(
                 id = requestId,
-                outcome = result.outcome,
-                generatedDescription = result.generatedDescription,
+                outcome = outcome,
             )
         }
-        return when (result.outcome) {
+        return when (outcome) {
             DescriptionGenerationOutcome.Success -> Result.success()
             DescriptionGenerationOutcome.Retry -> Result.retry()
             DescriptionGenerationOutcome.PermanentSaveFailure,
             DescriptionGenerationOutcome.PermanentPhotoFailure,
             DescriptionGenerationOutcome.PermanentGenerationFailure,
-            -> Result.failure(failureData(result.outcome))
+            -> Result.failure(failureData(outcome))
         }
     }
 }
@@ -519,7 +497,6 @@ internal class DescriptionGenerationWorkStore(baseDirectory: File) {
     fun complete(
         id: String,
         outcome: DescriptionGenerationOutcome,
-        generatedDescription: String? = null,
     ) {
         val request = pendingRequest(id) ?: return
         ensureDirectory(completedDirectory)
@@ -528,7 +505,6 @@ internal class DescriptionGenerationWorkStore(baseDirectory: File) {
         DataOutputStream(temporary.outputStream().buffered()).use { output ->
             output.writeRequest(request)
             output.writeUTF(outcome.name)
-            output.writeNullableString(generatedDescription)
         }
         check(temporary.renameTo(destination)) {
             "Description Generation outcome storage is unavailable"
@@ -559,7 +535,6 @@ internal class DescriptionGenerationWorkStore(baseDirectory: File) {
                 id = file.nameWithoutExtension,
                 request = input.readRequest(),
                 outcome = DescriptionGenerationOutcome.valueOf(input.readUTF()),
-                generatedDescription = input.readNullableString(),
             )
         }
     }.getOrNull()

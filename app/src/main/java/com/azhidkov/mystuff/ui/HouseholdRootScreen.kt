@@ -3,6 +3,7 @@ package com.azhidkov.mystuff.ui
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -28,12 +29,15 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -68,6 +72,49 @@ import kotlinx.coroutines.delay
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HouseholdRootScreen(
+    inventoryState: InventoryUiState,
+    invitationState: InvitationUiState,
+    signOutInProgress: Boolean,
+    onCreateInvitation: (String) -> Unit,
+    onRevokeInvitation: (String) -> Unit,
+    onReplaceInvitation: (String, String) -> Unit,
+    inventoryActions: InventoryActions,
+    onSignOut: () -> Unit,
+) {
+    val snackbarHostState = remember { SnackbarHostState() }
+    val deferredError = inventoryState.deferredError
+    LaunchedEffect(deferredError?.id) {
+        deferredError?.let { error ->
+            try {
+                snackbarHostState.showSnackbar(error.message)
+            } finally {
+                inventoryActions.consumeDeferredError(error.id)
+            }
+        }
+    }
+    Box(modifier = Modifier.fillMaxSize()) {
+        HouseholdRootContent(
+            inventoryState = inventoryState,
+            invitationState = invitationState,
+            signOutInProgress = signOutInProgress,
+            onCreateInvitation = onCreateInvitation,
+            onRevokeInvitation = onRevokeInvitation,
+            onReplaceInvitation = onReplaceInvitation,
+            inventoryActions = inventoryActions,
+            onSignOut = onSignOut,
+        )
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(24.dp),
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HouseholdRootContent(
     inventoryState: InventoryUiState,
     invitationState: InvitationUiState,
     signOutInProgress: Boolean,

@@ -6,9 +6,14 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
 
 class InventoryDescriptionGenerationWorkTest {
+    @get:Rule
+    val temporaryFolder = TemporaryFolder()
+
     @Test
     fun `workflow saves the draft before using captured Gemini input and patching Description`() {
         val events = mutableListOf<String>()
@@ -165,6 +170,49 @@ class InventoryDescriptionGenerationWorkTest {
             DescriptionGenerationOutcome.PermanentGenerationFailure,
             generationFailure.run(descriptionGenerationRequest()),
         )
+    }
+
+    @Test
+    fun `workflow distinguishes a permanent full-photo load failure`() {
+        val workflow = DescriptionGenerationWorkflow(
+            RecordingDescriptionGenerationItemStore(mutableListOf()),
+            FixedDescriptionGenerationPhotoLoader(DescriptionGenerationStep.PermanentFailure),
+            successfulGenerator(),
+        )
+
+        assertEquals(
+            DescriptionGenerationOutcome.PermanentPhotoFailure,
+            workflow.run(descriptionGenerationRequest()),
+        )
+    }
+
+    @Test
+    fun `permanent outcome survives work-store recreation until consumed`() {
+        val directory = temporaryFolder.newFolder("description-generation")
+        val request = descriptionGenerationRequest()
+        val firstStore = DescriptionGenerationWorkStore(directory)
+        val id = firstStore.enqueue(request)
+
+        firstStore.complete(
+            id = id,
+            outcome = DescriptionGenerationOutcome.PermanentGenerationFailure,
+        )
+
+        val restored = DescriptionGenerationWorkStore(directory)
+        assertEquals(
+            listOf(
+                CompletedDescriptionGeneration(
+                    id = id,
+                    request = request,
+                    outcome = DescriptionGenerationOutcome.PermanentGenerationFailure,
+                ),
+            ),
+            restored.snapshot().completed,
+        )
+
+        restored.consume(id)
+
+        assertTrue(DescriptionGenerationWorkStore(directory).snapshot().completed.isEmpty())
     }
 
     @Test

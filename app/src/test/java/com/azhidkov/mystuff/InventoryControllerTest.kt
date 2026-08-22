@@ -671,6 +671,232 @@ class InventoryControllerTest {
     }
 
     @Test
+    fun `pending Description Generation stays overlaid across live Inventory refreshes`() {
+        val household = household()
+        val existing = item(
+            id = "drill",
+            name = "Drill",
+            parentItemId = household.id,
+            photoUrl = "gs://mystuff/drill.webp",
+            description = "Old description",
+        )
+        val gateway = FakeInventoryGateway(
+            Inventory.from(household, listOf(household.rootItem, existing)),
+        )
+        val work = RecordingDescriptionGenerationWork()
+        val controller = InventoryController(
+            household = household,
+            identity = identity(),
+            gateway = gateway,
+            rootChildItemCache = NoRootChildItemCache,
+            descriptionGenerationWork = work,
+        )
+        controller.openItem(existing.id)
+        controller.beginEditItem()
+        controller.changeItemName("Hammer Drill")
+        controller.changeItemDescription("Member facts")
+
+        controller.saveAndGenerateDescription()
+        gateway.emit(
+            Inventory.from(
+                household,
+                listOf(
+                    household.rootItem,
+                    existing,
+                    item("saw", "Saw", household.id),
+                ),
+            ),
+        )
+
+        assertEquals("Hammer Drill", controller.state.selectedItem.name)
+        assertEquals("Member facts", controller.state.selectedItem.description)
+        assertEquals("Saw", controller.state.inventory.item("saw").name)
+        assertNull(controller.state.deferredError)
+        assertNull(controller.state.successMessage)
+    }
+
+    @Test
+    fun `successful Description Generation reconciles with observed Inventory silently`() {
+        val household = household()
+        val existing = item(
+            id = "drill",
+            name = "Drill",
+            parentItemId = household.id,
+            photoUrl = "gs://mystuff/drill.webp",
+            description = "Old description",
+        )
+        val gateway = FakeInventoryGateway(
+            Inventory.from(household, listOf(household.rootItem, existing)),
+        )
+        val work = RecordingDescriptionGenerationWork()
+        val controller = InventoryController(
+            household = household,
+            identity = identity(),
+            gateway = gateway,
+            rootChildItemCache = NoRootChildItemCache,
+            descriptionGenerationWork = work,
+        )
+        controller.openItem(existing.id)
+        controller.beginEditItem()
+        controller.changeItemName("Hammer Drill")
+        controller.changeItemDescription("Member facts")
+        controller.saveAndGenerateDescription()
+        val submission = work.pending.single()
+
+        work.complete(
+            submission.id,
+            DescriptionGenerationOutcome.Success,
+            generatedDescription = "A blue hammer drill.",
+        )
+
+        assertEquals("Hammer Drill", controller.state.selectedItem.name)
+        assertEquals("Member facts", controller.state.selectedItem.description)
+
+        gateway.emit(
+            Inventory.from(
+                household,
+                listOf(
+                    household.rootItem,
+                    submission.request.item.copy(description = "A blue hammer drill."),
+                ),
+            ),
+        )
+
+        assertEquals("A blue hammer drill.", controller.state.selectedItem.description)
+        assertNull(controller.state.deferredError)
+        assertNull(controller.state.successMessage)
+    }
+
+    @Test
+    fun `permanent Save failure rolls back optimistic Item and is consumed once`() {
+        val household = household()
+        val existing = item(
+            id = "drill",
+            name = "Drill",
+            parentItemId = household.id,
+            photoUrl = "gs://mystuff/drill.webp",
+            description = "Old description",
+        )
+        val gateway = FakeInventoryGateway(
+            Inventory.from(household, listOf(household.rootItem, existing)),
+        )
+        val work = RecordingDescriptionGenerationWork()
+        val controller = InventoryController(
+            household = household,
+            identity = identity(),
+            gateway = gateway,
+            rootChildItemCache = NoRootChildItemCache,
+            descriptionGenerationWork = work,
+        )
+        controller.openItem(existing.id)
+        controller.beginEditItem()
+        controller.changeItemName("Hammer Drill")
+        controller.saveAndGenerateDescription()
+        val submission = work.pending.single()
+
+        work.complete(submission.id, DescriptionGenerationOutcome.PermanentSaveFailure)
+
+        assertEquals("Drill", controller.state.selectedItem.name)
+        assertEquals("Couldn't save the Item.", controller.state.deferredError?.message)
+
+        controller.consumeDeferredError(requireNotNull(controller.state.deferredError).id)
+
+        assertNull(controller.state.deferredError)
+        assertEquals(listOf(submission.id), work.consumedOutcomes)
+    }
+
+    @Test
+    fun `post-Save failures preserve the saved draft and use stage-specific messages`() {
+        val scenarios = listOf(
+            DescriptionGenerationOutcome.PermanentPhotoFailure to
+                "Item saved, but couldn't upload its photo.",
+            DescriptionGenerationOutcome.PermanentGenerationFailure to
+                "Item saved, but couldn't generate its description.",
+        )
+
+        scenarios.forEach { (outcome, message) ->
+            val household = household()
+            val existing = item(
+                id = "drill",
+                name = "Drill",
+                parentItemId = household.id,
+                photoUrl = "gs://mystuff/drill.webp",
+                description = "Old description",
+            )
+            val gateway = FakeInventoryGateway(
+                Inventory.from(household, listOf(household.rootItem, existing)),
+            )
+            val work = RecordingDescriptionGenerationWork()
+            val controller = InventoryController(
+                household = household,
+                identity = identity(),
+                gateway = gateway,
+                rootChildItemCache = NoRootChildItemCache,
+                descriptionGenerationWork = work,
+            )
+            controller.openItem(existing.id)
+            controller.beginEditItem()
+            controller.changeItemName("Hammer Drill")
+            controller.changeItemDescription("Member facts")
+            controller.saveAndGenerateDescription()
+            val submission = work.pending.single()
+            gateway.emit(
+                Inventory.from(
+                    household,
+                    listOf(household.rootItem, submission.request.item),
+                ),
+            )
+
+            work.complete(submission.id, outcome)
+
+            assertEquals("Hammer Drill", controller.state.selectedItem.name)
+            assertEquals("Member facts", controller.state.selectedItem.description)
+            assertEquals(message, controller.state.deferredError?.message)
+            assertNull(controller.state.successMessage)
+        }
+    }
+
+    @Test
+    fun `failure completed without an active controller appears once on next Inventory lifecycle`() {
+        val household = household()
+        val existing = item(
+            id = "drill",
+            name = "Drill",
+            parentItemId = household.id,
+            photoUrl = "gs://mystuff/drill.webp",
+        )
+        val inventory = Inventory.from(household, listOf(household.rootItem, existing))
+        val work = RecordingDescriptionGenerationWork()
+        val submission = work.submit(descriptionGenerationRequestFor(existing))
+        work.complete(submission, DescriptionGenerationOutcome.PermanentGenerationFailure)
+
+        val firstController = InventoryController(
+            household = household,
+            identity = identity(),
+            gateway = FakeInventoryGateway(inventory),
+            rootChildItemCache = NoRootChildItemCache,
+            descriptionGenerationWork = work,
+        )
+
+        assertEquals(
+            "Item saved, but couldn't generate its description.",
+            firstController.state.deferredError?.message,
+        )
+        firstController.consumeDeferredError(requireNotNull(firstController.state.deferredError).id)
+        firstController.close()
+
+        val nextController = InventoryController(
+            household = household,
+            identity = identity(),
+            gateway = FakeInventoryGateway(inventory),
+            rootChildItemCache = NoRootChildItemCache,
+            descriptionGenerationWork = work,
+        )
+
+        assertNull(nextController.state.deferredError)
+    }
+
+    @Test
     fun `Description Generation stays unavailable without an unchanged stored Item Photo`() {
         val household = household()
         val itemWithoutPhoto = item("drill", "Drill", household.id)
@@ -825,6 +1051,11 @@ private class FakeInventoryGateway(
         requireNotNull(pendingCreate).also { pendingCreate = null }.invoke()
     }
 
+    fun emit(inventory: Inventory) {
+        this.inventory = inventory
+        observer?.invoke(Result.success(inventory))
+    }
+
     override fun updateItem(
         householdId: String,
         item: Item,
@@ -877,11 +1108,55 @@ private class RecordingRootChildItemCache(
 
 private class RecordingDescriptionGenerationWork : InventoryDescriptionGenerationWork {
     val requests = mutableListOf<DescriptionGenerationRequest>()
+    val pending = mutableListOf<PendingDescriptionGeneration>()
+    val outcomes = mutableListOf<CompletedDescriptionGeneration>()
+    val consumedOutcomes = mutableListOf<String>()
+    private var observer: ((DescriptionGenerationWorkState) -> Unit)? = null
 
-    override fun submit(request: DescriptionGenerationRequest) {
+    override fun submit(request: DescriptionGenerationRequest): String {
         requests += request
+        val id = "request-${requests.size}"
+        pending += PendingDescriptionGeneration(id, request)
+        emit()
+        return id
+    }
+
+    override fun observe(
+        onChanged: (DescriptionGenerationWorkState) -> Unit,
+    ): InventorySubscription {
+        observer = onChanged
+        emit()
+        return InventorySubscription { observer = null }
+    }
+
+    override fun consumeOutcome(id: String) {
+        outcomes.removeAll { it.id == id }
+        consumedOutcomes += id
+        emit()
+    }
+
+    fun complete(
+        id: String,
+        outcome: DescriptionGenerationOutcome,
+        generatedDescription: String? = null,
+    ) {
+        val request = requireNotNull(pending.singleOrNull { it.id == id }).request
+        pending.removeAll { it.id == id }
+        outcomes += CompletedDescriptionGeneration(id, request, outcome, generatedDescription)
+        emit()
+    }
+
+    private fun emit() {
+        observer?.invoke(DescriptionGenerationWorkState(pending.toList(), outcomes.toList()))
     }
 }
+
+private fun descriptionGenerationRequestFor(item: Item) = DescriptionGenerationRequest(
+    householdId = "household-1",
+    item = item,
+    requestingMember = RequestingMemberAttribution("member-1", "Alex"),
+    deviceLanguage = "en-AU",
+)
 
 private fun household() = Household(
     id = "household-1",

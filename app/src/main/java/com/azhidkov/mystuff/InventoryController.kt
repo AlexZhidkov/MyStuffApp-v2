@@ -76,6 +76,7 @@ interface InventoryActions {
     fun removeTag(tag: String)
     fun saveItem()
     fun saveAndGenerateDescription()
+    fun consumeDeferredError(id: String)
 }
 
 data class InventorySearchResult(
@@ -124,6 +125,7 @@ data class InventoryUiState(
     val operationInProgress: Boolean = false,
     val errorMessage: String? = null,
     val successMessage: String? = null,
+    val deferredError: DeferredInventoryError? = null,
 ) {
     val canGenerateDescription: Boolean
         get() {
@@ -177,6 +179,11 @@ data class InventoryUiState(
         }
 }
 
+data class DeferredInventoryError(
+    val id: String,
+    val message: String,
+)
+
 class InventoryController internal constructor(
     private val household: Household,
     private val identity: AuthenticatedIdentity,
@@ -207,19 +214,28 @@ class InventoryController internal constructor(
 
     var onStateChanged: (InventoryUiState) -> Unit = {}
 
+    private var observedInventory = state.inventory
+    private var pendingDescriptionGenerations = emptyMap<String, DescriptionGenerationRequest>()
+    private val reconcilingDescriptionGenerations =
+        mutableMapOf<String, DescriptionGenerationReconciliation>()
+    private var descriptionGenerationState = DescriptionGenerationWorkState()
+
     private val subscription = gateway.observe(household) { result ->
         result.onSuccess { inventory ->
+            observedInventory = inventory
             runCatching {
                 rootChildItemCache.store(
                     householdId = household.id,
                     items = inventory.childrenOf(inventory.rootItemId),
                 )
             }
-            val selectedItemId = state.selectedItemId.takeIf(inventory::contains)
-                ?: inventory.rootItemId
+            reconcileCompletedDescriptionGenerations()
+            val displayedInventory = inventory.withDescriptionGenerationOverlays()
+            val selectedItemId = state.selectedItemId.takeIf(displayedInventory::contains)
+                ?: displayedInventory.rootItemId
             updateState(
                 state.copy(
-                    inventory = inventory,
+                    inventory = displayedInventory,
                     selectedItemId = selectedItemId,
                     search = state.search.copy(
                         openedResultId = state.openedSearchResultId
@@ -237,6 +253,27 @@ class InventoryController internal constructor(
                 ),
             )
         }
+    }
+
+    private val descriptionGenerationSubscription = descriptionGenerationWork.observe { workState ->
+        descriptionGenerationState = workState
+        pendingDescriptionGenerations = workState.pending
+            .filter { it.request.householdId == household.id }
+            .associate { it.id to it.request }
+        workState.completed
+            .filter { it.request.householdId == household.id }
+            .forEach(::retainUntilObserved)
+        reconcileCompletedDescriptionGenerations()
+        updateState(
+            state.copy(
+                inventory = observedInventory.withDescriptionGenerationOverlays(),
+                deferredError = workState.completed
+                    .asSequence()
+                    .filter { it.request.householdId == household.id }
+                    .mapNotNull(CompletedDescriptionGeneration::deferredError)
+                    .firstOrNull(),
+            ),
+        )
     }
 
     override fun changeSearchQuery(query: String) {
@@ -559,6 +596,12 @@ class InventoryController internal constructor(
         )
     }
 
+    override fun consumeDeferredError(id: String) {
+        if (state.deferredError?.id != id) return
+        updateState(state.copy(deferredError = null))
+        descriptionGenerationWork.consumeOutcome(id)
+    }
+
     private fun validateAndNormalize(draft: ItemFormState): ItemDetails? {
         val name = draft.name.trimUnicodeWhitespace()
         val nameError = when {
@@ -613,8 +656,65 @@ class InventoryController internal constructor(
 
     override fun close() {
         subscription.cancel()
+        descriptionGenerationSubscription.cancel()
         onStateChanged = {}
     }
+
+    private fun retainUntilObserved(completed: CompletedDescriptionGeneration) {
+        when (completed.outcome) {
+            DescriptionGenerationOutcome.Success -> {
+                val expected = completed.request.item.copy(
+                    description = requireNotNull(completed.generatedDescription),
+                )
+                if (!observedInventory.containsMatching(expected)) {
+                    reconcilingDescriptionGenerations.putIfAbsent(
+                        completed.id,
+                        DescriptionGenerationReconciliation(completed.request.item, expected),
+                    )
+                }
+            }
+            DescriptionGenerationOutcome.PermanentPhotoFailure,
+            DescriptionGenerationOutcome.PermanentGenerationFailure,
+            -> if (!observedInventory.containsMatching(completed.request.item)) {
+                reconcilingDescriptionGenerations.putIfAbsent(
+                    completed.id,
+                    DescriptionGenerationReconciliation(
+                        completed.request.item,
+                        completed.request.item,
+                    ),
+                )
+            }
+            DescriptionGenerationOutcome.PermanentSaveFailure ->
+                reconcilingDescriptionGenerations.remove(completed.id)
+            DescriptionGenerationOutcome.Retry -> Unit
+        }
+    }
+
+    private fun reconcileCompletedDescriptionGenerations() {
+        val reconciledIds = reconcilingDescriptionGenerations
+            .filterValues { reconciliation ->
+                observedInventory.containsMatching(reconciliation.expectedItem)
+            }
+            .keys
+        reconciledIds.forEach(reconcilingDescriptionGenerations::remove)
+        descriptionGenerationState.completed
+            .filter { completed ->
+                completed.id in reconciledIds &&
+                    completed.outcome == DescriptionGenerationOutcome.Success
+            }
+            .forEach { completed -> descriptionGenerationWork.consumeOutcome(completed.id) }
+    }
+
+    private fun Inventory.withDescriptionGenerationOverlays(): Inventory {
+        val overlays = pendingDescriptionGenerations.values.map { it.item } +
+            reconcilingDescriptionGenerations.values.map { it.optimisticItem }
+        return overlays.fold(this) { inventory, item ->
+            if (inventory.contains(item.id)) inventory.withItem(item) else inventory
+        }
+    }
+
+    private fun Inventory.containsMatching(item: Item): Boolean =
+        contains(item.id) && item(item.id) == item
 
     private fun updateState(newState: InventoryUiState) {
         state = newState
@@ -630,6 +730,25 @@ class InventoryController internal constructor(
         updateState(state.copy(itemDraft = transition(draft)))
     }
 
+}
+
+private data class DescriptionGenerationReconciliation(
+    val optimisticItem: Item,
+    val expectedItem: Item,
+)
+
+private fun CompletedDescriptionGeneration.deferredError(): DeferredInventoryError? {
+    val message = when (outcome) {
+        DescriptionGenerationOutcome.PermanentSaveFailure -> "Couldn't save the Item."
+        DescriptionGenerationOutcome.PermanentPhotoFailure ->
+            "Item saved, but couldn't upload its photo."
+        DescriptionGenerationOutcome.PermanentGenerationFailure ->
+            "Item saved, but couldn't generate its description."
+        DescriptionGenerationOutcome.Success,
+        DescriptionGenerationOutcome.Retry,
+        -> return null
+    }
+    return DeferredInventoryError(id, message)
 }
 
 internal fun String.trimUnicodeWhitespace(): String = trim { character ->

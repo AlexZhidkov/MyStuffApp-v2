@@ -50,10 +50,8 @@ internal data class DescriptionGenerationRequest(
 )
 
 internal data class DescriptionGenerationReplacementPhoto(
-    val fullStoragePath: String,
-    val thumbnailStoragePath: String,
-    val fullSourceUri: String,
-    val thumbnailSourceUri: String,
+    val revision: ItemPhotoRevision,
+    val source: ItemPhoto,
 )
 
 internal data class RequestingMemberAttribution(
@@ -92,10 +90,8 @@ internal class DescriptionGenerationRequestCapture(
                 photoThumbnailUrl = revision.locations.thumbnail,
             ),
             replacementPhoto = DescriptionGenerationReplacementPhoto(
-                fullStoragePath = revision.fullStoragePath,
-                thumbnailStoragePath = revision.thumbnailStoragePath,
-                fullSourceUri = replacementPhoto.uri,
-                thumbnailSourceUri = replacementPhoto.thumbnailUri,
+                revision = revision,
+                source = replacementPhoto,
             ),
         )
     }
@@ -104,18 +100,8 @@ internal class DescriptionGenerationRequestCapture(
         val replacement = request.replacementPhoto ?: return
         try {
             photoStore.uploadThumbnailInBackground(
-                revision = ItemPhotoRevision(
-                    locations = ItemPhotoLocations(
-                        full = requireNotNull(request.item.photoUrl),
-                        thumbnail = requireNotNull(request.item.photoThumbnailUrl),
-                    ),
-                    fullStoragePath = replacement.fullStoragePath,
-                    thumbnailStoragePath = replacement.thumbnailStoragePath,
-                ),
-                photo = ItemPhoto(
-                    uri = replacement.fullSourceUri,
-                    thumbnailUri = replacement.thumbnailSourceUri,
-                ),
+                revision = replacement.revision,
+                photo = replacement.source,
             )
         } catch (_: RuntimeException) {
             // Thumbnail transfer remains independent from Description Generation submission.
@@ -209,7 +195,7 @@ internal interface DescriptionGenerationUploadedPhotoLedger {
 }
 
 internal fun interface DescriptionGenerationLocalPhotoSourceCleaner {
-    fun clean(sourceUri: String)
+    fun clean(sourceUri: String): DescriptionGenerationStep<Unit>
 }
 
 internal fun interface DescriptionGenerator {
@@ -225,7 +211,9 @@ internal class DescriptionGenerationWorkflow(
     private val uploadedPhotoLedger: DescriptionGenerationUploadedPhotoLedger =
         EmptyDescriptionGenerationUploadedPhotoLedger,
     private val localPhotoSourceCleaner: DescriptionGenerationLocalPhotoSourceCleaner =
-        DescriptionGenerationLocalPhotoSourceCleaner {},
+        DescriptionGenerationLocalPhotoSourceCleaner {
+            DescriptionGenerationStep.Success(Unit)
+        },
 ) {
     fun run(request: DescriptionGenerationRequest): DescriptionGenerationOutcome {
         when (itemStore.saveDraft(request)) {
@@ -241,13 +229,19 @@ internal class DescriptionGenerationWorkflow(
                 when (fullPhotoUploader.upload(replacement)) {
                     is DescriptionGenerationStep.Success -> {
                         uploadedPhotoLedger.markUploaded()
-                        localPhotoSourceCleaner.clean(replacement.fullSourceUri)
                     }
                     DescriptionGenerationStep.RetryableFailure ->
                         return DescriptionGenerationOutcome.Retry
                     DescriptionGenerationStep.PermanentFailure ->
                         return DescriptionGenerationOutcome.PermanentPhotoFailure
                 }
+            }
+            when (localPhotoSourceCleaner.clean(replacement.source.uri)) {
+                is DescriptionGenerationStep.Success -> Unit
+                DescriptionGenerationStep.RetryableFailure ->
+                    return DescriptionGenerationOutcome.Retry
+                DescriptionGenerationStep.PermanentFailure ->
+                    return DescriptionGenerationOutcome.PermanentPhotoFailure
             }
         }
 
@@ -509,8 +503,8 @@ private class FirebaseDescriptionGenerationFullPhotoUploader(
         photo: DescriptionGenerationReplacementPhoto,
     ): DescriptionGenerationStep<Unit> = firebaseStep {
         val upload = storage.reference
-            .child(photo.fullStoragePath)
-            .putFile(photo.fullSourceUri.toUri(), webPMetadata)
+            .child(photo.revision.fullStoragePath)
+            .putFile(photo.source.uri.toUri(), webPMetadata)
         try {
             Tasks.await(upload).let { }
         } catch (failure: InterruptedException) {
@@ -523,10 +517,11 @@ private class FirebaseDescriptionGenerationFullPhotoUploader(
 private class AndroidDescriptionGenerationLocalPhotoSourceCleaner(
     private val context: Context,
 ) : DescriptionGenerationLocalPhotoSourceCleaner {
-    override fun clean(sourceUri: String) {
-        runCatching {
-            context.contentResolver.delete(sourceUri.toUri(), null, null)
-        }
+    override fun clean(sourceUri: String): DescriptionGenerationStep<Unit> = try {
+        context.contentResolver.delete(sourceUri.toUri(), null, null)
+        DescriptionGenerationStep.Success(Unit)
+    } catch (failure: Exception) {
+        classifyDescriptionGenerationFailure(failure)
     }
 }
 
@@ -782,10 +777,10 @@ private fun DataOutputStream.writeRequest(request: DescriptionGenerationRequest)
     writeUTF(request.deviceLanguage)
     writeBoolean(request.replacementPhoto != null)
     request.replacementPhoto?.let { replacement ->
-        writeUTF(replacement.fullStoragePath)
-        writeUTF(replacement.thumbnailStoragePath)
-        writeUTF(replacement.fullSourceUri)
-        writeUTF(replacement.thumbnailSourceUri)
+        writeUTF(replacement.revision.fullStoragePath)
+        writeUTF(replacement.revision.thumbnailStoragePath)
+        writeUTF(replacement.source.uri)
+        writeUTF(replacement.source.thumbnailUri)
     }
 }
 
@@ -808,10 +803,18 @@ private fun DataInputStream.readRequest(): DescriptionGenerationRequest {
     val replacement = try {
         if (readBoolean()) {
             DescriptionGenerationReplacementPhoto(
-                fullStoragePath = readUTF(),
-                thumbnailStoragePath = readUTF(),
-                fullSourceUri = readUTF(),
-                thumbnailSourceUri = readUTF(),
+                revision = ItemPhotoRevision(
+                    locations = ItemPhotoLocations(
+                        full = requireNotNull(request.item.photoUrl),
+                        thumbnail = requireNotNull(request.item.photoThumbnailUrl),
+                    ),
+                    fullStoragePath = readUTF(),
+                    thumbnailStoragePath = readUTF(),
+                ),
+                source = ItemPhoto(
+                    uri = readUTF(),
+                    thumbnailUri = readUTF(),
+                ),
             )
         } else {
             null

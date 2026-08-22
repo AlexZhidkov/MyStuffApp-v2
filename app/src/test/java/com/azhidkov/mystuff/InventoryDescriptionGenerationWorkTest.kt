@@ -57,15 +57,7 @@ class InventoryDescriptionGenerationWorkTest {
     @Test
     fun `replacement workflow saves uploads cleans source then generates from stored revision`() {
         val events = mutableListOf<String>()
-        val request = descriptionGenerationRequest().copy(
-            replacementPhoto = DescriptionGenerationReplacementPhoto(
-                fullStoragePath = "households/household-1/items/drill-new.webp",
-                thumbnailStoragePath =
-                    "households/household-1/items/drill-new-thumb.webp",
-                fullSourceUri = "content://mystuff/new-full.webp",
-                thumbnailSourceUri = "content://mystuff/new-thumb.webp",
-            ),
-        )
+        val request = replacementDescriptionGenerationRequest()
         val workflow = DescriptionGenerationWorkflow(
             itemStore = RecordingDescriptionGenerationItemStore(events),
             photoLoader = RecordingDescriptionGenerationPhotoLoader(
@@ -87,7 +79,7 @@ class InventoryDescriptionGenerationWorkTest {
         assertEquals(
             listOf(
                 "save:Member facts",
-                "upload:households/household-1/items/drill-new.webp:" +
+                "upload:households/household-1/items/drill-$REPLACEMENT_REVISION.webp:" +
                     "content://mystuff/new-full.webp",
                 "mark-uploaded",
                 "cleanup:content://mystuff/new-full.webp",
@@ -122,12 +114,19 @@ class InventoryDescriptionGenerationWorkTest {
         )
         assertEquals(
             DescriptionGenerationReplacementPhoto(
-                fullStoragePath =
-                    "households/household-1/items/drill-$REPLACEMENT_REVISION.webp",
-                thumbnailStoragePath =
-                    "households/household-1/items/drill-$REPLACEMENT_REVISION-thumb.webp",
-                fullSourceUri = replacement.uri,
-                thumbnailSourceUri = replacement.thumbnailUri,
+                revision = ItemPhotoRevision(
+                    locations = ItemPhotoLocations(
+                        full = "gs://mystuff/households/household-1/items/" +
+                            "drill-$REPLACEMENT_REVISION.webp",
+                        thumbnail = "gs://mystuff/households/household-1/items/" +
+                            "drill-$REPLACEMENT_REVISION-thumb.webp",
+                    ),
+                    fullStoragePath =
+                        "households/household-1/items/drill-$REPLACEMENT_REVISION.webp",
+                    thumbnailStoragePath =
+                        "households/household-1/items/drill-$REPLACEMENT_REVISION-thumb.webp",
+                ),
+                source = replacement,
             ),
             request.replacementPhoto,
         )
@@ -177,8 +176,43 @@ class InventoryDescriptionGenerationWorkTest {
         assertEquals(DescriptionGenerationOutcome.Retry, firstOutcome)
         assertEquals(DescriptionGenerationOutcome.Success, secondOutcome)
         assertEquals(1, events.count { it.startsWith("upload:") })
-        assertEquals(1, events.count { it.startsWith("cleanup:") })
+        assertEquals(2, events.count { it.startsWith("cleanup:") })
         assertEquals(2, events.count { it.startsWith("load:") })
+    }
+
+    @Test
+    fun `replacement cleanup retries after upload without re-uploading or generating`() {
+        val events = mutableListOf<String>()
+        val ledger = RecordingUploadedPhotoLedger(events)
+        val cleaner = RecordingLocalPhotoSourceCleaner(
+            events,
+            ArrayDeque(
+                listOf(
+                    DescriptionGenerationStep.RetryableFailure,
+                    DescriptionGenerationStep.Success(Unit),
+                ),
+            ),
+        )
+        val workflow = DescriptionGenerationWorkflow(
+            itemStore = RecordingDescriptionGenerationItemStore(events),
+            photoLoader = RecordingDescriptionGenerationPhotoLoader(
+                events,
+                FakeDescriptionGenerationPhoto,
+            ),
+            generator = successfulGenerator(),
+            fullPhotoUploader = RecordingDescriptionGenerationPhotoUploader(events),
+            uploadedPhotoLedger = ledger,
+            localPhotoSourceCleaner = cleaner,
+        )
+
+        val firstOutcome = workflow.run(replacementDescriptionGenerationRequest())
+        val secondOutcome = workflow.run(replacementDescriptionGenerationRequest())
+
+        assertEquals(DescriptionGenerationOutcome.Retry, firstOutcome)
+        assertEquals(DescriptionGenerationOutcome.Success, secondOutcome)
+        assertEquals(1, events.count { it.startsWith("upload:") })
+        assertEquals(2, events.count { it.startsWith("cleanup:") })
+        assertEquals(1, events.count { it.startsWith("load:") })
     }
 
     @Test
@@ -511,7 +545,7 @@ private class RecordingDescriptionGenerationPhotoUploader(
     override fun upload(
         photo: DescriptionGenerationReplacementPhoto,
     ): DescriptionGenerationStep<Unit> {
-        events += "upload:${photo.fullStoragePath}:${photo.fullSourceUri}"
+        events += "upload:${photo.revision.fullStoragePath}:${photo.source.uri}"
         return output
     }
 }
@@ -531,9 +565,13 @@ private class RecordingUploadedPhotoLedger(
 
 private class RecordingLocalPhotoSourceCleaner(
     private val events: MutableList<String>,
+    private val outputs: ArrayDeque<DescriptionGenerationStep<Unit>> = ArrayDeque(
+        listOf(DescriptionGenerationStep.Success(Unit)),
+    ),
 ) : DescriptionGenerationLocalPhotoSourceCleaner {
-    override fun clean(sourceUri: String) {
+    override fun clean(sourceUri: String): DescriptionGenerationStep<Unit> {
         events += "cleanup:$sourceUri"
+        return if (outputs.size == 1) outputs.first() else outputs.removeFirst()
     }
 }
 
@@ -617,12 +655,22 @@ private fun replacementDescriptionGenerationRequest() = descriptionGenerationReq
             "gs://mystuff/households/household-1/items/drill-$REPLACEMENT_REVISION-thumb.webp",
     ),
     replacementPhoto = DescriptionGenerationReplacementPhoto(
-        fullStoragePath =
-            "households/household-1/items/drill-$REPLACEMENT_REVISION.webp",
-        thumbnailStoragePath =
-            "households/household-1/items/drill-$REPLACEMENT_REVISION-thumb.webp",
-        fullSourceUri = "content://mystuff/new-full.webp",
-        thumbnailSourceUri = "content://mystuff/new-thumb.webp",
+        revision = ItemPhotoRevision(
+            locations = ItemPhotoLocations(
+                full = "gs://mystuff/households/household-1/items/" +
+                    "drill-$REPLACEMENT_REVISION.webp",
+                thumbnail = "gs://mystuff/households/household-1/items/" +
+                    "drill-$REPLACEMENT_REVISION-thumb.webp",
+            ),
+            fullStoragePath =
+                "households/household-1/items/drill-$REPLACEMENT_REVISION.webp",
+            thumbnailStoragePath =
+                "households/household-1/items/drill-$REPLACEMENT_REVISION-thumb.webp",
+        ),
+        source = ItemPhoto(
+            uri = "content://mystuff/new-full.webp",
+            thumbnailUri = "content://mystuff/new-thumb.webp",
+        ),
     ),
 )
 

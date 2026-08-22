@@ -38,6 +38,12 @@ after(async () => {
 });
 
 test("only a Household Member can transfer a captured immutable photo revision", async () => {
+  await testEnvironment.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), "memberships/member-2"), {
+      householdId: "household-2",
+      role: "owner",
+    });
+  });
   const revision = "11111111-1111-1111-1111-111111111111";
   const fullPath = `households/household-1/items/item-1-${revision}.webp`;
   const thumbnailPath = `households/household-1/items/item-1-${revision}-thumb.webp`;

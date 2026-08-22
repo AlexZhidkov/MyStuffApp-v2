@@ -43,14 +43,15 @@ Use an existing Item with an Item Photo and a valid signed-in Member. Record the
 device, UTC time, configured model, visible result, and relevant App Check metric or error for each
 case in the evidence table below.
 
-1. Register the debug token, remove `description_generation_model` from the published Remote
-   Config template, clear the app's data, sign in, and run Description Generation. Confirm it
-   completes with the bundled `gemini-3.7-flash` fallback and appears as a verified Firebase AI
-   Logic request in **App Check > APIs**.
+1. Remove `description_generation_model` from the published Remote Config template, clear the
+   app's data, launch it, and register the newly logged App Check debug token before signing in.
+   Run Description Generation, confirm it completes with the bundled `gemini-3.7-flash` fallback,
+   and confirm it appears as a verified Firebase AI Logic request in **App Check > APIs**.
 2. Publish `description_generation_model` with a different currently supported model, wait for
-   the publish to propagate, clear the app's data, and run Description Generation again. Confirm
-   it completes and the generated Description changes in Firestore. Record the published model
-   name as evidence that this exercised the remotely configured path.
+   the publish to propagate, clear the app's data, launch it, and register its new debug token.
+   Sign in and run Description Generation again. Confirm it completes and the generated
+   Description changes in Firestore. Record the published model name as evidence that this
+   exercised the remotely configured path.
 3. On a disposable debug installation, delete or do not register its debug token, then attempt
    Description Generation. Confirm rejection from the worker-visible Firebase error and from an
    **Unverified: invalid requests** increase in the Firebase AI Logic App Check metrics. Restore a

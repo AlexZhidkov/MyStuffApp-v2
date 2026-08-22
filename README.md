@@ -77,6 +77,11 @@ The checked-in configuration belongs to the prototype's existing Firebase
 project. A locally signed build may not be authorized for Google sign-in until
 its signing certificate is registered in that project.
 
+Description Generation additionally requires Remote Config, Firebase AI Logic,
+and App Check setup. Follow the
+[Firebase Description Generation integration checklist](docs/firebase-description-generation.md)
+before testing or distributing that feature.
+
 ## Build and run
 
 Open the repository in Android Studio, allow Gradle sync to complete, select an

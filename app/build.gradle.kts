@@ -55,7 +55,9 @@ dependencies {
     implementation(libs.androidx.credentials.play.services.auth)
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.ai)
+    implementation(libs.firebase.appcheck.playintegrity)
     implementation(libs.firebase.auth)
+    implementation(libs.firebase.config)
     implementation(libs.firebase.firestore)
     implementation(libs.firebase.storage)
     implementation(libs.google.id)
@@ -70,4 +72,5 @@ dependencies {
     androidTestImplementation(libs.test.runner)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
+    debugImplementation(libs.firebase.appcheck.debug)
 }

@@ -384,15 +384,21 @@ private class FirebaseDescriptionGenerationPhotoLoader(
         }
 }
 
-private class FirebaseGeminiDescriptionGenerator : DescriptionGenerator {
+private class FirebaseGeminiDescriptionGenerator(
+    private val modelConfig: DescriptionGenerationModelConfig =
+        RemoteConfigDescriptionGenerationModelConfig(),
+) : DescriptionGenerator {
     override fun generate(
         input: DescriptionGenerationModelInput,
     ): DescriptionGenerationStep<String> {
         val bitmap = BitmapFactory.decodeByteArray(input.photo.bytes, 0, input.photo.bytes.size)
             ?: return DescriptionGenerationStep.PermanentFailure
         return try {
-            val model = Firebase.ai(backend = GenerativeBackend.googleAI())
-                .generativeModel(DESCRIPTION_GENERATION_MODEL)
+            val model = Firebase.ai(
+                backend = GenerativeBackend.googleAI(),
+                useLimitedUseAppCheckTokens = false,
+            )
+                .generativeModel(modelConfig.modelName())
             val prompt = content {
                 image(bitmap)
                 text(input.prompt)
@@ -627,7 +633,6 @@ private fun failureData(outcome: DescriptionGenerationOutcome): Data = Data.Buil
     .putString(WORK_FAILURE_OUTCOME, outcome.name)
     .build()
 
-private const val DESCRIPTION_GENERATION_MODEL = "gemini-3.7-flash"
 private const val MAX_INLINE_PHOTO_BYTES = 20L * 1024L * 1024L
 private const val HOUSEHOLDS_COLLECTION = "households"
 private const val ITEMS_COLLECTION = "items"

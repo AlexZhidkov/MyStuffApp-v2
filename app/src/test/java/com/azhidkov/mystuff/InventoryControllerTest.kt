@@ -1193,7 +1193,7 @@ private class RecordingDescriptionGenerationWork : InventoryDescriptionGeneratio
     ) {
         val request = requireNotNull(pending.singleOrNull { it.id == id }).request
         pending.removeAll { it.id == id }
-        outcomes += CompletedDescriptionGeneration(id, request, outcome)
+        outcomes += CompletedDescriptionGeneration(id, request.householdId, outcome)
         emit()
     }
 

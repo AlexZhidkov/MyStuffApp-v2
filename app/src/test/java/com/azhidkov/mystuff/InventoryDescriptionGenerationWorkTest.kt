@@ -203,7 +203,7 @@ class InventoryDescriptionGenerationWorkTest {
             listOf(
                 CompletedDescriptionGeneration(
                     id = id,
-                    request = request,
+                    householdId = request.householdId,
                     outcome = DescriptionGenerationOutcome.PermanentGenerationFailure,
                 ),
             ),
@@ -213,6 +213,28 @@ class InventoryDescriptionGenerationWorkTest {
         restored.consume(id)
 
         assertTrue(DescriptionGenerationWorkStore(directory).snapshot().completed.isEmpty())
+    }
+
+    @Test
+    fun `unreadable request retains a permanent Save outcome for its Household`() {
+        val directory = temporaryFolder.newFolder("unreadable-description-generation")
+        val store = DescriptionGenerationWorkStore(directory)
+
+        store.completeUnreadableRequest(
+            id = "missing-request",
+            householdId = "household-1",
+        )
+
+        assertEquals(
+            listOf(
+                CompletedDescriptionGeneration(
+                    id = "missing-request",
+                    householdId = "household-1",
+                    outcome = DescriptionGenerationOutcome.PermanentSaveFailure,
+                ),
+            ),
+            DescriptionGenerationWorkStore(directory).snapshot().completed,
+        )
     }
 
     @Test

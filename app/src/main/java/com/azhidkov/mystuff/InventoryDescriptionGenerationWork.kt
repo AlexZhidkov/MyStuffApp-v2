@@ -57,7 +57,7 @@ internal data class PendingDescriptionGeneration(
 
 internal data class CompletedDescriptionGeneration(
     val id: String,
-    val request: DescriptionGenerationRequest,
+    val householdId: String,
     val outcome: DescriptionGenerationOutcome,
 )
 
@@ -240,6 +240,7 @@ internal class WorkManagerInventoryDescriptionGenerationWork(
                 .setInputData(
                     Data.Builder()
                         .putString(WORK_REQUEST_ID, id)
+                        .putString(WORK_HOUSEHOLD_ID, request.householdId)
                         .build(),
                 )
                 .setConstraints(
@@ -288,10 +289,15 @@ internal class InventoryDescriptionGenerationWorker(
 ) : Worker(appContext, workerParameters) {
     override fun doWork(): Result {
         val workStore = DescriptionGenerationWorkStore(applicationContext.noBackupFilesDir)
-        val requestId = inputData.getString(WORK_REQUEST_ID)
-        val request = requestId?.let(workStore::pendingRequest)
+        val requestId = inputData.getString(WORK_REQUEST_ID) ?: id.toString()
+        val householdId = inputData.getString(WORK_HOUSEHOLD_ID)
+        val request = workStore.pendingRequest(requestId)
         if (request == null) {
-            requestId?.let(workStore::discardPending)
+            if (householdId != null) {
+                workStore.completeUnreadableRequest(requestId, householdId)
+            } else {
+                workStore.discardPending(requestId)
+            }
             return Result.failure(failureData(DescriptionGenerationOutcome.PermanentSaveFailure))
         }
         val workflow = DescriptionGenerationWorkflow(
@@ -499,17 +505,30 @@ internal class DescriptionGenerationWorkStore(baseDirectory: File) {
         outcome: DescriptionGenerationOutcome,
     ) {
         val request = pendingRequest(id) ?: return
+        writeCompleted(id, request.householdId, outcome)
+        discardPending(id)
+    }
+
+    fun completeUnreadableRequest(id: String, householdId: String) {
+        writeCompleted(id, householdId, DescriptionGenerationOutcome.PermanentSaveFailure)
+        discardPending(id)
+    }
+
+    private fun writeCompleted(
+        id: String,
+        householdId: String,
+        outcome: DescriptionGenerationOutcome,
+    ) {
         ensureDirectory(completedDirectory)
         val destination = resolve(completedDirectory, id) ?: return
         val temporary = File.createTempFile("completed-", ".tmp", completedDirectory)
         DataOutputStream(temporary.outputStream().buffered()).use { output ->
-            output.writeRequest(request)
+            output.writeUTF(householdId)
             output.writeUTF(outcome.name)
         }
         check(temporary.renameTo(destination)) {
             "Description Generation outcome storage is unavailable"
         }
-        discardPending(id)
     }
 
     fun snapshot(): DescriptionGenerationWorkState = DescriptionGenerationWorkState(
@@ -533,7 +552,7 @@ internal class DescriptionGenerationWorkStore(baseDirectory: File) {
         DataInputStream(file.inputStream().buffered()).use { input ->
             CompletedDescriptionGeneration(
                 id = file.nameWithoutExtension,
-                request = input.readRequest(),
+                householdId = input.readUTF(),
                 outcome = DescriptionGenerationOutcome.valueOf(input.readUTF()),
             )
         }
@@ -627,4 +646,5 @@ private const val DESCRIPTION_GENERATION_COMPLETED_DIRECTORY = "completed"
 private const val DESCRIPTION_GENERATION_REQUEST_PREFIX = "request-"
 private const val DESCRIPTION_GENERATION_WORK_TAG = "description-generation"
 private const val WORK_REQUEST_ID = "request-id"
+private const val WORK_HOUSEHOLD_ID = "household-id"
 private const val WORK_FAILURE_OUTCOME = "failure-outcome"

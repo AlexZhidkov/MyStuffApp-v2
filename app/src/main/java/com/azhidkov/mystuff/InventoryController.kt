@@ -256,7 +256,7 @@ class InventoryController internal constructor(
             .filter { it.request.householdId == household.id }
             .associate { it.id to it.request }
         workState.completed
-            .filter { it.request.householdId == household.id }
+            .filter { it.householdId == household.id }
             .filter { it.outcome == DescriptionGenerationOutcome.Success }
             .forEach { completed -> descriptionGenerationWork.consumeOutcome(completed.id) }
         updateState(
@@ -264,7 +264,7 @@ class InventoryController internal constructor(
                 inventory = observedInventory.withDescriptionGenerationOverlays(),
                 deferredError = workState.completed
                     .asSequence()
-                    .filter { it.request.householdId == household.id }
+                    .filter { it.householdId == household.id }
                     .mapNotNull(CompletedDescriptionGeneration::deferredError)
                     .firstOrNull(),
             ),

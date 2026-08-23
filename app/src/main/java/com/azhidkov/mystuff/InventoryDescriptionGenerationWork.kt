@@ -2,16 +2,17 @@ package com.azhidkov.mystuff
 
 import android.content.Context
 import android.graphics.BitmapFactory
+import android.os.FileObserver
+import android.os.Handler
+import android.os.Looper
 import androidx.core.net.toUri
 import androidx.lifecycle.Observer
-import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.Data
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
-import androidx.work.WorkRequest
 import androidx.work.Worker
 import androidx.work.WorkerParameters
 import com.google.android.gms.tasks.Tasks
@@ -38,7 +39,6 @@ import java.io.EOFException
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.ExecutionException
-import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.runBlocking
 
 internal data class DescriptionGenerationRequest(
@@ -138,7 +138,6 @@ internal object NoInventoryDescriptionGenerationWork : InventoryDescriptionGener
 
 internal sealed interface DescriptionGenerationStep<out T> {
     data class Success<T>(val value: T) : DescriptionGenerationStep<T>
-    data object RetryableFailure : DescriptionGenerationStep<Nothing>
     data object PermanentFailure : DescriptionGenerationStep<Nothing>
     data class PermanentFailureWithErrorType(val errorType: String) : DescriptionGenerationStep<Nothing>
 }
@@ -150,11 +149,6 @@ internal sealed interface DescriptionGenerationOutcome {
     data object Success : DescriptionGenerationOutcome {
         override val deferredErrorMessage = null
         override val storageName = "Success"
-    }
-
-    data object Retry : DescriptionGenerationOutcome {
-        override val deferredErrorMessage = null
-        override val storageName = "Retry"
     }
 
     data object PermanentSaveFailure : DescriptionGenerationOutcome {
@@ -247,8 +241,6 @@ internal class DescriptionGenerationWorkflow(
     fun run(request: DescriptionGenerationRequest): DescriptionGenerationOutcome {
         when (itemStore.saveDraft(request)) {
             is DescriptionGenerationStep.Success -> Unit
-            DescriptionGenerationStep.RetryableFailure ->
-                return DescriptionGenerationOutcome.Retry
             is DescriptionGenerationStep.PermanentFailureWithErrorType,
             DescriptionGenerationStep.PermanentFailure ->
                 return DescriptionGenerationOutcome.PermanentSaveFailure
@@ -260,8 +252,6 @@ internal class DescriptionGenerationWorkflow(
                     is DescriptionGenerationStep.Success -> {
                         uploadedPhotoLedger.markUploaded()
                     }
-                    DescriptionGenerationStep.RetryableFailure ->
-                        return DescriptionGenerationOutcome.Retry
                     is DescriptionGenerationStep.PermanentFailureWithErrorType,
                     DescriptionGenerationStep.PermanentFailure ->
                         return DescriptionGenerationOutcome.PermanentPhotoFailure
@@ -269,8 +259,6 @@ internal class DescriptionGenerationWorkflow(
             }
             when (localPhotoSourceCleaner.clean(replacement.source.uri)) {
                 is DescriptionGenerationStep.Success -> Unit
-                DescriptionGenerationStep.RetryableFailure ->
-                    return DescriptionGenerationOutcome.Retry
                 is DescriptionGenerationStep.PermanentFailureWithErrorType,
                 DescriptionGenerationStep.PermanentFailure ->
                     return DescriptionGenerationOutcome.PermanentPhotoFailure
@@ -281,8 +269,6 @@ internal class DescriptionGenerationWorkflow(
             val loaded = photoLoader.load(requireNotNull(request.item.photoUrl))
         ) {
             is DescriptionGenerationStep.Success -> loaded.value
-            DescriptionGenerationStep.RetryableFailure ->
-                return DescriptionGenerationOutcome.Retry
             is DescriptionGenerationStep.PermanentFailureWithErrorType,
             DescriptionGenerationStep.PermanentFailure ->
                 return DescriptionGenerationOutcome.PermanentPhotoFailure
@@ -302,8 +288,6 @@ internal class DescriptionGenerationWorkflow(
             )
         ) {
             is DescriptionGenerationStep.Success -> result.value.trimUnicodeWhitespace()
-            DescriptionGenerationStep.RetryableFailure ->
-                return DescriptionGenerationOutcome.Retry
             is DescriptionGenerationStep.PermanentFailureWithErrorType ->
                 return DescriptionGenerationOutcome.PermanentGenerationFailureWithErrorType(
                     result.errorType,
@@ -327,7 +311,6 @@ internal class DescriptionGenerationWorkflow(
             )
         ) {
             is DescriptionGenerationStep.Success -> DescriptionGenerationOutcome.Success
-            DescriptionGenerationStep.RetryableFailure -> DescriptionGenerationOutcome.Retry
             is DescriptionGenerationStep.PermanentFailureWithErrorType ->
                 DescriptionGenerationOutcome.PermanentGenerationFailureWithErrorType(
                     result.errorType,
@@ -364,15 +347,28 @@ internal fun descriptionGenerationPrompt(
 internal class WorkManagerInventoryDescriptionGenerationWork(
     context: Context,
 ) : InventoryDescriptionGenerationWork {
+    private val mainHandler = Handler(Looper.getMainLooper())
     private val workManager = WorkManager.getInstance(context)
     private val workStore = DescriptionGenerationWorkStore(context.noBackupFilesDir)
     private val requestCapture = DescriptionGenerationRequestCapture(firebaseInventoryPhotoStore())
     private val observers = mutableSetOf<(DescriptionGenerationWorkState) -> Unit>()
     private val workInfoObserver = Observer<List<WorkInfo>> { emitState() }
+    private val completedOutcomeObserver = object : FileObserver(
+        File(
+            context.noBackupFilesDir,
+            "$DESCRIPTION_GENERATION_WORK_DIRECTORY/$DESCRIPTION_GENERATION_COMPLETED_DIRECTORY",
+        ).apply { mkdirs() }.absolutePath,
+        FileObserver.CREATE or FileObserver.MOVED_TO or FileObserver.CLOSE_WRITE,
+    ) {
+        override fun onEvent(event: Int, path: String?) {
+            mainHandler.post { emitState() }
+        }
+    }
 
     init {
         workManager.getWorkInfosByTagLiveData(DESCRIPTION_GENERATION_WORK_TAG)
             .observeForever(workInfoObserver)
+        completedOutcomeObserver.startWatching()
     }
 
     override fun submit(
@@ -393,11 +389,6 @@ internal class WorkManagerInventoryDescriptionGenerationWork(
                     Constraints.Builder()
                         .setRequiredNetworkType(NetworkType.CONNECTED)
                         .build(),
-                )
-                .setBackoffCriteria(
-                    BackoffPolicy.EXPONENTIAL,
-                    WorkRequest.MIN_BACKOFF_MILLIS,
-                    TimeUnit.MILLISECONDS,
                 )
                 .addTag(DESCRIPTION_GENERATION_WORK_TAG)
                 .build()
@@ -458,15 +449,12 @@ internal class InventoryDescriptionGenerationWorker(
             ),
         )
         val outcome = workflow.run(request)
-        if (outcome != DescriptionGenerationOutcome.Retry) {
-            workStore.complete(
-                id = requestId,
-                outcome = outcome,
-            )
-        }
+        workStore.complete(
+            id = requestId,
+            outcome = outcome,
+        )
         return when (outcome) {
             DescriptionGenerationOutcome.Success -> Result.success()
-            DescriptionGenerationOutcome.Retry -> Result.retry()
             DescriptionGenerationOutcome.PermanentSaveFailure,
             DescriptionGenerationOutcome.PermanentPhotoFailure,
             DescriptionGenerationOutcome.PermanentGenerationFailure,
@@ -609,7 +597,7 @@ internal fun classifyDescriptionGenerationFailure(
     failure: Throwable,
 ): DescriptionGenerationStep<Nothing> {
     val unwrapped = failure.unwrapExecutionFailure()
-    if (unwrapped is QuotaExceededException) {
+    if (unwrapped.isResourceExhausted()) {
         return DescriptionGenerationStep.PermanentFailureWithErrorType(
             GEMINI_ERROR_TYPE_RESOURCE_EXHAUSTED,
         )
@@ -617,14 +605,24 @@ internal fun classifyDescriptionGenerationFailure(
     return classifyDescriptionGenerationFailure(unwrapped.descriptionGenerationFailureCategory())
 }
 
+private fun Throwable.isResourceExhausted(): Boolean {
+    var current: Throwable? = this
+    while (current != null) {
+        if (current is QuotaExceededException ||
+            current is FirebaseTooManyRequestsException ||
+            current.message?.contains(GEMINI_ERROR_TYPE_RESOURCE_EXHAUSTED, ignoreCase = true) == true
+        ) {
+            return true
+        }
+        current = current.cause
+    }
+    return false
+}
+
 internal fun classifyDescriptionGenerationFailure(
     category: DescriptionGenerationFailureCategory,
 ): DescriptionGenerationStep<Nothing> =
-    if (category != DescriptionGenerationFailureCategory.Permanent) {
-        DescriptionGenerationStep.RetryableFailure
-    } else {
-        DescriptionGenerationStep.PermanentFailure
-    }
+    DescriptionGenerationStep.PermanentFailure
 
 private fun Throwable.toDescriptionGenerationFailure(): DescriptionGenerationStep<Nothing> =
     classifyDescriptionGenerationFailure(this)
@@ -645,12 +643,12 @@ private fun Throwable.descriptionGenerationFailureCategory():
     is ServiceConnectionHandshakeFailedException,
     is UnknownException,
     -> DescriptionGenerationFailureCategory.RemoteService
-    is FirebaseFirestoreException -> if (code.isRetryable()) {
+    is FirebaseFirestoreException -> if (code.isTransient()) {
         DescriptionGenerationFailureCategory.RemoteService
     } else {
         DescriptionGenerationFailureCategory.Permanent
     }
-    is StorageException -> if (errorCode.isRetryableStorageError()) {
+    is StorageException -> if (errorCode.isTransientStorageError()) {
         DescriptionGenerationFailureCategory.RemoteService
     } else {
         DescriptionGenerationFailureCategory.Permanent
@@ -658,7 +656,7 @@ private fun Throwable.descriptionGenerationFailureCategory():
     else -> DescriptionGenerationFailureCategory.Permanent
 }
 
-private fun FirebaseFirestoreException.Code.isRetryable(): Boolean = when (this) {
+private fun FirebaseFirestoreException.Code.isTransient(): Boolean = when (this) {
     FirebaseFirestoreException.Code.ABORTED,
     FirebaseFirestoreException.Code.CANCELLED,
     FirebaseFirestoreException.Code.DEADLINE_EXCEEDED,
@@ -670,7 +668,7 @@ private fun FirebaseFirestoreException.Code.isRetryable(): Boolean = when (this)
     else -> false
 }
 
-private fun Int.isRetryableStorageError(): Boolean = when (this) {
+private fun Int.isTransientStorageError(): Boolean = when (this) {
     StorageException.ERROR_RETRY_LIMIT_EXCEEDED,
     StorageException.ERROR_QUOTA_EXCEEDED,
     StorageException.ERROR_UNKNOWN,
@@ -767,7 +765,6 @@ internal class DescriptionGenerationWorkStore(baseDirectory: File) {
                 householdId = householdId,
                 outcome = when (outcomeName) {
                     "Success" -> DescriptionGenerationOutcome.Success
-                    "Retry" -> DescriptionGenerationOutcome.Retry
                     "PermanentSaveFailure" -> DescriptionGenerationOutcome.PermanentSaveFailure
                     "PermanentPhotoFailure" ->
                         DescriptionGenerationOutcome.PermanentPhotoFailure

@@ -13,8 +13,8 @@
 - [x] The full-size replacement upload must succeed before the stored full photo is loaded and sent inline to Gemini.
 - [x] The thumbnail upload proceeds independently and neither blocks nor is blocked by Description Generation.
 - [x] Successful full upload cleans up its local source without racing Description Generation, because generation reads the stored revision rather than the upload source.
-- [x] Retryable full-photo upload and load failures use WorkManager retry with exponential backoff.
-- [x] A non-retryable full-photo upload or load failure stops generation, preserves the saved Member-written Description, and exposes the permanent photo-failure outcome required by ticket 03.
+- [x] Full-photo upload and load failures terminate the work without WorkManager retry.
+- [x] A full-photo upload or load failure stops generation, preserves the saved Member-written Description, and exposes the permanent photo-failure outcome required by ticket 03.
 - [x] A thumbnail failure follows the existing independent photo-transfer behavior and does not become a Description Generation failure.
 - [x] Existing-photo Description Generation from ticket 01 continues to bypass replacement upload while preserving identical prompt, validation, overwrite, and attribution behavior.
 - [x] Platform-neutral workflow tests verify full-save-before-upload, full-upload-before-generation, stored inline photo input, independent thumbnail outcomes, source cleanup, retries, and permanent photo failure.

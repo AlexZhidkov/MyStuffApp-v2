@@ -1,6 +1,7 @@
 package com.azhidkov.mystuff
 
 import com.google.firebase.ai.type.QuotaExceededException
+import com.google.firebase.ai.type.ServerException
 import java.io.IOException
 import java.util.concurrent.ExecutionException
 import java.util.UUID
@@ -143,82 +144,6 @@ class InventoryDescriptionGenerationWorkTest {
     }
 
     @Test
-    fun `uploaded replacement checkpoint skips source upload when stored-photo load retries`() {
-        val directory = temporaryFolder.newFolder("replacement-load-retry")
-        val store = DescriptionGenerationWorkStore(directory)
-        val request = replacementDescriptionGenerationRequest()
-        val id = store.enqueue(request)
-        val events = mutableListOf<String>()
-        val loader = SequencedDescriptionGenerationPhotoLoader(
-            events,
-            ArrayDeque(
-                listOf(
-                    DescriptionGenerationStep.RetryableFailure,
-                    DescriptionGenerationStep.Success(FakeDescriptionGenerationPhoto),
-                ),
-            ),
-        )
-
-        val firstOutcome = DescriptionGenerationWorkflow(
-            itemStore = RecordingDescriptionGenerationItemStore(events),
-            photoLoader = loader,
-            generator = successfulGenerator(),
-            fullPhotoUploader = RecordingDescriptionGenerationPhotoUploader(events),
-            uploadedPhotoLedger = store.uploadedPhotoLedger(id),
-            localPhotoSourceCleaner = RecordingLocalPhotoSourceCleaner(events),
-        ).run(request)
-        val secondOutcome = DescriptionGenerationWorkflow(
-            itemStore = RecordingDescriptionGenerationItemStore(events),
-            photoLoader = loader,
-            generator = successfulGenerator(),
-            fullPhotoUploader = RecordingDescriptionGenerationPhotoUploader(events),
-            uploadedPhotoLedger = DescriptionGenerationWorkStore(directory).uploadedPhotoLedger(id),
-            localPhotoSourceCleaner = RecordingLocalPhotoSourceCleaner(events),
-        ).run(requireNotNull(DescriptionGenerationWorkStore(directory).pendingRequest(id)))
-
-        assertEquals(DescriptionGenerationOutcome.Retry, firstOutcome)
-        assertEquals(DescriptionGenerationOutcome.Success, secondOutcome)
-        assertEquals(1, events.count { it.startsWith("upload:") })
-        assertEquals(2, events.count { it.startsWith("cleanup:") })
-        assertEquals(2, events.count { it.startsWith("load:") })
-    }
-
-    @Test
-    fun `replacement cleanup retries after upload without re-uploading or generating`() {
-        val events = mutableListOf<String>()
-        val ledger = RecordingUploadedPhotoLedger(events)
-        val cleaner = RecordingLocalPhotoSourceCleaner(
-            events,
-            ArrayDeque(
-                listOf(
-                    DescriptionGenerationStep.RetryableFailure,
-                    DescriptionGenerationStep.Success(Unit),
-                ),
-            ),
-        )
-        val workflow = DescriptionGenerationWorkflow(
-            itemStore = RecordingDescriptionGenerationItemStore(events),
-            photoLoader = RecordingDescriptionGenerationPhotoLoader(
-                events,
-                FakeDescriptionGenerationPhoto,
-            ),
-            generator = successfulGenerator(),
-            fullPhotoUploader = RecordingDescriptionGenerationPhotoUploader(events),
-            uploadedPhotoLedger = ledger,
-            localPhotoSourceCleaner = cleaner,
-        )
-
-        val firstOutcome = workflow.run(replacementDescriptionGenerationRequest())
-        val secondOutcome = workflow.run(replacementDescriptionGenerationRequest())
-
-        assertEquals(DescriptionGenerationOutcome.Retry, firstOutcome)
-        assertEquals(DescriptionGenerationOutcome.Success, secondOutcome)
-        assertEquals(1, events.count { it.startsWith("upload:") })
-        assertEquals(2, events.count { it.startsWith("cleanup:") })
-        assertEquals(1, events.count { it.startsWith("load:") })
-    }
-
-    @Test
     fun `workflow trims valid output and rejects blank or oversized output without patching`() {
         val validStore = RecordingDescriptionGenerationItemStore(mutableListOf())
         val valid = workflow(
@@ -243,77 +168,83 @@ class InventoryDescriptionGenerationWorkTest {
     }
 
     @Test
-    fun `workflow retries retryable failures from every remote stage`() {
-        val retryingWorkflows = listOf(
+    fun `workflow reports failures as permanent stage outcomes`() {
+        val failingWorkflows = listOf(
             DescriptionGenerationWorkflow(
                 RecordingDescriptionGenerationItemStore(
                     mutableListOf(),
-                    saveOutcome = DescriptionGenerationStep.RetryableFailure,
+                    saveOutcome = DescriptionGenerationStep.PermanentFailure,
                 ),
                 successfulLoader(),
                 successfulGenerator(),
             ),
             DescriptionGenerationWorkflow(
                 RecordingDescriptionGenerationItemStore(mutableListOf()),
-                FixedDescriptionGenerationPhotoLoader(DescriptionGenerationStep.RetryableFailure),
+                FixedDescriptionGenerationPhotoLoader(DescriptionGenerationStep.PermanentFailure),
                 successfulGenerator(),
             ),
             DescriptionGenerationWorkflow(
                 RecordingDescriptionGenerationItemStore(mutableListOf()),
                 successfulLoader(),
-                FixedDescriptionGenerator(DescriptionGenerationStep.RetryableFailure),
+                FixedDescriptionGenerator(DescriptionGenerationStep.PermanentFailure),
             ),
             DescriptionGenerationWorkflow(
                 RecordingDescriptionGenerationItemStore(
                     mutableListOf(),
-                    patchOutcome = DescriptionGenerationStep.RetryableFailure,
+                    patchOutcome = DescriptionGenerationStep.PermanentFailure,
                 ),
                 successfulLoader(),
                 successfulGenerator(),
             ),
         )
 
-        retryingWorkflows.forEach { workflow ->
+        val expectedOutcomes = listOf(
+            DescriptionGenerationOutcome.PermanentSaveFailure,
+            DescriptionGenerationOutcome.PermanentPhotoFailure,
+            DescriptionGenerationOutcome.PermanentGenerationFailure,
+            DescriptionGenerationOutcome.PermanentGenerationFailure,
+        )
+        failingWorkflows.zip(expectedOutcomes).forEach { (workflow, expectedOutcome) ->
             assertEquals(
-                DescriptionGenerationOutcome.Retry,
+                expectedOutcome,
                 workflow.run(descriptionGenerationRequest()),
             )
         }
 
-        val replacementUploadRetry = DescriptionGenerationWorkflow(
+        val replacementUploadFailure = DescriptionGenerationWorkflow(
             itemStore = RecordingDescriptionGenerationItemStore(mutableListOf()),
             photoLoader = successfulLoader(),
             generator = successfulGenerator(),
             fullPhotoUploader = DescriptionGenerationFullPhotoUploader {
-                DescriptionGenerationStep.RetryableFailure
+                DescriptionGenerationStep.PermanentFailure
             },
         )
         assertEquals(
-            DescriptionGenerationOutcome.Retry,
-            replacementUploadRetry.run(replacementDescriptionGenerationRequest()),
+            DescriptionGenerationOutcome.PermanentPhotoFailure,
+            replacementUploadFailure.run(replacementDescriptionGenerationRequest()),
         )
     }
 
     @Test
-    fun `remote failure classifier retries connectivity throttling and service failures`() {
-        val retryableCategories = listOf(
+    fun `remote failure classifier reports connectivity throttling and service failures as permanent`() {
+        val failureCategories = listOf(
             DescriptionGenerationFailureCategory.Connectivity,
             DescriptionGenerationFailureCategory.Throttling,
             DescriptionGenerationFailureCategory.RemoteService,
         )
 
-        retryableCategories.forEach { category ->
+        failureCategories.forEach { category ->
             assertEquals(
-                DescriptionGenerationStep.RetryableFailure,
+                DescriptionGenerationStep.PermanentFailure,
                 classifyDescriptionGenerationFailure(category),
             )
         }
         assertEquals(
-            DescriptionGenerationStep.RetryableFailure,
+            DescriptionGenerationStep.PermanentFailure,
             classifyDescriptionGenerationFailure(IOException("offline")),
         )
         assertEquals(
-            DescriptionGenerationStep.RetryableFailure,
+            DescriptionGenerationStep.PermanentFailure,
             classifyDescriptionGenerationFailure(
                 ExecutionException(IOException("wrapped offline failure")),
             ),
@@ -327,6 +258,21 @@ class InventoryDescriptionGenerationWorkTest {
     @Test
     fun `Firebase AI quota exhaustion becomes a visible permanent generation failure`() {
         val failure = QuotaExceededException::class.java
+            .getDeclaredConstructor(String::class.java, Throwable::class.java)
+            .newInstance("RESOURCE_EXHAUSTED", null)
+
+        val classified = classifyDescriptionGenerationFailure(failure)
+
+        assertTrue(classified is DescriptionGenerationStep.PermanentFailureWithErrorType)
+        assertEquals(
+            "RESOURCE_EXHAUSTED",
+            (classified as DescriptionGenerationStep.PermanentFailureWithErrorType).errorType,
+        )
+    }
+
+    @Test
+    fun `Firebase AI RESOURCE_EXHAUSTED server failure becomes a visible permanent generation failure`() {
+        val failure = ServerException::class.java
             .getDeclaredConstructor(String::class.java, Throwable::class.java)
             .newInstance("RESOURCE_EXHAUSTED", null)
 

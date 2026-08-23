@@ -14,7 +14,7 @@
 - [x] Edit closes immediately after the request is handed to WorkManager, without waiting for enqueue completion, Firestore, photo loading, or Gemini.
 - [x] The submitted Item appears optimistically in the current Inventory state with no success message or progress indicator.
 - [x] One deep background-work module hides WorkManager, Firestore, photo loading, Firebase AI Logic, prompt construction, response validation, and result persistence behind a small interface used by the Inventory controller.
-- [x] Work requires network connectivity and returns retry with exponential backoff for retryable connectivity, throttling, or remote-service failures.
+- [x] Work requires network connectivity and reports connectivity, throttling, or remote-service failures without retrying.
 - [x] The background workflow unconditionally saves the complete captured draft before generation, allowing it to overwrite newer edits to any captured field.
 - [x] The worker loads the captured stored full-size Item Photo, decodes it on the device, and sends it inline with the captured Description through Firebase AI Logic's Gemini Developer API backend on the free tier.
 - [x] The bundled model for this slice is `gemini-3.7-flash`; remotely selecting the model is deferred to ticket 04.
@@ -25,5 +25,5 @@
 - [x] The workflow adds no per-Item uniqueness, cancellation, deduplication, request ID, or stale-result protection; overlapping successful work remains last-write-wins.
 - [x] The workflow exposes distinct permanent Save and Description Generation failure outcomes for later Member-visible delivery without posting a system notification.
 - [x] Controller tests exercise the complete action and optimistic state through the existing controller interface with an in-memory background-work adapter.
-- [x] Platform-neutral workflow tests exercise Save ordering, captured Gemini input, retry classification, output validation, Description overwrite, and attribution through the module interface rather than Worker internals.
+- [x] Platform-neutral workflow tests exercise Save ordering, captured Gemini input, failure classification, output validation, Description overwrite, and attribution through the module interface rather than Worker internals.
 - [x] Firebase emulator tests confirm that the full Item Save and Description-only generated patch are authorized for a Household Member and denied across Households.

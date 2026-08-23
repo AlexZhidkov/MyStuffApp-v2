@@ -10,7 +10,7 @@
 - [x] Successful background persistence reconciles the optimistic Item with the normal Firestore observation flow without showing a success message.
 - [x] A permanent Save failure removes or releases the unpersisted optimistic overlay so remote Inventory state can become authoritative again.
 - [x] A generation or full-photo failure after Save preserves the remotely saved draft and its Member-written Description.
-- [x] Retryable failures remain invisible while WorkManager continues exponential-backoff retries.
+- [x] Every failed attempt is retained as a permanent outcome; WorkManager does not retry failures.
 - [x] A permanent outcome is retained device-locally until it can be presented once while the app is active.
 - [x] Permanent Save failure presents exactly **Couldn't save the Item.**
 - [x] Permanent full-photo upload or load failure presents exactly **Item saved, but couldn't upload its photo.**

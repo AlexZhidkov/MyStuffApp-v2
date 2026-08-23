@@ -14,7 +14,7 @@ Add a secondary **Save & generate description** action to the edit form for a no
 
 The background workflow saves the complete captured draft, ensures a replacement full-size photo has uploaded, and sends that photo inline with the captured Description to Gemini through Firebase AI Logic. Gemini returns a concise replacement Description that preserves Member-provided facts and adds clearly visible details. A valid response replaces the Item's current Description even if it changed after the request.
 
-The Member does not wait for either remote persistence or Gemini. There is no success or progress message. Transient failures retry automatically; permanent failures produce a stage-specific, one-time error message when the app is next active.
+The Member does not wait for either remote persistence or Gemini. There is no success or progress message. Failed attempts produce a stage-specific, one-time error message when the app is next active.
 
 ## User Stories
 
@@ -27,7 +27,7 @@ The Member does not wait for either remote persistence or Gemini. There is no su
 7. As a Member, I want the edit form to close immediately after valid work is queued, so that I can continue using the Inventory without waiting for network calls.
 8. As a Member, I want the submitted draft to appear immediately after the edit form closes, so that the action does not appear to have discarded my changes.
 9. As a Member, I want background work to survive ordinary app exits and device restarts, so that I do not need to keep the edit screen or app open.
-10. As a Member, I want background work to wait for connectivity and retry transient failures, so that temporary network problems do not require immediate manual intervention.
+10. As a Member, I want background work to wait for connectivity and report failed attempts, so that I receive a visible outcome instead of an indefinitely retried request.
 11. As a Member, I want the ordinary **Save** action to remain available, so that I can save an Item without sending its photo or Description to Gemini.
 12. As a Member, I want the ordinary **Save** behavior to remain unchanged, so that this feature does not alter the established edit workflow.
 13. As a Member, I want **Save** to remain the primary action, so that ordinary persistence is still the default choice.
@@ -52,7 +52,7 @@ The Member does not wait for either remote persistence or Gemini. There is no su
 32. As a Member, I accept that a delayed background Save may replace newer edits to any captured Item field, so that the asynchronous workflow remains simple and last-write-wins.
 33. As a Member, I want Gemini's Description update attributed to the Member who requested it, so that existing Item attribution remains meaningful.
 34. As a Member, I want a failed generation to leave the saved Member-written Description intact, so that a model failure does not erase my input.
-35. As a Member, I want transient save, upload, and generation failures retried with backoff, so that temporary service failures can recover automatically.
+35. As a Member, I want save, upload, and generation failures reported as permanent outcomes, so that every failed request produces a visible result.
 36. As a Member, I want a permanent Save failure reported distinctly, so that I know the complete draft was not persisted.
 37. As a Member, I want a permanent full-photo upload failure reported distinctly, so that I know why Description Generation could not proceed.
 38. As a Member, I want a permanent Description Generation failure reported distinctly, so that I can reopen Edit and try again.
@@ -77,7 +77,7 @@ The Member does not wait for either remote persistence or Gemini. There is no su
 - The background-work module accepts an immutable snapshot containing the Household and Item identities, every editable draft field, current photo choice, requesting Member attribution, and device language. It allocates any replacement photo revision before returning the optimistic Item.
 - Once local validation passes and the workflow is submitted to WorkManager, Edit closes immediately without awaiting enqueue completion. The controller overlays the optimistic Item onto observed Inventory state while its background Save is pending so unrelated Firestore refreshes do not immediately erase the submitted draft.
 - Enqueueing produces no success message and no persistent progress state in the UI.
-- The WorkManager workflow requires network connectivity and uses exponential backoff for retryable failures.
+- The WorkManager workflow requires network connectivity and does not retry failed attempts.
 - For an unchanged existing Item Photo, the workflow saves the captured draft and then loads the captured immutable full-photo revision for generation.
 - For a replacement Item Photo, the workflow saves the captured draft, uploads the full-size revision, then loads that stored revision for generation. The thumbnail upload proceeds independently and does not gate generation.
 - The full-size stored photo is decoded on the device and submitted as inline image data. Cloud Storage URLs are not supplied directly to Gemini.
@@ -93,7 +93,7 @@ The Member does not wait for either remote persistence or Gemini. There is no su
 - The result is trimmed and accepted only when nonblank and no longer than 2,000 Unicode code points. A response that violates the contract is a permanent generation failure and leaves the saved Description unchanged.
 - The generated update uses the requesting Member's captured ID and display-name attribution, consistent with existing Item update fields and Firestore authorization.
 - No special handling is added for sign-out or a different authenticated identity appearing before work runs. Ordinary Firebase authentication and authorization failures determine the result.
-- Retryable connectivity, throttling, and remote-service failures return WorkManager retry with exponential backoff. Non-retryable failures terminate the affected workflow stage.
+- Connectivity, throttling, and remote-service failures terminate the affected workflow stage without WorkManager retry.
 - A permanent failure is retained locally until presented once when the app is next active. The Member sees exactly one stage-appropriate in-app Snackbar: **Couldn't save the Item.**, **Item saved, but couldn't upload its photo.**, or **Item saved, but couldn't generate its description.**
 - No Android system notification is posted for success or failure.
 - The remote Item schema gains no Description Generation status, request, or history fields. Work lifecycle and one-time failure delivery remain device-local.
@@ -108,9 +108,9 @@ The Member does not wait for either remote persistence or Gemini. There is no su
 - WorkManager orchestration remains behind the background-work module. A platform-neutral workflow runner is an internal seam tested with fake Item persistence, photo storage, model configuration, Gemini, and failure-delivery adapters.
 - Workflow tests cover the unconditional full-draft Save, last-write-wins behavior, unchanged-photo generation, replacement full-photo upload before generation, independent thumbnail upload, inline photo submission, exact captured Description input, language selection, requesting-Member attribution, and Description-only final patch.
 - Workflow tests cover nonblank plain-text acceptance, whitespace trimming, the 2,000-code-point limit, preservation of the saved Description after blank or oversized output, and replacement of a newer Description by a valid result.
-- Workflow tests cover transient retry outcomes separately for Save, full-photo upload, photo loading, Gemini, and final Firestore update, plus permanent outcomes mapped to the three Member-visible failure stages.
+- Workflow tests cover Save, full-photo upload, photo loading, Gemini, and final Firestore update failures mapped to the three Member-visible failure stages without retry outcomes.
 - Model configuration tests cover a Remote Config model name and fallback to `gemini-3.7-flash` when remote configuration is missing or unavailable.
-- Existing Inventory controller tests are prior art for form validation, optimistic state transitions, gateway fakes, and failure/retry presentation.
+- Existing Inventory controller tests are prior art for form validation, optimistic state transitions, gateway fakes, and failure presentation.
 - Existing photo background-work tests are prior art for a platform-neutral runner, independent photo variants, WorkManager retry outcomes, and immutable photo revisions.
 - Existing Firebase Inventory gateway tests are prior art for full Item persistence, Description-only updates, photo revisions, and requesting-Member attribution.
 - Firestore and Storage emulator tests verify that the background full Save, generated Description patch, replacement photo upload, and authenticated Member attribution remain authorized while cross-Household access remains denied.

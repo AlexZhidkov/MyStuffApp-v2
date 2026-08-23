@@ -1,5 +1,6 @@
 package com.azhidkov.mystuff
 
+import com.google.firebase.ai.type.QuotaExceededException
 import java.io.IOException
 import java.util.concurrent.ExecutionException
 import java.util.UUID
@@ -324,6 +325,21 @@ class InventoryDescriptionGenerationWorkTest {
     }
 
     @Test
+    fun `Firebase AI quota exhaustion becomes a visible permanent generation failure`() {
+        val failure = QuotaExceededException::class.java
+            .getDeclaredConstructor(String::class.java, Throwable::class.java)
+            .newInstance("RESOURCE_EXHAUSTED", null)
+
+        val classified = classifyDescriptionGenerationFailure(failure)
+
+        assertTrue(classified is DescriptionGenerationStep.PermanentFailureWithErrorType)
+        assertEquals(
+            "RESOURCE_EXHAUSTED",
+            (classified as DescriptionGenerationStep.PermanentFailureWithErrorType).errorType,
+        )
+    }
+
+    @Test
     fun `workflow distinguishes permanent Save and Description Generation failures`() {
         val saveFailure = DescriptionGenerationWorkflow(
             RecordingDescriptionGenerationItemStore(
@@ -338,6 +354,13 @@ class InventoryDescriptionGenerationWorkTest {
             successfulLoader(),
             FixedDescriptionGenerator(DescriptionGenerationStep.PermanentFailure),
         )
+        val typedGenerationFailure = DescriptionGenerationWorkflow(
+            RecordingDescriptionGenerationItemStore(mutableListOf()),
+            successfulLoader(),
+            FixedDescriptionGenerator(
+                DescriptionGenerationStep.PermanentFailureWithErrorType("RESOURCE_EXHAUSTED"),
+            ),
+        )
 
         assertEquals(
             DescriptionGenerationOutcome.PermanentSaveFailure,
@@ -346,6 +369,12 @@ class InventoryDescriptionGenerationWorkTest {
         assertEquals(
             DescriptionGenerationOutcome.PermanentGenerationFailure,
             generationFailure.run(descriptionGenerationRequest()),
+        )
+        assertEquals(
+            DescriptionGenerationOutcome.PermanentGenerationFailureWithErrorType(
+                "RESOURCE_EXHAUSTED",
+            ),
+            typedGenerationFailure.run(descriptionGenerationRequest()),
         )
     }
 
@@ -412,6 +441,34 @@ class InventoryDescriptionGenerationWorkTest {
         restored.consume(id)
 
         assertTrue(DescriptionGenerationWorkStore(directory).snapshot().completed.isEmpty())
+    }
+
+    @Test
+    fun `LLM error type survives work-store recreation until shown`() {
+        val directory = temporaryFolder.newFolder("typed-description-generation")
+        val request = descriptionGenerationRequest()
+        val firstStore = DescriptionGenerationWorkStore(directory)
+        val id = firstStore.enqueue(request)
+
+        firstStore.complete(
+            id = id,
+            outcome = DescriptionGenerationOutcome.PermanentGenerationFailureWithErrorType(
+                "RESOURCE_EXHAUSTED",
+            ),
+        )
+
+        assertEquals(
+            listOf(
+                CompletedDescriptionGeneration(
+                    id = id,
+                    householdId = request.householdId,
+                    outcome = DescriptionGenerationOutcome.PermanentGenerationFailureWithErrorType(
+                        "RESOURCE_EXHAUSTED",
+                    ),
+                ),
+            ),
+            DescriptionGenerationWorkStore(directory).snapshot().completed,
+        )
     }
 
     @Test

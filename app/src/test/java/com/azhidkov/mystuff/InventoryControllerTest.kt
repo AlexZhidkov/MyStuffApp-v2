@@ -825,6 +825,10 @@ class InventoryControllerTest {
                 "Item saved, but couldn't upload its photo.",
             DescriptionGenerationOutcome.PermanentGenerationFailure to
                 "Item saved, but couldn't generate its description.",
+            DescriptionGenerationOutcome.PermanentGenerationFailureWithErrorType(
+                "RESOURCE_EXHAUSTED",
+            ) to "Item saved, but couldn't generate its description. " +
+                "RESOURCE_EXHAUSTED.",
         )
 
         scenarios.forEach { (outcome, message) ->

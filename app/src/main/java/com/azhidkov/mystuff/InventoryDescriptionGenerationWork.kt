@@ -140,16 +140,45 @@ internal sealed interface DescriptionGenerationStep<out T> {
     data class Success<T>(val value: T) : DescriptionGenerationStep<T>
     data object RetryableFailure : DescriptionGenerationStep<Nothing>
     data object PermanentFailure : DescriptionGenerationStep<Nothing>
+    data class PermanentFailureWithErrorType(val errorType: String) : DescriptionGenerationStep<Nothing>
 }
 
-internal enum class DescriptionGenerationOutcome(
-    val deferredErrorMessage: String? = null,
-) {
-    Success,
-    Retry,
-    PermanentSaveFailure("Couldn't save the Item."),
-    PermanentPhotoFailure("Item saved, but couldn't upload its photo."),
-    PermanentGenerationFailure("Item saved, but couldn't generate its description."),
+internal sealed interface DescriptionGenerationOutcome {
+    val deferredErrorMessage: String?
+    val storageName: String
+
+    data object Success : DescriptionGenerationOutcome {
+        override val deferredErrorMessage = null
+        override val storageName = "Success"
+    }
+
+    data object Retry : DescriptionGenerationOutcome {
+        override val deferredErrorMessage = null
+        override val storageName = "Retry"
+    }
+
+    data object PermanentSaveFailure : DescriptionGenerationOutcome {
+        override val deferredErrorMessage = "Couldn't save the Item."
+        override val storageName = "PermanentSaveFailure"
+    }
+
+    data object PermanentPhotoFailure : DescriptionGenerationOutcome {
+        override val deferredErrorMessage = "Item saved, but couldn't upload its photo."
+        override val storageName = "PermanentPhotoFailure"
+    }
+
+    data object PermanentGenerationFailure : DescriptionGenerationOutcome {
+        override val deferredErrorMessage = "Item saved, but couldn't generate its description."
+        override val storageName = "PermanentGenerationFailure"
+    }
+
+    data class PermanentGenerationFailureWithErrorType(
+        val errorType: String,
+    ) : DescriptionGenerationOutcome {
+        override val deferredErrorMessage =
+            "Item saved, but couldn't generate its description. $errorType."
+        override val storageName = "PermanentGenerationFailureWithErrorType"
+    }
 }
 
 internal enum class DescriptionGenerationFailureCategory {
@@ -220,6 +249,7 @@ internal class DescriptionGenerationWorkflow(
             is DescriptionGenerationStep.Success -> Unit
             DescriptionGenerationStep.RetryableFailure ->
                 return DescriptionGenerationOutcome.Retry
+            is DescriptionGenerationStep.PermanentFailureWithErrorType,
             DescriptionGenerationStep.PermanentFailure ->
                 return DescriptionGenerationOutcome.PermanentSaveFailure
         }
@@ -232,6 +262,7 @@ internal class DescriptionGenerationWorkflow(
                     }
                     DescriptionGenerationStep.RetryableFailure ->
                         return DescriptionGenerationOutcome.Retry
+                    is DescriptionGenerationStep.PermanentFailureWithErrorType,
                     DescriptionGenerationStep.PermanentFailure ->
                         return DescriptionGenerationOutcome.PermanentPhotoFailure
                 }
@@ -240,6 +271,7 @@ internal class DescriptionGenerationWorkflow(
                 is DescriptionGenerationStep.Success -> Unit
                 DescriptionGenerationStep.RetryableFailure ->
                     return DescriptionGenerationOutcome.Retry
+                is DescriptionGenerationStep.PermanentFailureWithErrorType,
                 DescriptionGenerationStep.PermanentFailure ->
                     return DescriptionGenerationOutcome.PermanentPhotoFailure
             }
@@ -251,6 +283,7 @@ internal class DescriptionGenerationWorkflow(
             is DescriptionGenerationStep.Success -> loaded.value
             DescriptionGenerationStep.RetryableFailure ->
                 return DescriptionGenerationOutcome.Retry
+            is DescriptionGenerationStep.PermanentFailureWithErrorType,
             DescriptionGenerationStep.PermanentFailure ->
                 return DescriptionGenerationOutcome.PermanentPhotoFailure
         }
@@ -271,6 +304,10 @@ internal class DescriptionGenerationWorkflow(
             is DescriptionGenerationStep.Success -> result.value.trimUnicodeWhitespace()
             DescriptionGenerationStep.RetryableFailure ->
                 return DescriptionGenerationOutcome.Retry
+            is DescriptionGenerationStep.PermanentFailureWithErrorType ->
+                return DescriptionGenerationOutcome.PermanentGenerationFailureWithErrorType(
+                    result.errorType,
+                )
             DescriptionGenerationStep.PermanentFailure ->
                 return DescriptionGenerationOutcome.PermanentGenerationFailure
         }
@@ -282,7 +319,7 @@ internal class DescriptionGenerationWorkflow(
         }
 
         return when (
-            itemStore.patchDescription(
+            val result = itemStore.patchDescription(
                 householdId = request.householdId,
                 itemId = request.item.id,
                 description = generated,
@@ -291,6 +328,10 @@ internal class DescriptionGenerationWorkflow(
         ) {
             is DescriptionGenerationStep.Success -> DescriptionGenerationOutcome.Success
             DescriptionGenerationStep.RetryableFailure -> DescriptionGenerationOutcome.Retry
+            is DescriptionGenerationStep.PermanentFailureWithErrorType ->
+                DescriptionGenerationOutcome.PermanentGenerationFailureWithErrorType(
+                    result.errorType,
+                )
             DescriptionGenerationStep.PermanentFailure ->
                 DescriptionGenerationOutcome.PermanentGenerationFailure
         }
@@ -429,6 +470,7 @@ internal class InventoryDescriptionGenerationWorker(
             DescriptionGenerationOutcome.PermanentSaveFailure,
             DescriptionGenerationOutcome.PermanentPhotoFailure,
             DescriptionGenerationOutcome.PermanentGenerationFailure,
+            is DescriptionGenerationOutcome.PermanentGenerationFailureWithErrorType,
             -> Result.failure(failureData(outcome))
         }
     }
@@ -565,9 +607,15 @@ private fun <T> firebaseStep(block: () -> T): DescriptionGenerationStep<T> = try
 
 internal fun classifyDescriptionGenerationFailure(
     failure: Throwable,
-): DescriptionGenerationStep<Nothing> = classifyDescriptionGenerationFailure(
-    failure.unwrapExecutionFailure().descriptionGenerationFailureCategory(),
-)
+): DescriptionGenerationStep<Nothing> {
+    val unwrapped = failure.unwrapExecutionFailure()
+    if (unwrapped is QuotaExceededException) {
+        return DescriptionGenerationStep.PermanentFailureWithErrorType(
+            GEMINI_ERROR_TYPE_RESOURCE_EXHAUSTED,
+        )
+    }
+    return classifyDescriptionGenerationFailure(unwrapped.descriptionGenerationFailureCategory())
+}
 
 internal fun classifyDescriptionGenerationFailure(
     category: DescriptionGenerationFailureCategory,
@@ -590,9 +638,8 @@ private fun Throwable.descriptionGenerationFailureCategory():
     is InterruptedException,
     is FirebaseNetworkException,
     -> DescriptionGenerationFailureCategory.Connectivity
-    is FirebaseTooManyRequestsException,
-    is QuotaExceededException,
-    -> DescriptionGenerationFailureCategory.Throttling
+    is QuotaExceededException -> DescriptionGenerationFailureCategory.Permanent
+    is FirebaseTooManyRequestsException -> DescriptionGenerationFailureCategory.Throttling
     is RequestTimeoutException,
     is ServerException,
     is ServiceConnectionHandshakeFailedException,
@@ -679,7 +726,10 @@ internal class DescriptionGenerationWorkStore(baseDirectory: File) {
         val temporary = File.createTempFile("completed-", ".tmp", completedDirectory)
         DataOutputStream(temporary.outputStream().buffered()).use { output ->
             output.writeUTF(householdId)
-            output.writeUTF(outcome.name)
+            output.writeUTF(outcome.storageName)
+            if (outcome is DescriptionGenerationOutcome.PermanentGenerationFailureWithErrorType) {
+                output.writeUTF(outcome.errorType)
+            }
         }
         check(temporary.renameTo(destination)) {
             "Description Generation outcome storage is unavailable"
@@ -710,10 +760,25 @@ internal class DescriptionGenerationWorkStore(baseDirectory: File) {
 
     private fun readCompleted(file: File): CompletedDescriptionGeneration? = runCatching {
         DataInputStream(file.inputStream().buffered()).use { input ->
+            val householdId = input.readUTF()
+            val outcomeName = input.readUTF()
             CompletedDescriptionGeneration(
                 id = file.nameWithoutExtension,
-                householdId = input.readUTF(),
-                outcome = DescriptionGenerationOutcome.valueOf(input.readUTF()),
+                householdId = householdId,
+                outcome = when (outcomeName) {
+                    "Success" -> DescriptionGenerationOutcome.Success
+                    "Retry" -> DescriptionGenerationOutcome.Retry
+                    "PermanentSaveFailure" -> DescriptionGenerationOutcome.PermanentSaveFailure
+                    "PermanentPhotoFailure" ->
+                        DescriptionGenerationOutcome.PermanentPhotoFailure
+                    "PermanentGenerationFailure" ->
+                        DescriptionGenerationOutcome.PermanentGenerationFailure
+                    "PermanentGenerationFailureWithErrorType" ->
+                        DescriptionGenerationOutcome.PermanentGenerationFailureWithErrorType(
+                            input.readUTF(),
+                        )
+                    else -> error("Unknown Description Generation outcome: $outcomeName")
+                },
             )
         }
     }.getOrNull()
@@ -837,7 +902,7 @@ private fun DataInputStream.readNullableString(): String? =
     if (readBoolean()) readUTF() else null
 
 private fun failureData(outcome: DescriptionGenerationOutcome): Data = Data.Builder()
-    .putString(WORK_FAILURE_OUTCOME, outcome.name)
+    .putString(WORK_FAILURE_OUTCOME, outcome.storageName)
     .build()
 
 private const val MAX_INLINE_PHOTO_BYTES = 20L * 1024L * 1024L
@@ -862,3 +927,4 @@ private const val WORK_REQUEST_ID = "request-id"
 private const val WORK_HOUSEHOLD_ID = "household-id"
 private const val WORK_FAILURE_OUTCOME = "failure-outcome"
 private const val DESCRIPTION_GENERATION_WEBP_CONTENT_TYPE = "image/webp"
+private const val GEMINI_ERROR_TYPE_RESOURCE_EXHAUSTED = "RESOURCE_EXHAUSTED"

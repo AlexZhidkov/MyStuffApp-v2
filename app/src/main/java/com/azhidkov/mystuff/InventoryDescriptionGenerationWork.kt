@@ -261,6 +261,7 @@ internal class DescriptionGenerationWorkflow(
                     existingDescription = request.item.description,
                     deviceLanguage = request.deviceLanguage,
                     prompt = descriptionGenerationPrompt(
+                        itemTitle = request.item.name,
                         existingDescription = request.item.description,
                         deviceLanguage = request.deviceLanguage,
                     ),
@@ -303,17 +304,19 @@ private object EmptyDescriptionGenerationUploadedPhotoLedger :
 }
 
 internal fun descriptionGenerationPrompt(
+    itemTitle: String,
     existingDescription: String?,
     deviceLanguage: String,
 ): String = """
-    Write one concise plain-text paragraph describing the Item shown in the photo.
-    Preserve every factual statement from the Member-written Description below, rewriting only
+    Write one concise plain-text paragraph describing the $itemTitle shown in the photo.
+    If the photo contains multiple things, describe only $itemTitle.
+    Preserve every factual statement from the Human-written Description below, rewriting only
     for clarity. Add only identifying details that are clearly visible in the photo. Do not make
     unsupported brand or model claims. Do not use Markdown, headings, or lists.
-    Use the Member-written Description's language when it is detectable; otherwise use the
+    Use the Human-written Description's language when it is detectable; otherwise use the
     captured device language: $deviceLanguage.
 
-    Member-written Description:
+    Human-written Description:
     ${existingDescription.orEmpty()}
 """.trimIndent()
 

@@ -49,6 +49,8 @@ class InventoryDescriptionGenerationWorkTest {
                 ignoreCase = true,
             ),
         )
+        assertTrue(generator.inputs.single().prompt.contains("Hammer Drill"))
+        assertTrue(generator.inputs.single().prompt.contains("multiple things"))
         assertTrue(generator.inputs.single().prompt.contains("clearly visible"))
         assertTrue(generator.inputs.single().prompt.contains("brand or model"))
         assertTrue(generator.inputs.single().prompt.contains("plain-text paragraph"))

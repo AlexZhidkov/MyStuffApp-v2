@@ -200,21 +200,6 @@ private fun HouseholdRootContent(
                         )
                     }
                 },
-                actions = {
-                    if (inventoryState.openedSearchResultId != null) {
-                        TextButton(
-                            onClick = {
-                                inventoryActions.changeSearchQuery(inventoryState.searchQuery)
-                            },
-                        ) {
-                            Text(stringResource(R.string.search_results))
-                        }
-                    } else if (!isHome && !showSearchResults) {
-                        TextButton(onClick = inventoryActions::openParentItem) {
-                            Text(stringResource(R.string.up_to_parent_item))
-                        }
-                    }
-                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background,
                 ),

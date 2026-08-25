@@ -292,14 +292,27 @@ private fun HouseholdRootContent(
                     }
                 }
                 item {
-                    Text(
-                        text = inventoryState.itemPath.joinToString(
-                            " → ",
-                            transform = Item::name,
-                        ),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        inventoryState.itemPath.forEachIndexed { index, pathItem ->
+                            if (index > 0) {
+                                Text(
+                                    text = "→",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Text(
+                                text = pathItem.name,
+                                modifier = Modifier.clickable {
+                                    inventoryActions.openItem(pathItem.id)
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
                 }
                 item {
                     val webUrl = inventoryState.selectedItem.webUrl?.takeIf(String::isNotBlank)

@@ -372,22 +372,14 @@ private fun HouseholdRootContent(
                 item {
                     AddItemButton(inventoryState, inventoryActions)
                 }
-                item {
-                    Text(
-                        text = stringResource(R.string.child_items),
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
-                if (inventoryState.childItems.isEmpty()) {
+                if (inventoryState.childItems.isNotEmpty()) {
                     item {
                         Text(
-                            text = stringResource(R.string.no_child_items),
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            text = stringResource(R.string.child_items),
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
                         )
                     }
-                } else {
                     items(
                         items = inventoryState.childItems,
                         key = Item::id,

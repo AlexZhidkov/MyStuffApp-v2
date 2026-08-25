@@ -293,16 +293,12 @@ private fun HouseholdRootContent(
                 }
                 item {
                     Text(
-                        text = stringResource(
-                            if (isHome) {
-                                R.string.household_root_label
-                            } else {
-                                R.string.item_details
-                            },
+                        text = inventoryState.itemPath.joinToString(
+                            " → ",
+                            transform = Item::name,
                         ),
-                        style = MaterialTheme.typography.labelLarge,
+                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.SemiBold,
                     )
                 }
                 item {
@@ -335,16 +331,6 @@ private fun HouseholdRootContent(
                         }
                     }
                 }
-                item {
-                    Text(
-                        text = inventoryState.itemPath.joinToString(
-                            " → ",
-                            transform = Item::name,
-                        ),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                }
                 inventoryState.selectedItem.description?.let { description ->
                     item {
                         Text(
@@ -373,13 +359,6 @@ private fun HouseholdRootContent(
                     AddItemButton(inventoryState, inventoryActions)
                 }
                 if (inventoryState.childItems.isNotEmpty()) {
-                    item {
-                        Text(
-                            text = stringResource(R.string.child_items),
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
                     items(
                         items = inventoryState.childItems,
                         key = Item::id,

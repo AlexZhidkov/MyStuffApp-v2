@@ -179,13 +179,26 @@ private fun HouseholdRootContent(
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        text = stringResource(R.string.app_name),
-                        modifier = Modifier.clickable {
-                            inventoryActions.openItem(inventoryState.inventory.rootItemId)
-                        },
-                        fontWeight = FontWeight.Bold,
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = stringResource(R.string.app_name),
+                            modifier = Modifier.clickable {
+                                inventoryActions.openItem(inventoryState.inventory.rootItemId)
+                            },
+                            fontWeight = FontWeight.Bold,
+                        )
+                        OutlinedTextField(
+                            value = inventoryState.searchQuery,
+                            onValueChange = inventoryActions::changeSearchQuery,
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            label = { Text(stringResource(R.string.search_household)) },
+                        )
+                    }
                 },
                 actions = {
                     if (inventoryState.openedSearchResultId != null) {
@@ -215,15 +228,6 @@ private fun HouseholdRootContent(
                 .padding(horizontal = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            item {
-                OutlinedTextField(
-                    value = inventoryState.searchQuery,
-                    onValueChange = inventoryActions::changeSearchQuery,
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    label = { Text(stringResource(R.string.search_household)) },
-                )
-            }
             if (showSearchResults) {
                 item {
                     AddItemButton(inventoryState, inventoryActions)

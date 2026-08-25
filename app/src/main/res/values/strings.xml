@@ -58,7 +58,7 @@
     <string name="item_photo_unavailable">Photo unavailable</string>
     <string name="household_invitations">Household invitations</string>
     <string name="household_invitations_body">Invite one person at a time using the email address for their Google Account. Each link expires after seven days.</string>
-    <string name="google_email_address">Google email address</string>
+    <string name="google_email_address">Gmail address</string>
     <string name="create_invitation">Create invitation</string>
     <string name="revoke_invitation">Revoke</string>
     <string name="replace_invitation">Replace link</string>

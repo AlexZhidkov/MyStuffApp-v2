@@ -135,7 +135,7 @@ class InventoryControllerTest {
     }
 
     @Test
-    fun `opening a search result exposes its complete Item Path details and Child Items`() {
+    fun `opening a search result exposes its parent Item Path details and Child Items`() {
         val household = household()
         val controller = InventoryController(
             household,
@@ -165,10 +165,10 @@ class InventoryControllerTest {
 
         assertEquals("gs://mystuff/drill-thumb.webp", result.item.photoThumbnailUrl)
         assertEquals(
-            listOf("Our Home", "Garage", "Cabinet", "Drill"),
+            listOf("Garage", "Cabinet"),
             result.itemPath.map(Item::name),
         )
-        assertEquals("Our Home → Garage → Cabinet → Drill", result.itemPathText)
+        assertEquals("Garage → Cabinet", result.itemPathText)
 
         controller.openSearchResult(result.item.id)
 
@@ -305,7 +305,7 @@ class InventoryControllerTest {
     }
 
     @Test
-    fun `Member browses immediate Child Items and a complete deep Item Path`() {
+    fun `Member browses immediate Child Items and a deep parent Item Path`() {
         val household = household()
         val inventory = Inventory.from(
             household = household,
@@ -328,7 +328,7 @@ class InventoryControllerTest {
         controller.openItem("cabinet")
         controller.openItem("drill")
         assertEquals(
-            listOf("Our Home", "Garage", "Cabinet", "Drill"),
+            listOf("Garage", "Cabinet"),
             controller.state.itemPath.map(Item::name),
         )
     }

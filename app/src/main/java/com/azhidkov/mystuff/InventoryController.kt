@@ -143,7 +143,7 @@ data class InventoryUiState(
     val childItems: List<Item>
         get() = inventory.childrenOf(selectedItemId)
     val itemPath: List<Item>
-        get() = inventory.pathTo(selectedItemId)
+        get() = inventory.pathTo(selectedItemId).drop(1).dropLast(1)
     val searchQuery: String
         get() = search.query
     val openedSearchResultId: String?
@@ -160,7 +160,10 @@ data class InventoryUiState(
                 }
                 .sortedWith(compareBy({ it.second.field }, { it.second.match }))
                 .map { (item) ->
-                    InventorySearchResult(item = item, itemPath = inventory.pathTo(item.id))
+                    InventorySearchResult(
+                        item = item,
+                        itemPath = inventory.pathTo(item.id).drop(1).dropLast(1),
+                    )
                 }
                 .toList()
         }

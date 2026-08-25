@@ -167,6 +167,9 @@ private fun HouseholdRootContent(
                 title = {
                     Text(
                         text = stringResource(R.string.app_name),
+                        modifier = Modifier.clickable {
+                            inventoryActions.openItem(inventoryState.inventory.rootItemId)
+                        },
                         fontWeight = FontWeight.Bold,
                     )
                 },

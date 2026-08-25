@@ -2,6 +2,7 @@ package com.azhidkov.mystuff.ui
 
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -139,6 +140,9 @@ private fun HouseholdRootContent(
 ) {
     val itemDraft = inventoryState.itemDraft
     if (itemDraft != null) {
+        BackHandler(enabled = !inventoryState.operationInProgress) {
+            inventoryActions.closeItemForm()
+        }
         when (itemDraft.stage) {
             ItemFormStage.CameraPermission,
             ItemFormStage.Camera,
@@ -160,6 +164,16 @@ private fun HouseholdRootContent(
     val isHome = inventoryState.selectedItemId == inventoryState.inventory.rootItemId
     val showSearchResults = inventoryState.searchQuery.isNotBlank() &&
         inventoryState.openedSearchResultId == null
+    BackHandler(
+        enabled = inventoryState.openedSearchResultId != null ||
+            (!isHome && !showSearchResults),
+    ) {
+        if (inventoryState.openedSearchResultId != null) {
+            inventoryActions.changeSearchQuery(inventoryState.searchQuery)
+        } else {
+            inventoryActions.openParentItem()
+        }
+    }
     Scaffold(
         contentWindowInsets = WindowInsets.safeDrawing,
         topBar = {

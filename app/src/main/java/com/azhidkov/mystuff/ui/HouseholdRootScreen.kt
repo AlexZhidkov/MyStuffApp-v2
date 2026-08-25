@@ -201,9 +201,6 @@ private fun HouseholdRootContent(
                             Text(stringResource(R.string.up_to_parent_item))
                         }
                     }
-                    TextButton(onClick = onSignOut, enabled = !signOutInProgress) {
-                        Text(stringResource(R.string.sign_out))
-                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background,
@@ -460,6 +457,14 @@ private fun HouseholdRootContent(
                                 onReplaceInvitation(invitation.id, invitation.intendedEmail)
                             },
                         )
+                    }
+                }
+                if (isHome) {
+                    item { Spacer(Modifier.height(16.dp)) }
+                    item {
+                        TextButton(onClick = onSignOut, enabled = !signOutInProgress) {
+                            Text(stringResource(R.string.sign_out))
+                        }
                     }
                 }
             }

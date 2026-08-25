@@ -204,7 +204,6 @@ private fun HouseholdRootContent(
                 .padding(horizontal = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            item { Spacer(Modifier.height(24.dp)) }
             item {
                 OutlinedTextField(
                     value = inventoryState.searchQuery,

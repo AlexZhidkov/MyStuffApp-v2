@@ -198,6 +198,18 @@ private fun HouseholdRootContent(
                             modifier = Modifier.weight(1f),
                             singleLine = true,
                             label = { Text(stringResource(R.string.search_household)) },
+                            trailingIcon = {
+                                if (inventoryState.searchQuery.isNotEmpty()) {
+                                    IconButton(
+                                        onClick = { inventoryActions.changeSearchQuery("") },
+                                    ) {
+                                        Icon(
+                                            painter = painterResource(R.drawable.ic_clear),
+                                            contentDescription = stringResource(R.string.clear_search),
+                                        )
+                                    }
+                                }
+                            },
                         )
                     }
                 },

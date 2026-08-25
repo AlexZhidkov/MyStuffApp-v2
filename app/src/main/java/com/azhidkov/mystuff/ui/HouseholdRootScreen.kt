@@ -361,15 +361,19 @@ private fun HouseholdRootContent(
                         )
                     }
                 }
-                if (!isHome) {
-                    item {
-                        TextButton(onClick = inventoryActions::beginEditItem) {
-                            Text(stringResource(R.string.edit_item))
-                        }
-                    }
-                }
                 item {
-                    AddItemButton(inventoryState, inventoryActions)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (!isHome) {
+                            TextButton(onClick = inventoryActions::beginEditItem) {
+                                Text(stringResource(R.string.edit_item))
+                            }
+                        }
+                        AddItemButton(inventoryState, inventoryActions)
+                    }
                 }
                 if (inventoryState.childItems.isNotEmpty()) {
                     items(

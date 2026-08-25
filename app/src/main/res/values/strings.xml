@@ -23,7 +23,7 @@
     <string name="child_items">Child Items</string>
     <string name="no_child_items">No Child Items yet.</string>
     <string name="up_to_parent_item">Up</string>
-    <string name="search_household">Search Household</string>
+    <string name="search_household">Search</string>
     <string name="search_results">Search results</string>
     <string name="no_search_results">No matching Items.</string>
     <string name="cancel">Cancel</string>

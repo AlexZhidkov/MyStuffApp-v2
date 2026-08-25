@@ -191,7 +191,7 @@ private fun HouseholdRootContent(
                             },
                             fontWeight = FontWeight.Bold,
                         )
-                        OutlinedTextField(
+                        TextField(
                             value = inventoryState.searchQuery,
                             onValueChange = inventoryActions::changeSearchQuery,
                             modifier = Modifier.weight(1f),

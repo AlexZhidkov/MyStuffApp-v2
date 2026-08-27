@@ -7,6 +7,7 @@
     <string name="signing_in">Signing in…</string>
     <string name="google_only_provider">MyStuff uses your Google Account only to identify you and protect your Household.</string>
     <string name="sign_out">Sign out</string>
+    <string name="open_menu">Open menu</string>
     <string name="welcome_person">Welcome, %1$s</string>
     <string name="create_household">Create a Household</string>
     <string name="create_household_title">Create your Household</string>

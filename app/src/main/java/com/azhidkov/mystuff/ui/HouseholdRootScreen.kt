@@ -3,6 +3,7 @@ package com.azhidkov.mystuff.ui
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,7 +16,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -185,12 +185,10 @@ private fun HouseholdRootContent(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(
-                            text = stringResource(R.string.app_name),
-                            modifier = Modifier.clickable {
+                        AppBarBrandIcon(
+                            onClick = {
                                 inventoryActions.openItem(inventoryState.inventory.rootItemId)
                             },
-                            fontWeight = FontWeight.Bold,
                         )
                         TextField(
                             value = inventoryState.searchQuery,
@@ -212,6 +210,12 @@ private fun HouseholdRootContent(
                             },
                         )
                     }
+                },
+                actions = {
+                    AppBarOverflowMenu(
+                        enabled = !signOutInProgress,
+                        onSignOut = onSignOut,
+                    )
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background,
@@ -459,14 +463,6 @@ private fun HouseholdRootContent(
                                 onReplaceInvitation(invitation.id, invitation.intendedEmail)
                             },
                         )
-                    }
-                }
-                if (isHome) {
-                    item { Spacer(Modifier.height(16.dp)) }
-                    item {
-                        TextButton(onClick = onSignOut, enabled = !signOutInProgress) {
-                            Text(stringResource(R.string.sign_out))
-                        }
                     }
                 }
             }

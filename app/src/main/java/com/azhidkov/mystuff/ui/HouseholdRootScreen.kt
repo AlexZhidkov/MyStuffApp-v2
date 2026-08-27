@@ -24,6 +24,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -177,6 +178,9 @@ private fun HouseholdRootContent(
     }
     Scaffold(
         contentWindowInsets = WindowInsets.safeDrawing,
+        floatingActionButton = {
+            AddItemFab(inventoryState, inventoryActions)
+        },
         topBar = {
             TopAppBar(
                 title = {
@@ -231,9 +235,6 @@ private fun HouseholdRootContent(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             if (showSearchResults) {
-                item {
-                    AddItemButton(inventoryState, inventoryActions)
-                }
                 item {
                     Text(
                         text = stringResource(R.string.search_results),
@@ -377,18 +378,11 @@ private fun HouseholdRootContent(
                         )
                     }
                 }
-                item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        if (!isHome) {
-                            TextButton(onClick = inventoryActions::beginEditItem) {
-                                Text(stringResource(R.string.edit_item))
-                            }
+                if (!isHome) {
+                    item {
+                        TextButton(onClick = inventoryActions::beginEditItem) {
+                            Text(stringResource(R.string.edit_item))
                         }
-                        AddItemButton(inventoryState, inventoryActions)
                     }
                 }
                 if (inventoryState.childItems.isNotEmpty()) {
@@ -472,15 +466,17 @@ private fun HouseholdRootContent(
 }
 
 @Composable
-private fun AddItemButton(
+private fun AddItemFab(
     state: InventoryUiState,
     actions: InventoryActions,
 ) {
-    Button(
-        onClick = actions::beginAddItem,
-        enabled = !state.loading,
-    ) {
-        Text(stringResource(R.string.add_item))
+    if (!state.loading) {
+        FloatingActionButton(onClick = actions::beginAddItem) {
+            Icon(
+                painter = painterResource(R.drawable.ic_add),
+                contentDescription = stringResource(R.string.add_item),
+            )
+        }
     }
 }
 

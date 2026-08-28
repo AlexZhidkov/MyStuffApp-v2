@@ -10,6 +10,8 @@ interface InventoryGateway {
         onResult: (Result<Inventory>) -> Unit,
     ): InventorySubscription
 
+    fun newItemId(householdId: String): String
+
     fun createItem(
         householdId: String,
         parentItemId: String,
@@ -132,11 +134,11 @@ data class InventoryUiState(
     val canGenerateDescription: Boolean
         get() {
             val draft = itemDraft ?: return false
+            if (draft.photoRemoved) return false
+            if (draft.photo != null) return true
             val editingItemId = draft.editingItemId ?: return false
-            if (draft.photoRemoved || !inventory.contains(editingItemId)) {
-                return false
-            }
-            return draft.photo != null || inventory.item(editingItemId).photoUrl != null
+            return inventory.contains(editingItemId) &&
+                inventory.item(editingItemId).photoUrl != null
         }
     val itemFormStage: ItemFormStage?
         get() = itemDraft?.stage
@@ -629,13 +631,25 @@ class InventoryController internal constructor(
         if (state.operationInProgress || !state.canGenerateDescription) return
         val details = validateAndNormalize(draft) ?: return
 
-        val existing = state.inventory.item(requireNotNull(draft.editingItemId))
-        val capturedItem = existing.copy(
-            name = details.name,
-            description = details.description,
-            tags = details.tags,
-            webUrl = details.webUrl,
-        )
+        val editingItemId = draft.editingItemId
+        val capturedItem = if (editingItemId == null) {
+            Item(
+                id = gateway.newItemId(household.id),
+                name = details.name,
+                parentItemId = draft.parentItemId,
+                photoUrl = null,
+                description = details.description,
+                tags = details.tags,
+                webUrl = details.webUrl,
+            )
+        } else {
+            state.inventory.item(editingItemId).copy(
+                name = details.name,
+                description = details.description,
+                tags = details.tags,
+                webUrl = details.webUrl,
+            )
+        }
         val submission = descriptionGenerationWork.submit(
             DescriptionGenerationRequest(
                 householdId = household.id,
@@ -645,6 +659,11 @@ class InventoryController internal constructor(
                     displayName = identity.attributionDisplayName(),
                 ),
                 deviceLanguage = deviceLanguage(),
+                saveMode = if (editingItemId == null) {
+                    DescriptionGenerationSaveMode.Create
+                } else {
+                    DescriptionGenerationSaveMode.Update
+                },
             ),
             replacementPhoto = draft.photo,
         )
@@ -728,9 +747,15 @@ class InventoryController internal constructor(
     }
 
     private fun Inventory.withDescriptionGenerationOverlays(): Inventory {
-        val overlays = pendingDescriptionGenerations.values.map { it.item }
-        return overlays.fold(this) { inventory, item ->
-            if (inventory.contains(item.id)) inventory.withItem(item) else inventory
+        return pendingDescriptionGenerations.values.fold(this) { inventory, request ->
+            val item = request.item
+            val canAddPendingCreate = request.saveMode == DescriptionGenerationSaveMode.Create &&
+                item.parentItemId?.let(inventory::contains) == true
+            if (inventory.contains(item.id) || canAddPendingCreate) {
+                inventory.withItem(item)
+            } else {
+                inventory
+            }
         }
     }
 

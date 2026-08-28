@@ -790,6 +790,70 @@ class InventoryControllerTest {
     }
 
     @Test
+    fun `Member submits a new photo Item for Description Generation`() {
+        val work = RecordingDescriptionGenerationWork()
+        val controller = InventoryController(
+            household = household(),
+            identity = identity(),
+            gateway = FakeInventoryGateway(inventory()),
+            rootChildItemCache = NoRootChildItemCache,
+            descriptionGenerationWork = work,
+            deviceLanguage = { "en-AU" },
+        )
+        val photo = ItemPhoto("content://new.webp", "content://new-thumb.webp")
+        controller.beginAddItem()
+        controller.resolveCameraPermission(granted = true)
+        controller.photoCaptured(ItemPhoto("content://captured.jpg"))
+        controller.useCroppedPhoto(photo)
+        controller.changeItemName("  Drill  ")
+        controller.changeItemDescription("Member facts")
+        controller.changeItemWebUrl(" https://example.com/drill ")
+        controller.changeTagInput("Power Tools")
+        controller.addTag()
+
+        assertTrue(controller.state.canGenerateDescription)
+
+        controller.saveAndGenerateDescription()
+
+        val request = work.requests.single()
+        assertEquals(DescriptionGenerationSaveMode.Create, request.saveMode)
+        assertEquals("created-1", request.item.id)
+        assertEquals(household().id, request.item.parentItemId)
+        assertEquals(listOf(photo), work.replacementPhotos)
+        assertNull(controller.state.itemDraft)
+        assertEquals("Drill", controller.state.selectedItem.name)
+        assertEquals("Member facts", controller.state.selectedItem.description)
+        assertEquals(listOf("Power Tools"), controller.state.selectedItem.tags)
+        assertEquals("https://example.com/drill", controller.state.selectedItem.webUrl)
+    }
+
+    @Test
+    fun `pending new Item stays overlaid until its background create is observed`() {
+        val household = household()
+        val gateway = FakeInventoryGateway(inventory())
+        val work = RecordingDescriptionGenerationWork()
+        val controller = InventoryController(
+            household = household,
+            identity = identity(),
+            gateway = gateway,
+            rootChildItemCache = NoRootChildItemCache,
+            descriptionGenerationWork = work,
+        )
+        controller.beginAddItem()
+        controller.resolveCameraPermission(granted = true)
+        controller.photoCaptured(ItemPhoto("content://captured.jpg"))
+        controller.useCroppedPhoto(ItemPhoto("content://new.webp", "content://new-thumb.webp"))
+        controller.changeItemName("Drill")
+        controller.saveAndGenerateDescription()
+        val submitted = work.requests.single().item
+
+        gateway.emit(Inventory.from(household, listOf(household.rootItem)))
+
+        assertEquals(submitted, controller.state.inventory.item(submitted.id))
+        assertEquals(submitted.id, controller.state.selectedItemId)
+    }
+
+    @Test
     fun `Member submits a complete existing-photo draft and sees it optimistically`() {
         val household = household()
         val existing = item(
@@ -1309,6 +1373,8 @@ private class FakeInventoryGateway(
         return InventorySubscription { observer = null }
     }
 
+    override fun newItemId(householdId: String): String = "created-${nextId++}"
+
     override fun createItem(
         householdId: String,
         parentItemId: String,
@@ -1322,7 +1388,7 @@ private class FakeInventoryGateway(
         createdDetails = details
         createdPhoto = photo
         val created = item(
-            id = "created-${nextId++}",
+            id = newItemId(householdId),
             name = details.name,
             parentItemId = parentItemId,
             photoUrl = photo?.let {

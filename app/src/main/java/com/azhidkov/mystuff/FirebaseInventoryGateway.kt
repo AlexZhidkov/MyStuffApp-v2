@@ -29,6 +29,8 @@ class FirebaseInventoryGateway internal constructor(
         )
     }
 
+    override fun newItemId(householdId: String): String = store.newItemId(householdId)
+
     override fun createItem(
         householdId: String,
         parentItemId: String,
@@ -41,7 +43,7 @@ class FirebaseInventoryGateway internal constructor(
             onResult(Result.failure(IllegalArgumentException(error)))
             return
         }
-        val itemId = store.newItemId(householdId)
+        val itemId = newItemId(householdId)
         val photoRevision = photo?.let { photoStore.newRevision(householdId, itemId) }
         createItemDocument(
             householdId = householdId,

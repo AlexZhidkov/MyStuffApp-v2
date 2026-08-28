@@ -47,7 +47,13 @@ internal data class DescriptionGenerationRequest(
     val requestingMember: RequestingMemberAttribution,
     val deviceLanguage: String,
     val replacementPhoto: DescriptionGenerationReplacementPhoto? = null,
+    val saveMode: DescriptionGenerationSaveMode = DescriptionGenerationSaveMode.Update,
 )
+
+internal enum class DescriptionGenerationSaveMode {
+    Create,
+    Update,
+}
 
 internal data class DescriptionGenerationReplacementPhoto(
     val revision: ItemPhotoRevision,
@@ -471,21 +477,31 @@ private class FirebaseDescriptionGenerationItemStore(
         request: DescriptionGenerationRequest,
     ): DescriptionGenerationStep<Unit> = firebaseStep {
         val item = request.item
-        Tasks.await(
-            itemDocument(request.householdId, item.id).update(
-                mapOf(
-                    ITEM_NAME_FIELD to item.name,
-                    ITEM_PHOTO_URL_FIELD to item.photoUrl,
-                    ITEM_PHOTO_THUMBNAIL_URL_FIELD to item.photoThumbnailUrl,
-                    ITEM_DESCRIPTION_FIELD to item.description,
-                    ITEM_TAGS_FIELD to item.tags,
-                    ITEM_WEB_URL_FIELD to item.webUrl,
-                    ITEM_UPDATED_AT_FIELD to FieldValue.serverTimestamp(),
-                    ITEM_UPDATED_BY_ID_FIELD to request.requestingMember.id,
-                    ITEM_UPDATED_BY_DISPLAY_NAME_FIELD to request.requestingMember.displayName,
-                ),
-            ),
+        val updatedData = mapOf(
+            ITEM_NAME_FIELD to item.name,
+            ITEM_PHOTO_URL_FIELD to item.photoUrl,
+            ITEM_PHOTO_THUMBNAIL_URL_FIELD to item.photoThumbnailUrl,
+            ITEM_DESCRIPTION_FIELD to item.description,
+            ITEM_TAGS_FIELD to item.tags,
+            ITEM_WEB_URL_FIELD to item.webUrl,
+            ITEM_UPDATED_AT_FIELD to FieldValue.serverTimestamp(),
+            ITEM_UPDATED_BY_ID_FIELD to request.requestingMember.id,
+            ITEM_UPDATED_BY_DISPLAY_NAME_FIELD to request.requestingMember.displayName,
         )
+        val document = itemDocument(request.householdId, item.id)
+        val save = when (request.saveMode) {
+            DescriptionGenerationSaveMode.Create -> document.set(
+                updatedData + mapOf(
+                    ITEM_HOUSEHOLD_ID_FIELD to request.householdId,
+                    ITEM_PARENT_ITEM_ID_FIELD to requireNotNull(item.parentItemId),
+                    ITEM_CREATED_AT_FIELD to FieldValue.serverTimestamp(),
+                    ITEM_CREATED_BY_ID_FIELD to request.requestingMember.id,
+                    ITEM_CREATED_BY_DISPLAY_NAME_FIELD to request.requestingMember.displayName,
+                ),
+            )
+            DescriptionGenerationSaveMode.Update -> document.update(updatedData)
+        }
+        Tasks.await(save)
     }
 
     override fun patchDescription(
@@ -847,6 +863,7 @@ private fun DataOutputStream.writeRequest(request: DescriptionGenerationRequest)
         writeUTF(replacement.source.uri)
         writeUTF(replacement.source.thumbnailUri)
     }
+    writeUTF(request.saveMode.name)
 }
 
 private fun DataInputStream.readRequest(): DescriptionGenerationRequest {
@@ -887,7 +904,12 @@ private fun DataInputStream.readRequest(): DescriptionGenerationRequest {
     } catch (_: EOFException) {
         null
     }
-    return request.copy(replacementPhoto = replacement)
+    val saveMode = try {
+        DescriptionGenerationSaveMode.valueOf(readUTF())
+    } catch (_: EOFException) {
+        DescriptionGenerationSaveMode.Update
+    }
+    return request.copy(replacementPhoto = replacement, saveMode = saveMode)
 }
 
 private fun DataOutputStream.writeNullableString(value: String?) {
@@ -905,13 +927,18 @@ private fun failureData(outcome: DescriptionGenerationOutcome): Data = Data.Buil
 private const val MAX_INLINE_PHOTO_BYTES = 20L * 1024L * 1024L
 private const val HOUSEHOLDS_COLLECTION = "households"
 private const val ITEMS_COLLECTION = "items"
+private const val ITEM_HOUSEHOLD_ID_FIELD = "householdId"
+private const val ITEM_PARENT_ITEM_ID_FIELD = "parentItemId"
 private const val ITEM_NAME_FIELD = "name"
 private const val ITEM_PHOTO_URL_FIELD = "photoUrl"
 private const val ITEM_PHOTO_THUMBNAIL_URL_FIELD = "photoThumbnailUrl"
 private const val ITEM_DESCRIPTION_FIELD = "description"
 private const val ITEM_TAGS_FIELD = "tags"
 private const val ITEM_WEB_URL_FIELD = "webUrl"
+private const val ITEM_CREATED_AT_FIELD = "createdAt"
 private const val ITEM_UPDATED_AT_FIELD = "updatedAt"
+private const val ITEM_CREATED_BY_ID_FIELD = "createdById"
+private const val ITEM_CREATED_BY_DISPLAY_NAME_FIELD = "createdByDisplayName"
 private const val ITEM_UPDATED_BY_ID_FIELD = "updatedById"
 private const val ITEM_UPDATED_BY_DISPLAY_NAME_FIELD = "updatedByDisplayName"
 private const val DESCRIPTION_GENERATION_WORK_DIRECTORY = "description-generation-work"

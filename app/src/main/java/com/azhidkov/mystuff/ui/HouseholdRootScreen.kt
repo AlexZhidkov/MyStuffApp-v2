@@ -53,6 +53,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -503,6 +505,10 @@ private fun ItemFormScreen(
     val draft = requireNotNull(state.itemDraft)
     val editing = draft.editingItemId != null
     val formEnabled = !state.operationInProgress
+    val saveDescription = stringResource(
+        if (state.operationInProgress) R.string.saving_item else R.string.save_item,
+    )
+    val saveAndGenerateDescription = stringResource(R.string.save_and_generate_description)
     val storedPhotoItem = draft.editingItemId
         ?.takeIf(state.inventory::contains)
         ?.let(state.inventory::item)
@@ -731,28 +737,40 @@ private fun ItemFormScreen(
                 }
             }
             item {
-                Button(
-                    onClick = actions::saveItem,
-                    enabled = !state.operationInProgress,
+                Row(
                     modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
                 ) {
-                    Text(
-                        if (state.operationInProgress) {
-                            stringResource(R.string.saving_item)
-                        } else {
-                            stringResource(R.string.save_item)
-                        },
-                    )
-                }
-            }
-            if (editing) {
-                item {
-                    OutlinedButton(
+                    IconButton(
                         onClick = actions::saveAndGenerateDescription,
                         enabled = !state.operationInProgress && state.canGenerateDescription,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.semantics {
+                            contentDescription = saveAndGenerateDescription
+                        },
                     ) {
-                        Text(stringResource(R.string.save_and_generate_description))
+                        Icon(
+                            painter = painterResource(R.drawable.ic_auto_awesome),
+                            contentDescription = null,
+                        )
+                    }
+                    IconButton(
+                        onClick = actions::saveItem,
+                        enabled = !state.operationInProgress,
+                        modifier = Modifier.semantics {
+                            contentDescription = saveDescription
+                        },
+                    ) {
+                        if (state.operationInProgress) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                strokeWidth = 2.dp,
+                            )
+                        } else {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_save),
+                                contentDescription = null,
+                            )
+                        }
                     }
                 }
             }

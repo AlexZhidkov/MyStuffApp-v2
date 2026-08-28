@@ -361,6 +361,20 @@ class InventoryDescriptionGenerationWorkTest {
     }
 
     @Test
+    fun `new Item save mode survives work-store recreation`() {
+        val directory = temporaryFolder.newFolder("new-item-description-generation")
+        val request = replacementDescriptionGenerationRequest().copy(
+            saveMode = DescriptionGenerationSaveMode.Create,
+        )
+        val id = DescriptionGenerationWorkStore(directory).enqueue(request)
+
+        assertEquals(
+            request,
+            DescriptionGenerationWorkStore(directory).pendingRequest(id),
+        )
+    }
+
+    @Test
     fun `permanent outcome survives work-store recreation until consumed`() {
         val directory = temporaryFolder.newFolder("description-generation")
         val request = descriptionGenerationRequest()

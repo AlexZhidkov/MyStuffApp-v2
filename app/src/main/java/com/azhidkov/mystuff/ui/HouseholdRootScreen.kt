@@ -21,10 +21,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -739,30 +741,20 @@ private fun ItemFormScreen(
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    IconButton(
-                        onClick = actions::saveAndGenerateDescription,
-                        enabled = !state.operationInProgress && state.canGenerateDescription,
-                        modifier = Modifier.semantics {
-                            contentDescription = saveAndGenerateDescription
-                        },
-                    ) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_auto_awesome),
-                            contentDescription = null,
-                        )
-                    }
-                    IconButton(
+                    FilledTonalButton(
                         onClick = actions::saveItem,
                         enabled = !state.operationInProgress,
-                        modifier = Modifier.semantics {
-                            contentDescription = saveDescription
-                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .semantics {
+                                contentDescription = saveDescription
+                            },
                     ) {
                         if (state.operationInProgress) {
                             CircularProgressIndicator(
-                                modifier = Modifier.size(24.dp),
+                                modifier = Modifier.size(20.dp),
                                 strokeWidth = 2.dp,
                             )
                         } else {
@@ -771,6 +763,24 @@ private fun ItemFormScreen(
                                 contentDescription = null,
                             )
                         }
+                        Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                        Text(saveDescription)
+                    }
+                    FilledTonalButton(
+                        onClick = actions::saveAndGenerateDescription,
+                        enabled = !state.operationInProgress && state.canGenerateDescription,
+                        modifier = Modifier
+                            .weight(1f)
+                            .semantics {
+                                contentDescription = saveAndGenerateDescription
+                            },
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_auto_awesome),
+                            contentDescription = null,
+                        )
+                        Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                        Text(saveAndGenerateDescription)
                     }
                 }
             }

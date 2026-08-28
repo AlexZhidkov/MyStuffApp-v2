@@ -1,15 +1,30 @@
 {
   "firestore": {
-    "rules": "firestore.rules"
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "functions": {
+    "source": "functions",
+    "runtime": "nodejs22"
   },
   "storage": {
     "rules": "storage.rules"
   },
   "emulators": {
     "firestore": {
+      "host": "127.0.0.1",
       "port": 8080
     },
+    "functions": {
+      "host": "127.0.0.1",
+      "port": 5001
+    },
+    "auth": {
+      "host": "127.0.0.1",
+      "port": 9099
+    },
     "storage": {
+      "host": "127.0.0.1",
       "port": 9199
     },
     "ui": {

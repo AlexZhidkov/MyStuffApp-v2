@@ -23,6 +23,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -236,13 +237,25 @@ private fun HouseholdRootContent(
         ) {
             if (showSearchResults) {
                 item {
-                    Text(
-                        text = stringResource(R.string.search_results),
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = stringResource(R.string.search_results),
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        if (inventoryState.search.isConceptualSearchLoading) {
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                        }
+                    }
                 }
-                if (inventoryState.searchResults.isEmpty()) {
+                if (
+                    inventoryState.searchResults.isEmpty() &&
+                    !inventoryState.search.isConceptualSearchLoading
+                ) {
                     item {
                         Text(
                             text = stringResource(R.string.no_search_results),
@@ -345,6 +358,14 @@ private fun HouseholdRootContent(
                             style = MaterialTheme.typography.headlineLarge,
                             fontWeight = FontWeight.Bold,
                         )
+                        if (!isHome) {
+                            IconButton(onClick = inventoryActions::beginEditItem) {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_edit),
+                                    contentDescription = stringResource(R.string.edit_item),
+                                )
+                            }
+                        }
                         webUrl?.let { url ->
                             IconButton(
                                 onClick = {
@@ -376,13 +397,6 @@ private fun HouseholdRootContent(
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.secondary,
                         )
-                    }
-                }
-                if (!isHome) {
-                    item {
-                        TextButton(onClick = inventoryActions::beginEditItem) {
-                            Text(stringResource(R.string.edit_item))
-                        }
                     }
                 }
                 if (inventoryState.childItems.isNotEmpty()) {

@@ -327,6 +327,10 @@ service cloud.firestore {
           && validChildItemUpdate(householdId, itemId);
         allow delete: if false;
       }
+
+      match /searchIndex/{itemId} {
+        allow read, write: if false;
+      }
     }
   }
 }

@@ -44,6 +44,10 @@ _Avoid_: Location path, file path, breadcrumb
 The tree of Items rooted at a Household.
 _Avoid_: Catalogue, database
 
+**Search**:
+A Member's attempt to find Items in their Household by words or meaning expressed in Item names, Tags, and Descriptions. Search may relate wording through synonyms, categories, and obvious purposes, but does not infer unstated properties or subjective judgments; Item Paths and Item Photos are not part of Search.
+_Avoid_: Semantic search, vector search
+
 **Move**:
 A change to an Item's Parent Item that preserves the Item and all its descendants.
 _Avoid_: Transfer, relocate

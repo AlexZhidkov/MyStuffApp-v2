@@ -135,6 +135,184 @@ class InventoryControllerTest {
     }
 
     @Test
+    fun `Search adds vector results beneath precise literal matches after its debounce`() {
+        val household = household()
+        val searchGateway = RecordingSearchGateway()
+        val searchDebouncer = RecordingSearchDebouncer()
+        val controller = InventoryController(
+            household = household,
+            identity = identity(),
+            gateway = FakeInventoryGateway(
+                Inventory.from(
+                    household,
+                    listOf(
+                        household.rootItem,
+                        item("watch-box", "Watch Box", household.id),
+                        item("clock", "Clock", household.id),
+                        item(
+                            "manual",
+                            "Warranty Manual",
+                            household.id,
+                            description = "Watch the battery indicator",
+                        ),
+                    ),
+                ),
+            ),
+            rootChildItemCache = NoRootChildItemCache,
+            searchGateway = searchGateway,
+            searchDebouncer = searchDebouncer,
+        )
+
+        controller.changeSearchQuery("watch")
+
+        assertEquals(listOf("watch-box", "manual"), controller.state.searchResults.map { it.item.id })
+        assertEquals(500L, searchDebouncer.delayMillis)
+        assertTrue(searchGateway.queries.isEmpty())
+
+        searchDebouncer.runPending()
+
+        assertTrue(controller.state.search.isConceptualSearchLoading)
+        assertEquals(listOf("watch"), searchGateway.queries)
+
+        searchGateway.complete(listOf("clock", "watch-box"))
+
+        assertFalse(controller.state.search.isConceptualSearchLoading)
+        assertEquals(
+            listOf("watch-box", "clock"),
+            controller.state.searchResults.map { it.item.id },
+        )
+    }
+
+    @Test
+    fun `Search sends only queries with at least three Unicode letters or digits`() {
+        val household = household()
+        val searchGateway = RecordingSearchGateway()
+        val searchDebouncer = RecordingSearchDebouncer()
+        val controller = InventoryController(
+            household = household,
+            identity = identity(),
+            gateway = FakeInventoryGateway(inventory()),
+            rootChildItemCache = NoRootChildItemCache,
+            searchGateway = searchGateway,
+            searchDebouncer = searchDebouncer,
+        )
+
+        controller.changeSearchQuery("!?é2")
+        assertNull(searchDebouncer.delayMillis)
+
+        controller.changeSearchQuery("!?é23")
+        searchDebouncer.runPending()
+
+        assertEquals(listOf("!?é23"), searchGateway.queries)
+    }
+
+    @Test
+    fun `failed conceptual Search silently restores every literal result`() {
+        val household = household()
+        val searchGateway = RecordingSearchGateway()
+        val searchDebouncer = RecordingSearchDebouncer()
+        val controller = InventoryController(
+            household = household,
+            identity = identity(),
+            gateway = FakeInventoryGateway(
+                Inventory.from(
+                    household,
+                    listOf(
+                        household.rootItem,
+                        item("name", "Watch Box", household.id),
+                        item("description", "Manual", household.id, description = "Watch care"),
+                    ),
+                ),
+            ),
+            rootChildItemCache = NoRootChildItemCache,
+            searchGateway = searchGateway,
+            searchDebouncer = searchDebouncer,
+        )
+
+        controller.changeSearchQuery("watch")
+        searchDebouncer.runPending()
+        searchGateway.fail()
+
+        assertFalse(controller.state.search.isConceptualSearchLoading)
+        assertNull(controller.state.search.conceptualResultIds)
+        assertEquals(
+            listOf("name", "description"),
+            controller.state.searchResults.map { it.item.id },
+        )
+        assertNull(controller.state.errorMessage)
+    }
+
+    @Test
+    fun `successful conceptual Search ranks precise matches then deduplicated vector results`() {
+        val household = household()
+        val searchGateway = RecordingSearchGateway()
+        val searchDebouncer = RecordingSearchDebouncer()
+        val controller = InventoryController(
+            household = household,
+            identity = identity(),
+            gateway = FakeInventoryGateway(
+                Inventory.from(
+                    household,
+                    listOf(
+                        household.rootItem,
+                        item("exact", "Watch", household.id),
+                        item("prefix", "Watch Box", household.id),
+                        item("tag", "Timepiece", household.id, tags = listOf("Watch")),
+                        item("description", "Manual", household.id, description = "Watch care"),
+                        item("clock", "Clock", household.id),
+                    ),
+                ),
+            ),
+            rootChildItemCache = NoRootChildItemCache,
+            searchGateway = searchGateway,
+            searchDebouncer = searchDebouncer,
+        )
+
+        controller.changeSearchQuery("watch")
+        searchDebouncer.runPending()
+        searchGateway.complete(
+            listOf("description", "tag", "clock", "exact", "missing", household.id, "clock"),
+        )
+
+        assertEquals(
+            listOf("exact", "prefix", "tag", "description", "clock"),
+            controller.state.searchResults.map { it.item.id },
+        )
+    }
+
+    @Test
+    fun `late conceptual response cannot replace results for a newer query`() {
+        val household = household()
+        val searchGateway = UncooperativeSearchGateway()
+        val searchDebouncer = RecordingSearchDebouncer()
+        val controller = InventoryController(
+            household = household,
+            identity = identity(),
+            gateway = FakeInventoryGateway(
+                Inventory.from(
+                    household,
+                    listOf(
+                        household.rootItem,
+                        item("clock", "Clock", household.id),
+                        item("drill", "Drill", household.id),
+                    ),
+                ),
+            ),
+            rootChildItemCache = NoRootChildItemCache,
+            searchGateway = searchGateway,
+            searchDebouncer = searchDebouncer,
+        )
+
+        controller.changeSearchQuery("watch")
+        searchDebouncer.runPending()
+        controller.changeSearchQuery("drill")
+        searchGateway.complete("watch", listOf("clock"))
+
+        assertNull(controller.state.search.conceptualResultIds)
+        assertEquals(listOf("drill"), controller.state.searchResults.map { it.item.id })
+    }
+
+    @Test
     fun `opening a search result exposes its parent Item Path details and Child Items`() {
         val household = household()
         val controller = InventoryController(
@@ -1212,6 +1390,64 @@ private class FakeInventoryGateway(
         )
         inventory = inventory.withItem(updated)
         onResult(Result.success(updated))
+    }
+}
+
+private class RecordingSearchGateway : SearchGateway {
+    val queries = mutableListOf<String>()
+    private var onResult: ((Result<List<String>>) -> Unit)? = null
+
+    override fun search(
+        query: String,
+        onResult: (Result<List<String>>) -> Unit,
+    ): SearchSubscription {
+        queries += query
+        this.onResult = onResult
+        return SearchSubscription { this.onResult = null }
+    }
+
+    fun complete(itemIds: List<String>) {
+        requireNotNull(onResult).invoke(Result.success(itemIds))
+    }
+
+    fun fail() {
+        requireNotNull(onResult).invoke(Result.failure(IllegalStateException("offline")))
+    }
+}
+
+private class UncooperativeSearchGateway : SearchGateway {
+    private val callbacks = mutableMapOf<String, (Result<List<String>>) -> Unit>()
+
+    override fun search(
+        query: String,
+        onResult: (Result<List<String>>) -> Unit,
+    ): SearchSubscription {
+        callbacks[query] = onResult
+        return SearchSubscription {}
+    }
+
+    fun complete(query: String, itemIds: List<String>) {
+        requireNotNull(callbacks[query]).invoke(Result.success(itemIds))
+    }
+}
+
+private class RecordingSearchDebouncer : SearchDebouncer {
+    var delayMillis: Long? = null
+        private set
+    private var pending: (() -> Unit)? = null
+
+    override fun schedule(delayMillis: Long, action: () -> Unit): SearchSubscription {
+        this.delayMillis = delayMillis
+        pending = action
+        return SearchSubscription { pending = null }
+    }
+
+    override fun close() {
+        pending = null
+    }
+
+    fun runPending() {
+        requireNotNull(pending).also { pending = null }.invoke()
     }
 }
 

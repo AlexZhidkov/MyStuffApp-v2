@@ -1,9 +1,9 @@
 # Firebase Description Generation Integration
 
 This checklist configures the Firebase services used by Description Generation. The app uses
-Firebase AI Logic with the Gemini Developer API free tier. It does not use Agent Platform, a
-paid-tier path, a server proxy, or another model provider, and it does not show Members any
-additional confirmation or informational copy.
+Firebase AI Logic with the Gemini Developer API paid tier on the project's Blaze billing plan.
+Description Generation does not use Agent Platform, the Search backend, or another model
+provider, and it does not show Members any additional confirmation or informational copy.
 
 The Remote Config parameter is `description_generation_model`. The app reads and activates this
 parameter for every background generation request. A nonblank value fetched within the last 24
@@ -14,8 +14,8 @@ the app.
 ## Firebase console checklist
 
 - [ ] In **Firebase AI Logic**, choose **Get started**, select the **Gemini Developer API**, and
-  keep the project on its free-tier path. Do not configure Agent Platform or a billing-dependent
-  alternate backend.
+  confirm that its paid tier is enabled for the Blaze project. Do not configure Agent Platform or
+  route Description Generation through the Search backend.
 - [ ] In **Remote Config**, create the string parameter `description_generation_model`, set its
   default value to a currently validated Gemini model name, and publish the configuration.
 - [ ] In **Project settings > Your apps**, register the SHA-256 fingerprints for every certificate

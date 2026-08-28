@@ -2,7 +2,9 @@
   "name": "mystuff-firebase-tests",
   "private": true,
   "scripts": {
-    "test:rules": "firebase emulators:exec --only firestore,storage --project mystuff-ai-app 'node --test --test-concurrency=1 firestore.rules.test.js storage.rules.test.js'"
+    "test:rules": "firebase emulators:exec --only firestore,storage --project mystuff-ai-app 'node --test --test-concurrency=1 firestore.rules.test.js storage.rules.test.js'",
+    "test:functions": "npm test --prefix functions",
+    "test:functions:emulator": "firebase emulators:exec --only auth,firestore,functions --project demo-mystuff-search 'npm test --prefix functions'"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "5.0.1",

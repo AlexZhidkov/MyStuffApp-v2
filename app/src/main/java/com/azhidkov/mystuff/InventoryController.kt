@@ -90,6 +90,8 @@ data class InventorySearchResult(
 data class InventorySearchState(
     val query: String = "",
     val openedResultId: String? = null,
+    val conceptualResultIds: List<String>? = null,
+    val isConceptualSearchLoading: Boolean = false,
 )
 
 enum class ItemFormStage {
@@ -152,7 +154,7 @@ data class InventoryUiState(
         get() {
             val query = SearchQuery(searchQuery.trimUnicodeWhitespace().tagKey().value)
             if (query.value.isEmpty()) return emptyList()
-            return inventory.allItems
+            val literalResults = inventory.allItems
                 .asSequence()
                 .filterNot { it.id == inventory.rootItemId }
                 .mapNotNull { item ->
@@ -166,6 +168,26 @@ data class InventoryUiState(
                     )
                 }
                 .toList()
+            val conceptualResultIds = search.conceptualResultIds ?: return literalResults
+            val preciseResults = inventory.allItems
+                .asSequence()
+                .filterNot { it.id == inventory.rootItemId }
+                .mapNotNull { item -> item.preciseSearchRank(query)?.let { item to it } }
+                .sortedBy { it.second }
+                .map { (item) -> item.toSearchResult(inventory) }
+                .toList()
+            val preciseIds = preciseResults.mapTo(mutableSetOf()) { it.item.id }
+            val conceptualResults = conceptualResultIds
+                .asSequence()
+                .distinct()
+                .filterNot(preciseIds::contains)
+                .mapNotNull { itemId ->
+                    itemId.takeIf(inventory::contains)?.let(inventory::item)
+                }
+                .filterNot { it.id == inventory.rootItemId }
+                .map { it.toSearchResult(inventory) }
+                .toList()
+            return preciseResults + conceptualResults
         }
     val tagSuggestions: List<String>
         get() {
@@ -195,6 +217,8 @@ class InventoryController internal constructor(
     private val descriptionGenerationWork: InventoryDescriptionGenerationWork =
         NoInventoryDescriptionGenerationWork,
     private val deviceLanguage: () -> String = { java.util.Locale.getDefault().toLanguageTag() },
+    private val searchGateway: SearchGateway = NoSearchGateway,
+    private val searchDebouncer: SearchDebouncer = NoSearchDebouncer,
 ) : InventoryActions, AutoCloseable {
     constructor(
         household: Household,
@@ -219,6 +243,8 @@ class InventoryController internal constructor(
 
     private var observedInventory = state.inventory
     private var pendingDescriptionGenerations = emptyMap<String, DescriptionGenerationRequest>()
+    private var searchDebounceSubscription: SearchSubscription? = null
+    private var searchRequestSubscription: SearchSubscription? = null
 
     private val subscription = gateway.observe(household) { result ->
         result.onSuccess { inventory ->
@@ -275,15 +301,53 @@ class InventoryController internal constructor(
     }
 
     override fun changeSearchQuery(query: String) {
+        cancelConceptualSearch()
         updateState(state.copy(search = InventorySearchState(query = query)))
+        if (!query.isConceptualSearchEligible()) return
+        val conceptualQuery = query.trimUnicodeWhitespace()
+        searchDebounceSubscription = searchDebouncer.schedule(
+            CONCEPTUAL_SEARCH_DEBOUNCE_MILLIS,
+        ) {
+            if (
+                state.search.query.trimUnicodeWhitespace() != conceptualQuery ||
+                state.search.openedResultId != null
+            ) {
+                return@schedule
+            }
+            updateState(
+                state.copy(
+                    search = state.search.copy(isConceptualSearchLoading = true),
+                ),
+            )
+            searchRequestSubscription = searchGateway.search(conceptualQuery) { result ->
+                if (
+                    state.search.query.trimUnicodeWhitespace() != conceptualQuery ||
+                    state.search.openedResultId != null
+                ) {
+                    return@search
+                }
+                updateState(
+                    state.copy(
+                        search = state.search.copy(
+                            conceptualResultIds = result.getOrNull(),
+                            isConceptualSearchLoading = false,
+                        ),
+                    ),
+                )
+            }
+        }
     }
 
     override fun openSearchResult(itemId: String) {
         if (state.itemDraft != null || state.searchResults.none { it.item.id == itemId }) return
+        cancelConceptualSearch()
         updateState(
             state.copy(
                 selectedItemId = itemId,
-                search = state.search.copy(openedResultId = itemId),
+                search = state.search.copy(
+                    openedResultId = itemId,
+                    isConceptualSearchLoading = false,
+                ),
                 errorMessage = null,
                 successMessage = null,
             ),
@@ -292,6 +356,7 @@ class InventoryController internal constructor(
 
     override fun openItem(itemId: String) {
         if (!state.inventory.contains(itemId) || state.itemDraft != null) return
+        cancelConceptualSearch()
         updateState(
             state.copy(
                 selectedItemId = itemId,
@@ -655,6 +720,8 @@ class InventoryController internal constructor(
     }
 
     override fun close() {
+        cancelConceptualSearch()
+        searchDebouncer.close()
         subscription.cancel()
         descriptionGenerationSubscription.cancel()
         onStateChanged = {}
@@ -670,6 +737,13 @@ class InventoryController internal constructor(
     private fun updateState(newState: InventoryUiState) {
         state = newState
         onStateChanged(newState)
+    }
+
+    private fun cancelConceptualSearch() {
+        searchDebounceSubscription?.cancel()
+        searchDebounceSubscription = null
+        searchRequestSubscription?.cancel()
+        searchRequestSubscription = null
     }
 
     private fun transitionItemFormState(
@@ -716,6 +790,12 @@ private enum class SearchMatchPriority {
     Substring,
 }
 
+private enum class PreciseSearchRank {
+    ExactName,
+    NamePrefix,
+    ExactTag,
+}
+
 private data class SearchRank(
     val field: SearchFieldPriority,
     val match: SearchMatchPriority,
@@ -734,6 +814,20 @@ private fun Item.searchRank(query: SearchQuery): SearchRank? {
     }
     return null
 }
+
+private fun Item.preciseSearchRank(query: SearchQuery): PreciseSearchRank? {
+    val normalizedName = name.tagKey().value
+    if (normalizedName == query.value) return PreciseSearchRank.ExactName
+    if (normalizedName.startsWith(query.value)) return PreciseSearchRank.NamePrefix
+    if (tags.any { it.tagKey().value == query.value }) return PreciseSearchRank.ExactTag
+    return null
+}
+
+private fun Item.toSearchResult(inventory: Inventory): InventorySearchResult =
+    InventorySearchResult(
+        item = this,
+        itemPath = inventory.pathTo(id).drop(1).dropLast(1),
+    )
 
 private fun String.matchPriority(query: SearchQuery): SearchMatchPriority? {
     val candidate = tagKey().value

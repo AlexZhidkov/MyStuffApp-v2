@@ -59,6 +59,7 @@ dependencies {
     implementation(libs.firebase.auth)
     implementation(libs.firebase.config)
     implementation(libs.firebase.firestore)
+    implementation(libs.firebase.functions)
     implementation(libs.firebase.storage)
     implementation(libs.google.id)
     implementation(libs.lifecycle.runtime.ktx)

@@ -30,7 +30,8 @@ Currently implemented:
 - Child Item creation and editing with names, descriptions, web URLs, Tags, and camera-first
   optional mobile-sized WebP photos and thumbnails
 - Independent persistent background upload and retry for each Item photo variant
-- Deep Inventory browsing and Household search with immediate Child Items and complete Item Paths
+- Deep Inventory browsing and hybrid literal/semantic Household Search with immediate Child Items
+  and complete Item Paths
 - Firebase rules and emulator tests for Household, Item, invitation, and photo authorization
 - Unit-tested session state transitions
 
@@ -45,7 +46,9 @@ synchronization are planned in the
 - Android Credential Manager
 - Firebase Authentication
 - Cloud Firestore
+- Cloud Functions for Firebase (JavaScript / Node 22)
 - Firebase Storage
+- Gemini embeddings and Firestore vector search
 - Jetpack WorkManager
 - Gradle Kotlin DSL with a version catalog
 - JUnit 4
@@ -56,6 +59,7 @@ The app targets Android 16 / API 36 and supports Android 9 / API 28 and newer.
 
 - Android Studio with Android SDK Platform 36 installed
 - JDK 17
+- Node.js 22 and npm for Firebase backend development
 - An Android device or emulator running API 28 or newer
 - A Firebase project configured for Google sign-in
 
@@ -81,6 +85,11 @@ Description Generation additionally requires Remote Config, Firebase AI Logic,
 and App Check setup. Follow the
 [Firebase Description Generation integration checklist](docs/firebase-description-generation.md)
 before testing or distributing that feature.
+
+Semantic Search additionally requires a Functions secret and a Firestore vector
+index. Follow the
+[Firebase Semantic Search setup and staging checklist](docs/firebase-semantic-search.md)
+before deploying or testing that feature against a real Firebase project.
 
 ## Build and run
 
@@ -120,6 +129,15 @@ gateways. Firestore and Storage authorization tests run against the Firebase emu
 ```bash
 npm install
 npm run test:rules
+```
+
+The JavaScript Functions unit suite and the end-to-end Auth/Firestore/Functions
+emulator suite run with:
+
+```bash
+npm install --prefix functions
+npm run test:functions
+npm run test:functions:emulator
 ```
 
 The on-device photo encoder check verifies the generated WebP format and dimensions:

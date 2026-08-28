@@ -228,6 +228,21 @@ test("current Member can access the Household and its root Item", async () => {
   );
 });
 
+test("Member cannot directly read or write backend-owned Search records", async () => {
+  await seedHousehold();
+  await testEnvironment.withSecurityRulesDisabled(async (context) => {
+    await setDoc(
+      doc(context.firestore(), "households/household-1/searchIndex/item-1"),
+      { itemId: "item-1", sourceHash: "hash", modelVersion: "model" },
+    );
+  });
+  const database = testEnvironment.authenticatedContext("member-1").firestore();
+  const searchRecord = doc(database, "households/household-1/searchIndex/item-1");
+
+  await assertFails(getDoc(searchRecord));
+  await assertFails(setDoc(searchRecord, { itemId: "item-1" }));
+});
+
 test("authenticated non-Member cannot access the Household or its root Item", async () => {
   await seedHousehold();
   const database = testEnvironment.authenticatedContext("member-2").firestore();

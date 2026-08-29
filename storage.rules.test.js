@@ -30,6 +30,10 @@ beforeEach(async () => {
       householdId: "household-1",
       role: "owner",
     });
+    await setDoc(doc(context.firestore(), "households/household-1/items/item-1"), {
+      householdId: "household-1",
+      parentItemId: "household-1",
+    });
   });
 });
 
@@ -127,5 +131,65 @@ test("Item photo storage rejects legacy formats names MIME types and oversized v
     ref(memberStorage, `households/household-1/items/item-1-${revision}-thumb.webp`),
     new Uint8Array(256 * 1024 + 1),
     { contentType: "image/webp" },
+  ));
+});
+
+test("a Household Member can transfer an Item Attachment display image in its nested location", async () => {
+  const memberStorage = testEnvironment.authenticatedContext("member-1").storage();
+  const attachmentPath =
+    "households/household-1/items/item-1/attachments/attachment-1.webp";
+
+  await assertSucceeds(uploadBytes(
+    ref(memberStorage, attachmentPath),
+    new Uint8Array([1]),
+    { contentType: "image/webp" },
+  ));
+  await assertSucceeds(getBytes(ref(memberStorage, attachmentPath)));
+  await assertSucceeds(deleteObject(ref(memberStorage, attachmentPath)));
+});
+
+test("Item Attachment storage rejects cross-Household, root Item, and non-WebP locations", async () => {
+  await testEnvironment.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), "memberships/member-2"), {
+      householdId: "household-2",
+      role: "owner",
+    });
+    await setDoc(doc(context.firestore(), "households/household-2/items/item-2"), {
+      householdId: "household-2",
+      parentItemId: "household-2",
+    });
+    await setDoc(doc(context.firestore(), "households/household-1/items/malformed-root"), {
+      householdId: "household-1",
+      parentItemId: null,
+    });
+  });
+  const memberStorage = testEnvironment.authenticatedContext("member-1").storage();
+  const otherMemberStorage = testEnvironment.authenticatedContext("member-2").storage();
+  const webPMetadata = { contentType: "image/webp" };
+
+  await assertFails(uploadBytes(
+    ref(memberStorage, "households/household-2/items/item-2/attachments/attachment-1.webp"),
+    new Uint8Array([1]),
+    webPMetadata,
+  ));
+  await assertFails(uploadBytes(
+    ref(otherMemberStorage, "households/household-1/items/item-1/attachments/attachment-1.webp"),
+    new Uint8Array([1]),
+    webPMetadata,
+  ));
+  await assertFails(uploadBytes(
+    ref(memberStorage, "households/household-1/items/household-1/attachments/attachment-1.webp"),
+    new Uint8Array([1]),
+    webPMetadata,
+  ));
+  await assertFails(uploadBytes(
+    ref(memberStorage, "households/household-1/items/malformed-root/attachments/attachment-1.webp"),
+    new Uint8Array([1]),
+    webPMetadata,
+  ));
+  await assertFails(uploadBytes(
+    ref(memberStorage, "households/household-1/items/item-1/attachments/attachment-1.pdf"),
+    new Uint8Array([1]),
+    { contentType: "application/pdf" },
   ));
 });

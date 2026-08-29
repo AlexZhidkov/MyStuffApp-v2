@@ -25,6 +25,23 @@ service firebase.storage {
       return isFullItemPhoto(fileName) || isItemPhotoThumbnail(fileName);
     }
 
+    function isNonRootItemInHousehold(householdId, itemId) {
+      return itemId != householdId
+        && firestore.exists(
+          /databases/(default)/documents/households/$(householdId)/items/$(itemId)
+        )
+        && firestore.get(
+          /databases/(default)/documents/households/$(householdId)/items/$(itemId)
+        ).data.get('householdId', null) == householdId
+        && firestore.get(
+          /databases/(default)/documents/households/$(householdId)/items/$(itemId)
+        ).data.get('parentItemId', null) is string;
+    }
+
+    function isItemAttachmentFile(fileName) {
+      return fileName.matches('^[A-Za-z0-9_-]+\\.webp$');
+    }
+
     match /households/{householdId}/items/{fileName} {
       allow read, delete: if isMember(householdId) && isItemPhoto(fileName);
       allow create, update: if isMember(householdId)
@@ -35,7 +52,19 @@ service firebase.storage {
             isItemPhotoThumbnail(fileName)
             && request.resource.size <= 256 * 1024
           )
-        );
+      );
+    }
+
+    match /households/{householdId}/items/{itemId}/attachments/{fileName} {
+      allow read, delete: if isMember(householdId)
+        && isNonRootItemInHousehold(householdId, itemId)
+        && isItemAttachmentFile(fileName);
+      // Updates keep retries idempotent; the Firestore attachment record is immutable.
+      allow create, update: if isMember(householdId)
+        && isNonRootItemInHousehold(householdId, itemId)
+        && isItemAttachmentFile(fileName)
+        && request.resource.contentType == 'image/webp'
+        && request.resource.size <= 2 * 1024 * 1024;
     }
   }
 }

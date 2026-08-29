@@ -145,6 +145,27 @@ service cloud.firestore {
         );
     }
 
+    function isNonRootItemInHousehold(householdId, itemId) {
+      return itemId != householdId
+        && exists(itemPath(householdId, itemId))
+        && get(itemPath(householdId, itemId)).data.get('householdId', null)
+          == householdId
+        && get(itemPath(householdId, itemId)).data.get('parentItemId', null)
+          is string;
+    }
+
+    function validItemAttachmentCreate(householdId, itemId) {
+      return isMember(householdId)
+        && isNonRootItemInHousehold(householdId, itemId)
+        && request.resource.data.keys().hasOnly([
+          'createdAt', 'contentType', 'displayUrl'
+        ])
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.contentType == 'image/webp'
+        && request.resource.data.displayUrl is string
+        && request.resource.data.displayUrl.matches('^.+$');
+    }
+
     function validDescription(description) {
       return description == null
         || (
@@ -330,6 +351,16 @@ service cloud.firestore {
 
       match /searchIndex/{itemId} {
         allow read, write: if false;
+      }
+
+      match /items/{itemId}/attachments/{attachmentId} {
+        allow read: if isMember(householdId)
+          && isNonRootItemInHousehold(householdId, itemId);
+        allow create: if signedIn()
+          && validItemAttachmentCreate(householdId, itemId);
+        allow delete: if isMember(householdId)
+          && isNonRootItemInHousehold(householdId, itemId);
+        allow update: if false;
       }
     }
   }

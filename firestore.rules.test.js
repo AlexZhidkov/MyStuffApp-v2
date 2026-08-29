@@ -8,6 +8,7 @@ const {
 } = require("@firebase/rules-unit-testing");
 const {
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -75,6 +76,15 @@ async function seedOtherHousehold() {
     await setDoc(
       doc(database, "households/household-2/items/item-2"),
       childItemData("Saw", "household-2", { householdId: "household-2" }),
+    );
+  });
+}
+
+async function seedChildItem() {
+  await testEnvironment.withSecurityRulesDisabled(async (context) => {
+    await setDoc(
+      doc(context.firestore(), "households/household-1/items/item-1"),
+      childItemData("Drill", "household-1"),
     );
   });
 }
@@ -218,6 +228,16 @@ function childItemData(name, parentItemId, overrides = {}) {
   return data;
 }
 
+function itemAttachmentData(overrides = {}) {
+  return {
+    createdAt: serverTimestamp(),
+    contentType: "image/webp",
+    displayUrl:
+      "gs://mystuff/households/household-1/items/item-1/attachments/attachment-1.webp",
+    ...overrides,
+  };
+}
+
 test("current Member can access the Household and its root Item", async () => {
   await seedHousehold();
   const database = testEnvironment.authenticatedContext("member-1").firestore();
@@ -315,6 +335,81 @@ test("Member can create duplicate Child Item names beneath an existing Parent It
   await assertSucceeds(setDoc(
     doc(database, "households/household-1/items/item-2"),
     childItemData("Box", "household-1"),
+  ));
+});
+
+test("every Household Member can create read and delete an immutable Item Attachment", async () => {
+  await seedHousehold();
+  await seedHouseholdMember();
+  await seedChildItem();
+  const database = testEnvironment.authenticatedContext("member-2").firestore();
+  const attachment = doc(
+    database,
+    "households/household-1/items/item-1/attachments/attachment-1",
+  );
+  const data = itemAttachmentData();
+
+  await assertSucceeds(setDoc(attachment, data));
+  await assertSucceeds(getDoc(attachment));
+  await assertSucceeds(deleteDoc(attachment));
+});
+
+test("Item Attachment records are immutable and cannot belong to the Household", async () => {
+  await seedHousehold();
+  await seedChildItem();
+  const database = testEnvironment.authenticatedContext("member-1").firestore();
+  const item = doc(
+    database,
+    "households/household-1/items/item-1/attachments/attachment-1",
+  );
+  const rootAttachment = doc(
+    database,
+    "households/household-1/items/household-1/attachments/attachment-2",
+  );
+
+  await assertSucceeds(setDoc(item, itemAttachmentData()));
+  await assertFails(updateDoc(item, { displayUrl: "gs://other/display.webp" }));
+  await assertFails(setDoc(rootAttachment, itemAttachmentData()));
+
+  await testEnvironment.withSecurityRulesDisabled(async (context) => {
+    await setDoc(
+      doc(context.firestore(), "households/household-1/items/malformed-root"),
+      { householdId: "household-1", parentItemId: null },
+    );
+  });
+  await assertFails(setDoc(
+    doc(
+      database,
+      "households/household-1/items/malformed-root/attachments/attachment-3",
+    ),
+    itemAttachmentData(),
+  ));
+});
+
+test("non-Member cannot access an Item Attachment and attachments cannot become Child Items", async () => {
+  await seedHousehold();
+  await seedChildItem();
+  await testEnvironment.withSecurityRulesDisabled(async (context) => {
+    await setDoc(
+      doc(
+        context.firestore(),
+        "households/household-1/items/item-1/attachments/attachment-1",
+      ),
+      itemAttachmentData(),
+    );
+  });
+  const database = testEnvironment.authenticatedContext("member-2").firestore();
+  const attachment = doc(
+    database,
+    "households/household-1/items/item-1/attachments/attachment-1",
+  );
+
+  await assertFails(getDoc(attachment));
+  await assertFails(setDoc(attachment, itemAttachmentData()));
+  await assertFails(deleteDoc(attachment));
+  await assertFails(setDoc(
+    doc(database, "households/household-1/items/item-2"),
+    childItemData("Attachment", "attachment-1"),
   ));
 });
 

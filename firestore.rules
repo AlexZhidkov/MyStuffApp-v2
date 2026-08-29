@@ -135,11 +135,13 @@ service cloud.firestore {
     }
 
     function validPhotoLocations(data) {
-      return data.get('photoAttachmentId', null) == null
-        || (
-          data.photoAttachmentId is string
-          && data.get('photoUrl', null) is string
-          && data.get('photoThumbnailUrl', null) is string
+      return (
+          data.get('photoAttachmentId', null) == null
+          || (
+            data.photoAttachmentId is string
+            && data.get('photoUrl', null) is string
+            && data.get('photoThumbnailUrl', null) is string
+          )
         )
         && (
           data.get('photoUrl', null) == null

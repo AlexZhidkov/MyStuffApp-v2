@@ -425,6 +425,20 @@ test("Member can create a Child Item with an optional photo URL", async () => {
   ));
 });
 
+test("Child Item rejects malformed legacy photo references", async () => {
+  await seedHousehold();
+  const database = testEnvironment.authenticatedContext("member-1").firestore();
+
+  await assertFails(setDoc(
+    doc(database, "households/household-1/items/item-1"),
+    childItemData("Drill", "household-1", { photoUrl: { invalid: true } }),
+  ));
+  await assertFails(setDoc(
+    doc(database, "households/household-1/items/item-2"),
+    childItemData("Saw", "household-1", { photoThumbnailUrl: 42 }),
+  ));
+});
+
 test("Child Item accepts an optional HTTP web URL and rejects other schemes", async () => {
   await seedHousehold();
   const database = testEnvironment.authenticatedContext("member-1").firestore();

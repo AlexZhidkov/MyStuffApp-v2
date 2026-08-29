@@ -45,9 +45,9 @@
     <string name="add_photo">Add photo</string>
     <string name="replace_photo">Replace photo</string>
     <string name="remove_photo">Remove photo</string>
-    <string name="save_item">Save Item</string>
+    <string name="save_item">Save</string>
     <string name="saving_item">Saving Item…</string>
-    <string name="save_and_generate_description">Save &amp; generate description</string>
+    <string name="save_and_generate_description">AI description</string>
     <string name="opening_camera">Opening camera…</string>
     <string name="opening_camera_body">Take an Item photo, or cancel the camera to continue without one.</string>
     <string name="retake_photo">Retake</string>

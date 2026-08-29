@@ -21,8 +21,12 @@ One named node in the Household tree. An Item may represent an area, container, 
 _Avoid_: Stuff, asset, product, location
 
 **Item Photo**:
-An optional photo associated with an Item other than the Household.
+An optional image Item Attachment designated to represent an Item other than the Household.
 _Avoid_: Item image, full-size image
+
+**Item Attachment**:
+One supporting file owned by an Item other than the Household, such as a photo, receipt, or instructions. An Item Attachment is not an Item and does not occupy a place in the Inventory tree.
+_Avoid_: Child Item, document Item
 
 **Description Generation**:
 A Member-requested replacement for an Item's Description inferred by an LLM from the Item Photo while preserving facts supplied in the existing Description.

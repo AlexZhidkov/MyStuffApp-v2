@@ -47,6 +47,7 @@ internal data class DescriptionGenerationRequest(
     val requestingMember: RequestingMemberAttribution,
     val deviceLanguage: String,
     val replacementPhoto: DescriptionGenerationReplacementPhoto? = null,
+    val supersededPhotoAttachmentId: String? = null,
     val saveMode: DescriptionGenerationSaveMode = DescriptionGenerationSaveMode.Update,
 )
 
@@ -89,9 +90,15 @@ internal class DescriptionGenerationRequestCapture(
         replacementPhoto: ItemPhoto?,
     ): DescriptionGenerationRequest {
         if (replacementPhoto == null) return request
-        val revision = photoStore.newRevision(request.householdId, request.item.id)
+        val attachmentId = photoStore.newAttachmentId(request.householdId, request.item.id)
+        val revision = photoStore.newAttachmentRevision(
+            request.householdId,
+            request.item.id,
+            attachmentId,
+        )
         return request.copy(
             item = request.item.copy(
+                photoAttachmentId = attachmentId,
                 photoUrl = revision.locations.full,
                 photoThumbnailUrl = revision.locations.thumbnail,
             ),
@@ -99,6 +106,7 @@ internal class DescriptionGenerationRequestCapture(
                 revision = revision,
                 source = replacementPhoto,
             ),
+            supersededPhotoAttachmentId = request.item.photoAttachmentId,
         )
     }
 
@@ -477,13 +485,23 @@ private class FirebaseDescriptionGenerationItemStore(
         request: DescriptionGenerationRequest,
     ): DescriptionGenerationStep<Unit> = firebaseStep {
         val item = request.item
+        val draftItem = if (request.replacementPhoto == null) {
+            item
+        } else {
+            item.copy(
+                photoAttachmentId = null,
+                photoUrl = null,
+                photoThumbnailUrl = null,
+            )
+        }
         val updatedData = mapOf(
-            ITEM_NAME_FIELD to item.name,
-            ITEM_PHOTO_URL_FIELD to item.photoUrl,
-            ITEM_PHOTO_THUMBNAIL_URL_FIELD to item.photoThumbnailUrl,
-            ITEM_DESCRIPTION_FIELD to item.description,
-            ITEM_TAGS_FIELD to item.tags,
-            ITEM_WEB_URL_FIELD to item.webUrl,
+            ITEM_NAME_FIELD to draftItem.name,
+            ITEM_PHOTO_ATTACHMENT_ID_FIELD to draftItem.photoAttachmentId,
+            ITEM_PHOTO_URL_FIELD to draftItem.photoUrl,
+            ITEM_PHOTO_THUMBNAIL_URL_FIELD to draftItem.photoThumbnailUrl,
+            ITEM_DESCRIPTION_FIELD to draftItem.description,
+            ITEM_TAGS_FIELD to draftItem.tags,
+            ITEM_WEB_URL_FIELD to draftItem.webUrl,
             ITEM_UPDATED_AT_FIELD to FieldValue.serverTimestamp(),
             ITEM_UPDATED_BY_ID_FIELD to request.requestingMember.id,
             ITEM_UPDATED_BY_DISPLAY_NAME_FIELD to request.requestingMember.displayName,
@@ -493,7 +511,7 @@ private class FirebaseDescriptionGenerationItemStore(
             DescriptionGenerationSaveMode.Create -> document.set(
                 updatedData + mapOf(
                     ITEM_HOUSEHOLD_ID_FIELD to request.householdId,
-                    ITEM_PARENT_ITEM_ID_FIELD to requireNotNull(item.parentItemId),
+                    ITEM_PARENT_ITEM_ID_FIELD to requireNotNull(draftItem.parentItemId),
                     ITEM_CREATED_AT_FIELD to FieldValue.serverTimestamp(),
                     ITEM_CREATED_BY_ID_FIELD to request.requestingMember.id,
                     ITEM_CREATED_BY_DISPLAY_NAME_FIELD to request.requestingMember.displayName,
@@ -502,6 +520,40 @@ private class FirebaseDescriptionGenerationItemStore(
             DescriptionGenerationSaveMode.Update -> document.update(updatedData)
         }
         Tasks.await(save)
+
+        if (request.replacementPhoto == null) return@firebaseStep
+        val attachmentId = requireNotNull(item.photoAttachmentId)
+        val attachment = attachmentDocument(request.householdId, item.id, attachmentId)
+        try {
+            Tasks.await(
+                attachment.set(
+                    mapOf(
+                        ITEM_ATTACHMENT_CREATED_AT_FIELD to FieldValue.serverTimestamp(),
+                        ITEM_ATTACHMENT_CONTENT_TYPE_FIELD to
+                            OPTIMIZED_ATTACHMENT_IMAGE_CONTENT_TYPE,
+                        ITEM_ATTACHMENT_DISPLAY_URL_FIELD to requireNotNull(item.photoUrl),
+                    ),
+                ),
+            )
+            Tasks.await(
+                itemDocument(request.householdId, item.id).update(
+                    mapOf(
+                        ITEM_PHOTO_ATTACHMENT_ID_FIELD to item.photoAttachmentId,
+                        ITEM_PHOTO_URL_FIELD to item.photoUrl,
+                        ITEM_PHOTO_THUMBNAIL_URL_FIELD to item.photoThumbnailUrl,
+                        ITEM_UPDATED_AT_FIELD to FieldValue.serverTimestamp(),
+                        ITEM_UPDATED_BY_ID_FIELD to request.requestingMember.id,
+                        ITEM_UPDATED_BY_DISPLAY_NAME_FIELD to request.requestingMember.displayName,
+                    ),
+                ),
+            )
+            request.supersededPhotoAttachmentId?.let { oldAttachmentId ->
+                Tasks.await(attachmentDocument(request.householdId, item.id, oldAttachmentId).delete())
+            }
+        } catch (failure: Exception) {
+            runCatching { Tasks.await(attachment.delete()) }
+            throw failure
+        }
     }
 
     override fun patchDescription(
@@ -527,6 +579,18 @@ private class FirebaseDescriptionGenerationItemStore(
         .document(householdId)
         .collection(ITEMS_COLLECTION)
         .document(itemId)
+
+    private fun attachmentDocument(
+        householdId: String,
+        itemId: String,
+        attachmentId: String,
+    ) = firestore
+        .collection(HOUSEHOLDS_COLLECTION)
+        .document(householdId)
+        .collection(ITEMS_COLLECTION)
+        .document(itemId)
+        .collection(ITEM_ATTACHMENTS_COLLECTION)
+        .document(attachmentId)
 }
 
 private class FirebaseDescriptionGenerationPhotoLoader(
@@ -864,6 +928,8 @@ private fun DataOutputStream.writeRequest(request: DescriptionGenerationRequest)
         writeUTF(replacement.source.thumbnailUri)
     }
     writeUTF(request.saveMode.name)
+    writeNullableString(request.item.photoAttachmentId)
+    writeNullableString(request.supersededPhotoAttachmentId)
 }
 
 private fun DataInputStream.readRequest(): DescriptionGenerationRequest {
@@ -909,7 +975,22 @@ private fun DataInputStream.readRequest(): DescriptionGenerationRequest {
     } catch (_: EOFException) {
         DescriptionGenerationSaveMode.Update
     }
-    return request.copy(replacementPhoto = replacement, saveMode = saveMode)
+    val photoAttachmentId = try {
+        readNullableString()
+    } catch (_: EOFException) {
+        null
+    }
+    val supersededPhotoAttachmentId = try {
+        readNullableString()
+    } catch (_: EOFException) {
+        null
+    }
+    return request.copy(
+        item = request.item.copy(photoAttachmentId = photoAttachmentId),
+        replacementPhoto = replacement,
+        supersededPhotoAttachmentId = supersededPhotoAttachmentId,
+        saveMode = saveMode,
+    )
 }
 
 private fun DataOutputStream.writeNullableString(value: String?) {
@@ -930,6 +1011,7 @@ private const val ITEMS_COLLECTION = "items"
 private const val ITEM_HOUSEHOLD_ID_FIELD = "householdId"
 private const val ITEM_PARENT_ITEM_ID_FIELD = "parentItemId"
 private const val ITEM_NAME_FIELD = "name"
+private const val ITEM_PHOTO_ATTACHMENT_ID_FIELD = "photoAttachmentId"
 private const val ITEM_PHOTO_URL_FIELD = "photoUrl"
 private const val ITEM_PHOTO_THUMBNAIL_URL_FIELD = "photoThumbnailUrl"
 private const val ITEM_DESCRIPTION_FIELD = "description"
@@ -941,6 +1023,10 @@ private const val ITEM_CREATED_BY_ID_FIELD = "createdById"
 private const val ITEM_CREATED_BY_DISPLAY_NAME_FIELD = "createdByDisplayName"
 private const val ITEM_UPDATED_BY_ID_FIELD = "updatedById"
 private const val ITEM_UPDATED_BY_DISPLAY_NAME_FIELD = "updatedByDisplayName"
+private const val ITEM_ATTACHMENTS_COLLECTION = "attachments"
+private const val ITEM_ATTACHMENT_CREATED_AT_FIELD = "createdAt"
+private const val ITEM_ATTACHMENT_CONTENT_TYPE_FIELD = "contentType"
+private const val ITEM_ATTACHMENT_DISPLAY_URL_FIELD = "displayUrl"
 private const val DESCRIPTION_GENERATION_WORK_DIRECTORY = "description-generation-work"
 private const val DESCRIPTION_GENERATION_PENDING_DIRECTORY = "pending"
 private const val DESCRIPTION_GENERATION_COMPLETED_DIRECTORY = "completed"

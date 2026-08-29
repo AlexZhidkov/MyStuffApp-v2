@@ -99,6 +99,10 @@ class FirebaseItemAttachmentGatewayTest {
             "households/household-1/items/item-1/attachments/attachment-1.pdf",
             itemAttachmentStoragePath("household-1", "item-1", "attachment-1", "pdf"),
         )
+        assertEquals(
+            "households/household-1/items/item-1/attachments/attachment-1-thumb.webp",
+            itemAttachmentThumbnailStoragePath("household-1", "item-1", "attachment-1"),
+        )
     }
 }
 

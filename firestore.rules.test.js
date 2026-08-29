@@ -596,6 +596,32 @@ test("Household Member can save a captured replacement revision and patch its De
   assert.equal(updated.updatedById, "member-2");
 });
 
+test("Item Photo projection may identify an attachment only with both image references", async () => {
+  await seedHousehold();
+  await seedChildItem();
+  const database = testEnvironment.authenticatedContext("member-1").firestore();
+  const reference = doc(database, "households/household-1/items/item-1");
+
+  await assertSucceeds(updateDoc(reference, {
+    photoAttachmentId: "attachment-1",
+    photoUrl:
+      "gs://mystuff/households/household-1/items/item-1/attachments/attachment-1.webp",
+    photoThumbnailUrl:
+      "gs://mystuff/households/household-1/items/item-1/attachments/attachment-1-thumb.webp",
+    updatedAt: serverTimestamp(),
+    updatedById: "member-1",
+    updatedByDisplayName: "Alex",
+  }));
+  await assertFails(updateDoc(reference, {
+    photoAttachmentId: "attachment-2",
+    photoUrl: null,
+    photoThumbnailUrl: null,
+    updatedAt: serverTimestamp(),
+    updatedById: "member-1",
+    updatedByDisplayName: "Alex",
+  }));
+});
+
 test("Household Member cannot save a replacement revision across Households", async () => {
   await seedHousehold();
   await seedHouseholdMember();

@@ -114,6 +114,27 @@ internal class BackgroundInventoryPhotoStore(
         )
     }
 
+    override fun newAttachmentRevision(
+        householdId: String,
+        itemId: String,
+        attachmentId: String,
+    ): ItemPhotoRevision {
+        val fullStoragePath = itemAttachmentStoragePath(householdId, itemId, attachmentId)
+        val thumbnailStoragePath = itemAttachmentThumbnailStoragePath(
+            householdId,
+            itemId,
+            attachmentId,
+        )
+        return ItemPhotoRevision(
+            locations = ItemPhotoLocations(
+                full = "$bucketUrl/$fullStoragePath",
+                thumbnail = "$bucketUrl/$thumbnailStoragePath",
+            ),
+            fullStoragePath = fullStoragePath,
+            thumbnailStoragePath = thumbnailStoragePath,
+        )
+    }
+
     override fun uploadInBackground(revision: ItemPhotoRevision, photo: ItemPhoto) {
         queueUpload(revision.fullStoragePath, photo.uri)
         queueUpload(revision.thumbnailStoragePath, photo.thumbnailUri)

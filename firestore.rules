@@ -135,8 +135,14 @@ service cloud.firestore {
     }
 
     function validPhotoLocations(data) {
-      return (
-          data.photoUrl == null
+      return data.get('photoAttachmentId', null) == null
+        || (
+          data.photoAttachmentId is string
+          && data.get('photoUrl', null) is string
+          && data.get('photoThumbnailUrl', null) is string
+        )
+        && (
+          data.get('photoUrl', null) == null
           || data.photoUrl is string
         )
         && (
@@ -231,7 +237,7 @@ service cloud.firestore {
       let household = getAfter(householdPath(householdId)).data;
       return itemId == householdId
         && request.resource.data.keys().hasOnly([
-          'householdId', 'name', 'parentItemId', 'photoUrl',
+          'householdId', 'name', 'parentItemId', 'photoAttachmentId', 'photoUrl',
           'photoThumbnailUrl', 'description', 'tags', 'createdAt',
           'webUrl',
           'updatedAt', 'createdById',
@@ -258,7 +264,7 @@ service cloud.firestore {
     function validChildItemCreate(householdId, itemId) {
       return itemId != householdId
         && request.resource.data.keys().hasOnly([
-          'householdId', 'name', 'parentItemId', 'photoUrl',
+          'householdId', 'name', 'parentItemId', 'photoAttachmentId', 'photoUrl',
           'photoThumbnailUrl', 'description', 'tags', 'createdAt',
           'webUrl',
           'updatedAt', 'createdById',
@@ -286,7 +292,7 @@ service cloud.firestore {
       return itemId != householdId
         && resource.data.parentItemId is string
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'name', 'photoUrl', 'photoThumbnailUrl', 'description', 'tags',
+          'name', 'photoAttachmentId', 'photoUrl', 'photoThumbnailUrl', 'description', 'tags',
           'webUrl',
           'updatedAt', 'updatedById', 'updatedByDisplayName'
         ])

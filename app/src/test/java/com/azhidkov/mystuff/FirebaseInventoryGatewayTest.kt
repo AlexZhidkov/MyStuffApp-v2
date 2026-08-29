@@ -4,8 +4,98 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.Instant
 
 class FirebaseInventoryGatewayTest {
+    @Test
+    fun `creating an Item with a photo creates and projects one Item Attachment`() {
+        val documents = FakeInventoryDocumentStore()
+        val photos = FakeInventoryPhotoStore()
+        val attachments = FakeItemPhotoAttachmentGateway()
+        val gateway = FirebaseInventoryGateway(documents, photos, attachments)
+        var result: Result<Item>? = null
+
+        gateway.createItem(
+            householdId = "household-1",
+            parentItemId = "garage",
+            creator = inventoryIdentity(),
+            details = inventoryDetails(),
+            photo = ItemPhoto("content://full.webp", "content://thumb.webp"),
+        ) { result = it }
+
+        val item = result?.getOrThrow()
+        assertEquals("attachment-1", item?.photoAttachmentId)
+        assertEquals(
+            "gs://mystuff/households/household-1/items/item-1/attachments/attachment-1.webp",
+            item?.photoUrl,
+        )
+        assertEquals(
+            "gs://mystuff/households/household-1/items/item-1/attachments/attachment-1-thumb.webp",
+            item?.photoThumbnailUrl,
+        )
+        assertEquals("attachment-1", attachments.createdAttachment?.id)
+        assertEquals(item?.photoUrl, attachments.createdDisplayUrl)
+        assertEquals(item?.photoAttachmentId, documents.updatedData?.get("photoAttachmentId"))
+    }
+
+    @Test
+    fun `replacing an attachment-backed Item Photo creates a new attachment and removes the old logical attachment`() {
+        val documents = FakeInventoryDocumentStore()
+        val photos = FakeInventoryPhotoStore()
+        val attachments = FakeItemPhotoAttachmentGateway()
+        val gateway = FirebaseInventoryGateway(documents, photos, attachments)
+        var result: Result<Item>? = null
+
+        gateway.updateItem(
+            householdId = "household-1",
+            item = inventoryItem(
+                "item-1",
+                "Drill",
+                "garage",
+                photoAttachmentId = "old-attachment",
+                photoUrl = "gs://mystuff/old.webp",
+                photoThumbnailUrl = "gs://mystuff/old-thumb.webp",
+            ),
+            updater = inventoryIdentity(),
+            details = inventoryDetails(),
+            photoUpdate = ItemPhotoUpdate.Replaced(ItemPhoto("content://new.webp")),
+        ) { result = it }
+
+        assertEquals("attachment-1", result?.getOrThrow()?.photoAttachmentId)
+        assertEquals("attachment-1", attachments.createdAttachment?.id)
+        assertEquals(listOf("old-attachment"), attachments.deletedAttachmentIds)
+        assertEquals("attachment-1", documents.updatedData?.get("photoAttachmentId"))
+    }
+
+    @Test
+    fun `removing an attachment-backed Item Photo deletes its attachment and clears the projection`() {
+        val documents = FakeInventoryDocumentStore()
+        val photos = FakeInventoryPhotoStore()
+        val attachments = FakeItemPhotoAttachmentGateway()
+        val gateway = FirebaseInventoryGateway(documents, photos, attachments)
+        var result: Result<Item>? = null
+
+        gateway.updateItem(
+            householdId = "household-1",
+            item = inventoryItem(
+                "item-1",
+                "Drill",
+                "garage",
+                photoAttachmentId = "attachment-1",
+                photoUrl = "gs://mystuff/households/household-1/items/item-1/attachments/attachment-1.webp",
+                photoThumbnailUrl = "gs://mystuff/households/household-1/items/item-1/attachments/attachment-1-thumb.webp",
+            ),
+            updater = inventoryIdentity(),
+            details = inventoryDetails(),
+            photoUpdate = ItemPhotoUpdate.Removed,
+        ) { result = it }
+
+        assertNull(result?.getOrThrow()?.photoAttachmentId)
+        assertNull(result?.getOrThrow()?.photoUrl)
+        assertEquals(listOf("attachment-1"), attachments.deletedAttachmentIds)
+        assertNull(documents.updatedData?.get("photoAttachmentId"))
+    }
+
     @Test
     fun `creating an Item finishes before its two photo variants upload`() {
         val documents = FakeInventoryDocumentStore()
@@ -184,6 +274,7 @@ class FirebaseInventoryGatewayTest {
                 "householdId" to "household-1",
                 "name" to "Drill",
                 "parentItemId" to "garage",
+                "photoAttachmentId" to null,
                 "photoUrl" to null,
                 "photoThumbnailUrl" to null,
                 "description" to "18V cordless",
@@ -234,6 +325,7 @@ class FirebaseInventoryGatewayTest {
         assertEquals(
             mapOf(
                 "name" to "Hammer Drill",
+                "photoAttachmentId" to null,
                 "photoUrl" to null,
                 "photoThumbnailUrl" to null,
                 "description" to "18V cordless",
@@ -369,6 +461,19 @@ private class FakeInventoryPhotoStore(
         thumbnailStoragePath = "households/$householdId/items/$itemId-$REVISION-thumb.webp",
     )
 
+    override fun newAttachmentRevision(
+        householdId: String,
+        itemId: String,
+        attachmentId: String,
+    ) = ItemPhotoRevision(
+        locations = ItemPhotoLocations(
+            full = "gs://mystuff/households/$householdId/items/$itemId/attachments/$attachmentId.webp",
+            thumbnail = "gs://mystuff/households/$householdId/items/$itemId/attachments/$attachmentId-thumb.webp",
+        ),
+        fullStoragePath = "households/$householdId/items/$itemId/attachments/$attachmentId.webp",
+        thumbnailStoragePath = "households/$householdId/items/$itemId/attachments/$attachmentId-thumb.webp",
+    )
+
     override fun uploadInBackground(
         revision: ItemPhotoRevision,
         photo: ItemPhoto,
@@ -487,6 +592,7 @@ private fun inventoryItem(
     parentItemId: String?,
     photoUrl: String? = null,
     photoThumbnailUrl: String? = null,
+    photoAttachmentId: String? = null,
     description: String? = null,
     tags: List<String> = emptyList(),
     webUrl: String? = null,
@@ -499,4 +605,50 @@ private fun inventoryItem(
     description = description,
     tags = tags,
     webUrl = webUrl,
+    photoAttachmentId = photoAttachmentId,
 )
+
+private class FakeItemPhotoAttachmentGateway : ItemAttachmentGateway {
+    var createdAttachment: ItemAttachment? = null
+        private set
+    var createdDisplayUrl: String? = null
+        private set
+    val deletedAttachmentIds = mutableListOf<String>()
+
+    override fun observe(
+        household: Household,
+        item: Item,
+        onResult: (Result<List<ItemAttachment>>) -> Unit,
+    ): InventorySubscription = InventorySubscription {}
+
+    override fun newAttachmentId(householdId: String, itemId: String): String = "attachment-1"
+
+    override fun create(
+        household: Household,
+        item: Item,
+        attachmentId: String,
+        contentType: String,
+        displayUrl: String,
+        onResult: (Result<ItemAttachment>) -> Unit,
+    ) {
+        createdDisplayUrl = displayUrl
+        createdAttachment = ItemAttachment(
+            id = attachmentId,
+            itemId = item.id,
+            createdAt = Instant.EPOCH,
+            contentType = contentType,
+            displayUrl = displayUrl,
+        )
+        onResult(Result.success(createdAttachment!!))
+    }
+
+    override fun delete(
+        household: Household,
+        item: Item,
+        attachment: ItemAttachment,
+        onResult: (Result<Unit>) -> Unit,
+    ) {
+        deletedAttachmentIds += attachment.id
+        onResult(Result.success(Unit))
+    }
+}

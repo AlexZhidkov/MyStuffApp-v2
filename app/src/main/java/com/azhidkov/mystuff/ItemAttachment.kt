@@ -37,3 +37,9 @@ private fun String.ensureFileExtension(): String = when {
     startsWith('.') -> this
     else -> "." + this
 }
+
+fun itemAttachmentThumbnailStoragePath(
+    householdId: String,
+    itemId: String,
+    attachmentId: String,
+): String = "households/$householdId/items/$itemId/attachments/$attachmentId-thumb.webp"

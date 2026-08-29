@@ -76,6 +76,7 @@ internal class FileRootChildItemCache(
                             id = input.readUTF(),
                             name = input.readUTF(),
                             parentItemId = input.readNullableString(),
+                            photoAttachmentId = input.readNullableString(),
                             photoUrl = input.readNullableString(),
                             description = input.readNullableString(),
                             tags = buildList {
@@ -112,6 +113,7 @@ internal class FileRootChildItemCache(
                     output.writeUTF(item.id)
                     output.writeUTF(item.name)
                     output.writeNullableString(item.parentItemId)
+                    output.writeNullableString(item.photoAttachmentId)
                     output.writeNullableString(item.photoUrl)
                     output.writeNullableString(item.description)
                     output.writeInt(item.tags.size)
@@ -160,4 +162,4 @@ private val rootChildItemCacheWriter = Executors.newSingleThreadExecutor { task 
 }
 
 private const val CACHE_MAGIC = 0x4D595354
-private const val CACHE_VERSION = 2
+private const val CACHE_VERSION = 3

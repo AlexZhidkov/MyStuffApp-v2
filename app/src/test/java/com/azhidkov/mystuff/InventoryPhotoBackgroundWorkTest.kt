@@ -7,6 +7,27 @@ import java.util.UUID
 
 class InventoryPhotoBackgroundWorkTest {
     @Test
+    fun `attachment-backed photo revisions use nested attachment locations`() {
+        val store = BackgroundInventoryPhotoStore(
+            bucketUrl = "gs://mystuff",
+            queue = RecordingPhotoTransferQueue(),
+        )
+
+        val revision = store.newAttachmentRevision("household-1", "item-1", "attachment-1")
+
+        assertEquals(
+            "households/household-1/items/item-1/attachments/attachment-1.webp",
+            revision.fullStoragePath,
+        )
+        assertEquals(
+            "households/household-1/items/item-1/attachments/attachment-1-thumb.webp",
+            revision.thumbnailStoragePath,
+        )
+        assertEquals("gs://mystuff/${revision.fullStoragePath}", revision.locations.full)
+        assertEquals("gs://mystuff/${revision.thumbnailStoragePath}", revision.locations.thumbnail)
+    }
+
+    @Test
     fun `new photo revisions use distinct random UUIDs`() {
         val store = BackgroundInventoryPhotoStore(
             bucketUrl = "gs://mystuff",

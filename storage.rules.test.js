@@ -138,14 +138,23 @@ test("a Household Member can transfer an Item Attachment display image in its ne
   const memberStorage = testEnvironment.authenticatedContext("member-1").storage();
   const attachmentPath =
     "households/household-1/items/item-1/attachments/attachment-1.webp";
+  const thumbnailPath =
+    "households/household-1/items/item-1/attachments/attachment-1-thumb.webp";
 
   await assertSucceeds(uploadBytes(
     ref(memberStorage, attachmentPath),
     new Uint8Array([1]),
     { contentType: "image/webp" },
   ));
+  await assertSucceeds(uploadBytes(
+    ref(memberStorage, thumbnailPath),
+    new Uint8Array([1]),
+    { contentType: "image/webp" },
+  ));
   await assertSucceeds(getBytes(ref(memberStorage, attachmentPath)));
+  await assertSucceeds(getBytes(ref(memberStorage, thumbnailPath)));
   await assertSucceeds(deleteObject(ref(memberStorage, attachmentPath)));
+  await assertSucceeds(deleteObject(ref(memberStorage, thumbnailPath)));
 });
 
 test("Item Attachment storage rejects cross-Household, root Item, and non-WebP locations", async () => {

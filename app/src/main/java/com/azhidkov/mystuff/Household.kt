@@ -9,6 +9,8 @@ data class Item(
     val tags: List<String>,
     val photoThumbnailUrl: String? = null,
     val webUrl: String? = null,
+    /** The designated Item Photo's Item Attachment, when the photo is migrated. */
+    val photoAttachmentId: String? = null,
 )
 
 data class Household(

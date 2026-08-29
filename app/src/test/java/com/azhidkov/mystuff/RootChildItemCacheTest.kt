@@ -13,6 +13,7 @@ class RootChildItemCacheTest {
             id = "garage",
             name = "Garage",
             parentItemId = "household-1",
+            photoAttachmentId = "attachment-1",
             photoUrl = "gs://mystuff/garage.webp",
             description = "West side",
             tags = listOf("Storage", "Tools"),

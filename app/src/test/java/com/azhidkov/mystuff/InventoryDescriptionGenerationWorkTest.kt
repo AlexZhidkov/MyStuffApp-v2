@@ -109,26 +109,27 @@ class InventoryDescriptionGenerationWorkTest {
 
         assertEquals(1, photos.allocatedRevisions)
         assertEquals(
-            "gs://mystuff/households/household-1/items/drill-$REPLACEMENT_REVISION.webp",
+            "gs://mystuff/households/household-1/items/drill/attachments/attachment-1.webp",
             request.item.photoUrl,
         )
         assertEquals(
-            "gs://mystuff/households/household-1/items/drill-$REPLACEMENT_REVISION-thumb.webp",
+            "gs://mystuff/households/household-1/items/drill/attachments/attachment-1-thumb.webp",
             request.item.photoThumbnailUrl,
         )
+        assertEquals("attachment-1", request.item.photoAttachmentId)
         assertEquals(
             DescriptionGenerationReplacementPhoto(
                 revision = ItemPhotoRevision(
                     locations = ItemPhotoLocations(
                         full = "gs://mystuff/households/household-1/items/" +
-                            "drill-$REPLACEMENT_REVISION.webp",
+                            "drill/attachments/attachment-1.webp",
                         thumbnail = "gs://mystuff/households/household-1/items/" +
-                            "drill-$REPLACEMENT_REVISION-thumb.webp",
+                            "drill/attachments/attachment-1-thumb.webp",
                     ),
-                    fullStoragePath =
-                        "households/household-1/items/drill-$REPLACEMENT_REVISION.webp",
-                    thumbnailStoragePath =
-                        "households/household-1/items/drill-$REPLACEMENT_REVISION-thumb.webp",
+                    fullStoragePath = "households/household-1/items/drill/attachments/" +
+                        "attachment-1.webp",
+                    thumbnailStoragePath = "households/household-1/items/drill/attachments/" +
+                        "attachment-1-thumb.webp",
                 ),
                 source = replacement,
             ),
@@ -611,6 +612,24 @@ private class RecordingDescriptionGenerationInventoryPhotoStore : InventoryPhoto
             revision,
             ItemPhotoVariant.Thumbnail,
         )
+        return ItemPhotoRevision(
+            locations = ItemPhotoLocations("gs://mystuff/$full", "gs://mystuff/$thumbnail"),
+            fullStoragePath = full,
+            thumbnailStoragePath = thumbnail,
+        )
+    }
+
+    override fun newAttachmentId(householdId: String, itemId: String): String = "attachment-1"
+
+    override fun newAttachmentRevision(
+        householdId: String,
+        itemId: String,
+        attachmentId: String,
+    ): ItemPhotoRevision {
+        allocatedRevisions += 1
+        val full = "households/$householdId/items/$itemId/attachments/$attachmentId.webp"
+        val thumbnail =
+            "households/$householdId/items/$itemId/attachments/$attachmentId-thumb.webp"
         return ItemPhotoRevision(
             locations = ItemPhotoLocations("gs://mystuff/$full", "gs://mystuff/$thumbnail"),
             fullStoragePath = full,

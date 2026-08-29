@@ -7,7 +7,8 @@
     "node": "22"
   },
   "scripts": {
-    "test": "node --test --test-concurrency=1"
+    "test": "node --test --test-concurrency=1",
+    "backfill:item-photos": "node scripts/backfill-item-photos.js"
   },
   "dependencies": {
     "@google/genai": "2.19.0",

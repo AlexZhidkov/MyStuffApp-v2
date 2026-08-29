@@ -4,7 +4,8 @@
   "scripts": {
     "test:rules": "firebase emulators:exec --only firestore,storage --project mystuff-ai-app 'node --test --test-concurrency=1 firestore.rules.test.js storage.rules.test.js'",
     "test:functions": "npm test --prefix functions",
-    "test:functions:emulator": "firebase emulators:exec --only auth,firestore,functions --project demo-mystuff-search 'npm test --prefix functions'"
+    "test:functions:emulator": "firebase emulators:exec --only auth,firestore,storage,functions --project demo-mystuff-search 'npm test --prefix functions'",
+    "backfill:item-photos": "npm run backfill:item-photos --prefix functions"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "5.0.1",

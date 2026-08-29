@@ -120,6 +120,41 @@ internal fun storedPhotoLocation(item: Item, presentation: ItemPhotoPresentation
     }
 
 @Composable
+internal fun rememberAttachmentDisplayPhoto(
+    location: String,
+    previewLocation: String? = null,
+): State<PhotoLoadState<Bitmap>> {
+    val context = LocalContext.current.applicationContext
+    val loader = attachmentDisplayPhotoLoader(context)
+    val previewLoader = storedPhotoBitmapLoader(context)
+    return produceState<PhotoLoadState<Bitmap>>(
+        initialValue = previewLocation
+            ?.let(previewLoader::thumbnailMemoryValue)
+            ?.let { PhotoLoadState.Available(it, PhotoResolution.Preview) }
+            ?: PhotoLoadState.Loading,
+        key1 = location,
+        key2 = previewLocation,
+    ) {
+        if (previewLocation != null && value !is PhotoLoadState.Available) {
+            launch {
+                previewLoader.cachedThumbnailValue(previewLocation)?.let { preview ->
+                    value = detailStateWithPreview(value, preview)
+                }
+            }
+        }
+        try {
+            value = detailStateWithFullLoad(
+                value,
+                PhotoLoadState.Available(loader.load(location)),
+            )
+        } catch (failure: Exception) {
+            if (failure is CancellationException) throw failure
+            value = detailStateWithFullLoad(value, PhotoLoadState.Unavailable)
+        }
+    }
+}
+
+@Composable
 internal fun LocalItemPhoto(
     photo: ItemPhoto,
     modifier: Modifier = Modifier,
@@ -261,6 +296,15 @@ private suspend fun downloadStoredPhotoBytes(location: String, maxBytes: Long): 
             .addOnFailureListener(continuation::resumeWithException)
     }
 
+private suspend fun downloadAttachmentDisplayPhotoBytes(location: String): ByteArray =
+    suspendCoroutine { continuation ->
+        FirebaseStorage.getInstance()
+            .getReferenceFromUrl(location)
+            .getBytes(Long.MAX_VALUE)
+            .addOnSuccessListener(continuation::resume)
+            .addOnFailureListener(continuation::resumeWithException)
+    }
+
 private suspend fun decodeStoredPhotoBitmap(bytes: ByteArray): Bitmap =
     withContext(Dispatchers.IO) {
         decodePhoto(ImageDecoder.createSource(ByteBuffer.wrap(bytes)))
@@ -290,6 +334,22 @@ private object StoredPhotoBitmapLoaderHolder {
     var loader: StoredPhotoLoader<Bitmap>? = null
 }
 
+private object AttachmentDisplayPhotoLoaderHolder {
+    @Volatile
+    var loader: AttachmentDisplayPhotoCache<Bitmap>? = null
+}
+
+internal fun attachmentDisplayPhotoLoader(context: Context): AttachmentDisplayPhotoCache<Bitmap> =
+    AttachmentDisplayPhotoLoaderHolder.loader
+        ?: synchronized(AttachmentDisplayPhotoLoaderHolder) {
+            AttachmentDisplayPhotoLoaderHolder.loader
+                ?: AttachmentDisplayPhotoCache(
+                    directory = File(context.cacheDir, ATTACHMENT_DISPLAY_CACHE_DIRECTORY),
+                    download = ::downloadAttachmentDisplayPhotoBytes,
+                    decode = ::decodeStoredPhotoBitmap,
+                ).also { AttachmentDisplayPhotoLoaderHolder.loader = it }
+        }
+
 private fun decodePhoto(source: ImageDecoder.Source): Bitmap =
     ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
         decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
@@ -306,5 +366,6 @@ private fun decodePhoto(source: ImageDecoder.Source): Bitmap =
 private const val MAX_DECODED_PHOTO_SIDE = 2_048
 private const val FULL_PHOTO_CROSSFADE_MILLIS = 200
 private const val THUMBNAIL_CACHE_DIRECTORY = "item-thumbnails"
+private const val ATTACHMENT_DISPLAY_CACHE_DIRECTORY = "item-attachment-displays"
 private const val INITIAL_PHOTO_RETRY_DELAY_MILLIS = 2_000L
 private const val MAX_PHOTO_RETRY_DELAY_MILLIS = 30_000L

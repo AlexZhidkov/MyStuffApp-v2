@@ -79,7 +79,16 @@ interface InventoryActions {
     fun saveItem()
     fun saveAndGenerateDescription()
     fun consumeDeferredError(id: String)
+    fun openItemAttachmentCarousel()
+    fun closeItemAttachmentCarousel()
 }
+
+data class ItemAttachmentState(
+    val itemId: String,
+    val attachments: List<ItemAttachment> = emptyList(),
+    val loading: Boolean = true,
+    val errorMessage: String? = null,
+)
 
 data class InventorySearchResult(
     val item: Item,
@@ -130,6 +139,8 @@ data class InventoryUiState(
     val errorMessage: String? = null,
     val successMessage: String? = null,
     val deferredError: DeferredInventoryError? = null,
+    val itemAttachments: ItemAttachmentState? = null,
+    val itemAttachmentCarousel: ItemAttachmentState? = null,
 ) {
     val canGenerateDescription: Boolean
         get() {
@@ -221,6 +232,7 @@ class InventoryController internal constructor(
     private val deviceLanguage: () -> String = { java.util.Locale.getDefault().toLanguageTag() },
     private val searchGateway: SearchGateway = NoSearchGateway,
     private val searchDebouncer: SearchDebouncer = NoSearchDebouncer,
+    private val itemAttachmentGateway: ItemAttachmentGateway = NoItemAttachmentGateway,
 ) : InventoryActions, AutoCloseable {
     constructor(
         household: Household,
@@ -247,6 +259,7 @@ class InventoryController internal constructor(
     private var pendingDescriptionGenerations = emptyMap<String, DescriptionGenerationRequest>()
     private var searchDebounceSubscription: SearchSubscription? = null
     private var searchRequestSubscription: SearchSubscription? = null
+    private var itemAttachmentSubscription: InventorySubscription? = null
 
     private val subscription = gateway.observe(household) { result ->
         result.onSuccess { inventory ->
@@ -354,6 +367,7 @@ class InventoryController internal constructor(
                 successMessage = null,
             ),
         )
+        observeItemAttachments(state.selectedItem)
     }
 
     override fun openItem(itemId: String) {
@@ -367,6 +381,7 @@ class InventoryController internal constructor(
                 successMessage = null,
             ),
         )
+        observeItemAttachments(state.selectedItem)
     }
 
     override fun openParentItem() {
@@ -686,6 +701,70 @@ class InventoryController internal constructor(
         descriptionGenerationWork.consumeOutcome(id)
     }
 
+    override fun openItemAttachmentCarousel() {
+        val item = state.selectedItem
+        if (item.photoUrl == null || item.id == household.rootItem.id || state.itemDraft != null) return
+        val collection = state.itemAttachments
+            ?.takeIf { it.itemId == item.id && it.errorMessage == null }
+        updateState(
+            state.copy(
+                itemAttachmentCarousel = collection
+                    ?: ItemAttachmentState(itemId = item.id),
+            ),
+        )
+        if (collection == null) observeItemAttachments(item)
+    }
+
+    override fun closeItemAttachmentCarousel() {
+        if (state.itemAttachmentCarousel != null) {
+            updateState(state.copy(itemAttachmentCarousel = null))
+        }
+    }
+
+    private fun observeItemAttachments(item: Item) {
+        itemAttachmentSubscription?.cancel()
+        if (item.id == household.rootItem.id || item.parentItemId == null) {
+            itemAttachmentSubscription = null
+            updateState(state.copy(itemAttachments = null))
+            return
+        }
+        updateState(
+            state.copy(
+                itemAttachments = ItemAttachmentState(itemId = item.id),
+                itemAttachmentCarousel = state.itemAttachmentCarousel
+                    ?.takeIf { it.itemId == item.id }
+                    ?.copy(loading = true, errorMessage = null),
+            ),
+        )
+        itemAttachmentSubscription = itemAttachmentGateway.observe(household, item) { result ->
+            if (state.itemAttachments?.itemId != item.id) return@observe
+            val collection = result.fold(
+                onSuccess = { attachments ->
+                    ItemAttachmentState(
+                        itemId = item.id,
+                        attachments = attachments,
+                        loading = false,
+                    )
+                },
+                onFailure = { failure ->
+                    ItemAttachmentState(
+                        itemId = item.id,
+                        loading = false,
+                        errorMessage = failure.message ?: "Couldn't load Item Attachments.",
+                    )
+                },
+            )
+            updateState(
+                state.copy(
+                    itemAttachments = collection,
+                    itemAttachmentCarousel = state.itemAttachmentCarousel
+                        ?.takeIf { it.itemId == item.id }
+                        ?.let { collection },
+                ),
+            )
+        }
+    }
+
     private fun validateAndNormalize(draft: ItemFormState): ItemDetails? {
         val name = draft.name.trimUnicodeWhitespace()
         val nameError = when {
@@ -742,6 +821,7 @@ class InventoryController internal constructor(
         cancelConceptualSearch()
         searchDebouncer.close()
         subscription.cancel()
+        itemAttachmentSubscription?.cancel()
         descriptionGenerationSubscription.cancel()
         onStateChanged = {}
     }

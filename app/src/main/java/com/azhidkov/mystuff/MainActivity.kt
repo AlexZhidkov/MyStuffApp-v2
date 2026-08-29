@@ -31,6 +31,7 @@ class MainActivity : ComponentActivity() {
         )
         val invitationGateway = FirebaseInvitationGateway()
         val inventoryGateway = FirebaseInventoryGateway()
+        val itemAttachmentGateway = FirebaseItemAttachmentGateway()
         val searchGateway = FirebaseSearchGateway()
         val descriptionGenerationWork = WorkManagerInventoryDescriptionGenerationWork(
             applicationContext,
@@ -56,6 +57,7 @@ class MainActivity : ComponentActivity() {
                     onCreateHousehold = sessionController::createHousehold,
                     invitationGateway = invitationGateway,
                     inventoryGateway = inventoryGateway,
+                    itemAttachmentGateway = itemAttachmentGateway,
                     searchGateway = searchGateway,
                     rootChildItemCache = rootChildItemCache,
                     descriptionGenerationWork = descriptionGenerationWork,
@@ -72,6 +74,7 @@ private fun MyStuffApp(
     onCreateHousehold: (String) -> Unit,
     invitationGateway: InvitationGateway,
     inventoryGateway: InventoryGateway,
+    itemAttachmentGateway: ItemAttachmentGateway,
     searchGateway: SearchGateway,
     rootChildItemCache: RootChildItemCache,
     descriptionGenerationWork: InventoryDescriptionGenerationWork,
@@ -114,6 +117,7 @@ private fun MyStuffApp(
                         descriptionGenerationWork = descriptionGenerationWork,
                         searchGateway = searchGateway,
                         searchDebouncer = MainThreadSearchDebouncer(),
+                        itemAttachmentGateway = itemAttachmentGateway,
                     )
                 }
                 var inventoryState by remember(inventoryController) {

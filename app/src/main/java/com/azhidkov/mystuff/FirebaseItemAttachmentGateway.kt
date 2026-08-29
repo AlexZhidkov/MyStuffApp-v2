@@ -3,6 +3,7 @@ package com.azhidkov.mystuff
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.DocumentSnapshot.ServerTimestampBehavior
 import java.time.Instant
 
 interface ItemAttachmentGateway {
@@ -170,7 +171,11 @@ private class FirestoreItemAttachmentDocumentStore(
                     onResult(
                         runCatching {
                             requireNotNull(snapshot).documents.map { document ->
-                                ItemAttachmentDocument(document.id, document.data ?: emptyMap())
+                                ItemAttachmentDocument(
+                                    document.id,
+                                    document.getData(ServerTimestampBehavior.ESTIMATE)
+                                        ?: emptyMap(),
+                                )
                             }
                         },
                     )

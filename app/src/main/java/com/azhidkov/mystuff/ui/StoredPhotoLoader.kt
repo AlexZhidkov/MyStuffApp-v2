@@ -135,11 +135,71 @@ internal class StoredPhotoLoader<T>(
         }
 }
 
+internal class AttachmentDisplayPhotoCache<T>(
+    private val directory: File,
+    private val download: suspend (String) -> ByteArray,
+    private val decode: suspend (ByteArray) -> T,
+    private val writeTemporaryFile: (File, ByteArray) -> Unit = File::writeBytes,
+) {
+    suspend fun load(location: String): T = withContext(Dispatchers.IO) {
+        val cacheFile = directory.resolve(attachmentDisplayCacheFileName(location))
+        val cached = readCached(cacheFile)
+        if (cached != null) return@withContext cached
+
+        val bytes = download(location)
+        val decoded = decode(bytes)
+        runCatching { writeAtomically(cacheFile, bytes) }
+        decoded
+    }
+
+    private suspend fun readCached(cacheFile: File): T? {
+        if (!cacheFile.isFile) return null
+        return try {
+            decode(cacheFile.readBytes())
+        } catch (failure: Exception) {
+            if (failure is CancellationException) throw failure
+            cacheFile.delete()
+            null
+        }
+    }
+
+    private fun writeAtomically(cacheFile: File, bytes: ByteArray) {
+        directory.mkdirs()
+        val temporaryFile = File.createTempFile(cacheFile.name, ".part", directory)
+        try {
+            writeTemporaryFile(temporaryFile, bytes)
+            try {
+                Files.move(
+                    temporaryFile.toPath(),
+                    cacheFile.toPath(),
+                    StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING,
+                )
+            } catch (_: AtomicMoveNotSupportedException) {
+                Files.move(
+                    temporaryFile.toPath(),
+                    cacheFile.toPath(),
+                    StandardCopyOption.REPLACE_EXISTING,
+                )
+            }
+        } finally {
+            temporaryFile.delete()
+        }
+    }
+}
+
 internal fun thumbnailCacheFileName(location: String): String {
     val digest = MessageDigest.getInstance("SHA-256")
         .digest(location.encodeToByteArray())
         .joinToString(separator = "") { byte -> "%02x".format(byte) }
     return "$digest.webp"
+}
+
+internal fun attachmentDisplayCacheFileName(location: String): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+        .digest(location.encodeToByteArray())
+        .joinToString(separator = "") { byte -> "%02x".format(byte) }
+    return "$digest.image"
 }
 
 internal fun thumbnailMemoryCacheMaxBytes(maxHeapBytes: Long): Long = maxHeapBytes / 8L

@@ -3,7 +3,11 @@ package com.azhidkov.mystuff.ui
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -52,6 +56,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -61,15 +67,19 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.azhidkov.mystuff.DeferredInventoryError
+import com.azhidkov.mystuff.CarouselImage
 import com.azhidkov.mystuff.HouseholdInvitation
 import com.azhidkov.mystuff.InvitationStatus
 import com.azhidkov.mystuff.InvitationUiState
 import com.azhidkov.mystuff.InventoryActions
 import com.azhidkov.mystuff.InventoryUiState
 import com.azhidkov.mystuff.Item
+import com.azhidkov.mystuff.ItemAttachmentState
 import com.azhidkov.mystuff.ItemFormStage
 import com.azhidkov.mystuff.ItemFormPolicy
 import com.azhidkov.mystuff.R
+import com.azhidkov.mystuff.carouselImages
+import com.azhidkov.mystuff.otherAttachmentCount
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
@@ -77,6 +87,7 @@ import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.util.Locale
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -165,6 +176,16 @@ private fun HouseholdRootContent(
                 actions = inventoryActions,
             )
         }
+        return
+    }
+
+    inventoryState.itemAttachmentCarousel?.let { carouselState ->
+        BackHandler { inventoryActions.closeItemAttachmentCarousel() }
+        ItemAttachmentCarouselScreen(
+            item = inventoryState.selectedItem,
+            state = carouselState,
+            onClose = inventoryActions::closeItemAttachmentCarousel,
+        )
         return
     }
 
@@ -316,9 +337,10 @@ private fun HouseholdRootContent(
                     ItemPhotoPresentation.Detail,
                 )?.let {
                     item {
-                        StoredItemPhoto(
+                        ItemPhotoWithAttachmentBadge(
                             item = inventoryState.selectedItem,
-                            presentation = ItemPhotoPresentation.Detail,
+                            attachments = inventoryState.itemAttachments,
+                            onClick = inventoryActions::openItemAttachmentCarousel,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(240.dp),
@@ -479,6 +501,171 @@ private fun HouseholdRootContent(
                 }
             }
             item { Spacer(Modifier.height(24.dp)) }
+        }
+    }
+}
+
+@Composable
+private fun ItemPhotoWithAttachmentBadge(
+    item: Item,
+    attachments: ItemAttachmentState?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier = modifier.clickable(onClick = onClick)) {
+        StoredItemPhoto(
+            item = item,
+            presentation = ItemPhotoPresentation.Detail,
+            modifier = Modifier.fillMaxSize(),
+        )
+        val count = attachments
+            ?.takeIf { it.itemId == item.id && !it.loading && it.errorMessage == null }
+            ?.let { item.otherAttachmentCount(it.attachments) }
+            ?: 0
+        if (count > 0) {
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(12.dp),
+                color = MaterialTheme.colorScheme.inverseSurface,
+                shape = MaterialTheme.shapes.small,
+            ) {
+                Text(
+                    text = "+$count",
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    color = MaterialTheme.colorScheme.inverseOnSurface,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ItemAttachmentCarouselScreen(
+    item: Item,
+    state: ItemAttachmentState,
+    onClose: () -> Unit,
+) {
+    val images = item.carouselImages(state.attachments)
+    val pagerState = rememberPagerState(pageCount = { images.size.coerceAtLeast(1) })
+    val loader = attachmentDisplayPhotoLoader(LocalContext.current.applicationContext)
+    LaunchedEffect(state.itemId, state.attachments) {
+        buildList {
+            item.photoUrl?.let(::add)
+            state.attachments
+                .asSequence()
+                .filterNot { it.id == item.photoAttachmentId }
+                .mapTo(this) { it.displayUrl }
+        }
+            .asSequence()
+            .forEach { location ->
+                launch { runCatching { loader.load(location) } }
+            }
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = Color.Black,
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            if (images.isNotEmpty()) {
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier.fillMaxSize(),
+                ) { page ->
+                    when (val image = images[page]) {
+                        is CarouselImage.ItemPhoto -> AttachmentDisplayPhoto(
+                            location = requireNotNull(image.item.photoUrl),
+                            previewLocation = image.item.photoThumbnailUrl,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 16.dp, vertical = 72.dp),
+                        )
+                        is CarouselImage.Attachment -> AttachmentDisplayPhoto(
+                            location = image.attachment.displayUrl,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 16.dp, vertical = 72.dp),
+                        )
+                    }
+                }
+            } else {
+                Text(
+                    text = stringResource(R.string.item_photo_unavailable),
+                    modifier = Modifier.align(Alignment.Center),
+                    color = Color.White,
+                )
+            }
+            IconButton(
+                onClick = onClose,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(top = 32.dp, start = 8.dp),
+            ) {
+                Text(
+                    text = "×",
+                    color = Color.White,
+                    style = MaterialTheme.typography.headlineMedium,
+                )
+            }
+            if (state.loading) {
+                CircularProgressIndicator(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 40.dp)
+                        .size(20.dp),
+                    color = Color.White,
+                    strokeWidth = 2.dp,
+                )
+            }
+            state.errorMessage?.let { error ->
+                Text(
+                    text = error,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(24.dp),
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            if (images.size > 1) {
+                Text(
+                    text = "${pagerState.currentPage + 1} / ${images.size}",
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 32.dp),
+                    color = Color.White,
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AttachmentDisplayPhoto(
+    location: String,
+    previewLocation: String? = null,
+    modifier: Modifier = Modifier,
+) {
+    val state by rememberAttachmentDisplayPhoto(location, previewLocation)
+    val photoState = state
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        when (photoState) {
+            PhotoLoadState.Loading -> CircularProgressIndicator(color = Color.White)
+            PhotoLoadState.Unavailable -> Text(
+                text = stringResource(R.string.attachment_unavailable),
+                color = Color.White,
+            )
+            is PhotoLoadState.Available -> Image(
+                bitmap = photoState.value.asImageBitmap(),
+                contentDescription = stringResource(R.string.item_attachment),
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Fit,
+            )
         }
     }
 }

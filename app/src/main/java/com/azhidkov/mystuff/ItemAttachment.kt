@@ -17,6 +17,52 @@ data class ItemAttachment(
     val displayUrl: String,
 )
 
+internal object NoItemAttachmentGateway : ItemAttachmentGateway {
+    override fun observe(
+        household: Household,
+        item: Item,
+        onResult: (Result<List<ItemAttachment>>) -> Unit,
+    ): InventorySubscription = InventorySubscription {}
+
+    override fun newAttachmentId(householdId: String, itemId: String): String =
+        throw UnsupportedOperationException("Item Attachments are unavailable.")
+
+    override fun create(
+        household: Household,
+        item: Item,
+        attachmentId: String,
+        contentType: String,
+        displayUrl: String,
+        onResult: (Result<ItemAttachment>) -> Unit,
+    ) = onResult(Result.failure(UnsupportedOperationException("Item Attachments are unavailable.")))
+
+    override fun delete(
+        household: Household,
+        item: Item,
+        attachment: ItemAttachment,
+        onResult: (Result<Unit>) -> Unit,
+    ) = onResult(Result.failure(UnsupportedOperationException("Item Attachments are unavailable.")))
+}
+
+sealed interface CarouselImage {
+    data class ItemPhoto(val item: Item) : CarouselImage
+
+    data class Attachment(val attachment: ItemAttachment) : CarouselImage
+}
+
+fun Item.carouselImages(attachments: List<ItemAttachment>): List<CarouselImage> = buildList {
+    if (photoUrl != null) add(CarouselImage.ItemPhoto(this@carouselImages))
+    attachments
+        .asSequence()
+        .filterNot { it.id == photoAttachmentId }
+        .sortedBy(ItemAttachment::createdAt)
+        .map(CarouselImage::Attachment)
+        .forEach(::add)
+}
+
+fun Item.otherAttachmentCount(attachments: List<ItemAttachment>): Int =
+    attachments.count { it.id != photoAttachmentId }
+
 /** The current optimized image format used when a display file is created. */
 const val OPTIMIZED_ATTACHMENT_IMAGE_CONTENT_TYPE = "image/webp"
 

@@ -173,7 +173,7 @@ async function replaceInvitation(database, oldInvitationId, newInvitationId) {
   await batch.commit();
 }
 
-function householdCreationBatch(database, name) {
+function householdCreationBatch(database, name, rootOverrides = {}) {
   const batch = writeBatch(database);
   batch.set(doc(database, "memberships/member-1"), {
     householdId: "household-1",
@@ -186,11 +186,11 @@ function householdCreationBatch(database, name) {
     createdAt: serverTimestamp(),
   });
   batch.set(doc(database, "households/household-1/items/household-1"),
-    rootItemData("household-1", name));
+    rootItemData("household-1", name, rootOverrides));
   return batch;
 }
 
-function rootItemData(householdId, name) {
+function rootItemData(householdId, name, overrides = {}) {
   return {
     householdId,
     name,
@@ -205,6 +205,7 @@ function rootItemData(householdId, name) {
     createdByDisplayName: "Alex",
     updatedById: "member-1",
     updatedByDisplayName: "Alex",
+    ...overrides,
   };
 }
 
@@ -277,6 +278,16 @@ test("Member can atomically create one Household and its single root Item", asyn
   const database = testEnvironment.authenticatedContext("member-1").firestore();
 
   await assertSucceeds(householdCreationBatch(database, "Our Home").commit());
+});
+
+test("Household root Item cannot carry an Item Photo projection", async () => {
+  const database = testEnvironment.authenticatedContext("member-1").firestore();
+
+  await assertFails(householdCreationBatch(database, "Our Home", {
+    photoAttachmentId: "attachment-1",
+    photoUrl: "gs://mystuff/root.webp",
+    photoThumbnailUrl: "gs://mystuff/root-thumb.webp",
+  }).commit());
 });
 
 test("Member cannot replace their membership to create another Household", async () => {
@@ -615,6 +626,10 @@ test("Item Photo projection may identify an attachment only with both image refe
   await seedChildItem();
   const database = testEnvironment.authenticatedContext("member-1").firestore();
   const reference = doc(database, "households/household-1/items/item-1");
+  await assertSucceeds(setDoc(
+    doc(database, "households/household-1/items/item-1/attachments/attachment-1"),
+    itemAttachmentData(),
+  ));
 
   await assertSucceeds(updateDoc(reference, {
     photoAttachmentId: "attachment-1",
@@ -628,8 +643,10 @@ test("Item Photo projection may identify an attachment only with both image refe
   }));
   await assertFails(updateDoc(reference, {
     photoAttachmentId: "attachment-2",
-    photoUrl: null,
-    photoThumbnailUrl: null,
+    photoUrl:
+      "gs://mystuff/households/household-1/items/item-1/attachments/attachment-2.webp",
+    photoThumbnailUrl:
+      "gs://mystuff/households/household-1/items/item-1/attachments/attachment-2-thumb.webp",
     updatedAt: serverTimestamp(),
     updatedById: "member-1",
     updatedByDisplayName: "Alex",

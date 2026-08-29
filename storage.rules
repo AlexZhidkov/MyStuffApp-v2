@@ -38,8 +38,17 @@ service firebase.storage {
         ).data.get('parentItemId', null) is string;
     }
 
+    function isItemAttachmentThumbnail(fileName) {
+      return fileName.matches('^[A-Za-z0-9_-]+-thumb\\.webp$');
+    }
+
+    function isItemAttachmentFull(fileName) {
+      return fileName.matches('^[A-Za-z0-9_-]+\\.webp$')
+        && !isItemAttachmentThumbnail(fileName);
+    }
+
     function isItemAttachmentFile(fileName) {
-      return fileName.matches('^[A-Za-z0-9_-]+\\.webp$');
+      return isItemAttachmentFull(fileName) || isItemAttachmentThumbnail(fileName);
     }
 
     match /households/{householdId}/items/{fileName} {
@@ -64,7 +73,13 @@ service firebase.storage {
         && isNonRootItemInHousehold(householdId, itemId)
         && isItemAttachmentFile(fileName)
         && request.resource.contentType == 'image/webp'
-        && request.resource.size <= 2 * 1024 * 1024;
+        && (
+          (isItemAttachmentFull(fileName) && request.resource.size <= 2 * 1024 * 1024)
+          || (
+            isItemAttachmentThumbnail(fileName)
+            && request.resource.size <= 256 * 1024
+          )
+        );
     }
   }
 }

@@ -22,6 +22,10 @@ service cloud.firestore {
       return /databases/$(database)/documents/households/$(householdId)/items/$(itemId);
     }
 
+    function itemAttachmentPath(householdId, itemId, attachmentId) {
+      return /databases/$(database)/documents/households/$(householdId)/items/$(itemId)/attachments/$(attachmentId);
+    }
+
     function invitationPath(invitationId) {
       return /databases/$(database)/documents/invitations/$(invitationId);
     }
@@ -153,6 +157,17 @@ service cloud.firestore {
         );
     }
 
+    function validItemPhotoProjection(householdId, itemId, data) {
+      return validPhotoLocations(data)
+        && (
+          data.get('photoAttachmentId', null) == null
+          || (
+            data.photoAttachmentId is string
+            && exists(itemAttachmentPath(householdId, itemId, data.photoAttachmentId))
+          )
+        );
+    }
+
     function isNonRootItemInHousehold(householdId, itemId) {
       return itemId != householdId
         && exists(itemPath(householdId, itemId))
@@ -248,7 +263,9 @@ service cloud.firestore {
         && request.resource.data.householdId == householdId
         && request.resource.data.name == household.name
         && request.resource.data.parentItemId == null
-        && validPhotoLocations(request.resource.data)
+        && request.resource.data.get('photoAttachmentId', null) == null
+        && request.resource.data.get('photoUrl', null) == null
+        && request.resource.data.get('photoThumbnailUrl', null) == null
         && request.resource.data.description == null
         && request.resource.data.get('webUrl', null) == null
         && request.resource.data.tags is list
@@ -276,7 +293,7 @@ service cloud.firestore {
         && validName(request.resource.data.name)
         && request.resource.data.parentItemId is string
         && exists(itemPath(householdId, request.resource.data.parentItemId))
-        && validPhotoLocations(request.resource.data)
+        && validItemPhotoProjection(householdId, itemId, request.resource.data)
         && validDescription(request.resource.data.description)
         && validWebUrl(request.resource.data.get('webUrl', null))
         && validTags(request.resource.data.tags)
@@ -299,7 +316,7 @@ service cloud.firestore {
           'updatedAt', 'updatedById', 'updatedByDisplayName'
         ])
         && validName(request.resource.data.name)
-        && validPhotoLocations(request.resource.data)
+        && validItemPhotoProjection(householdId, itemId, request.resource.data)
         && validDescription(request.resource.data.description)
         && validWebUrl(request.resource.data.get('webUrl', null))
         && validTags(request.resource.data.tags)

@@ -153,6 +153,11 @@ test("a Household Member can transfer an Item Attachment display image in its ne
   ));
   await assertSucceeds(getBytes(ref(memberStorage, attachmentPath)));
   await assertSucceeds(getBytes(ref(memberStorage, thumbnailPath)));
+  await assertFails(uploadBytes(
+    ref(memberStorage, thumbnailPath),
+    new Uint8Array(256 * 1024 + 1),
+    { contentType: "image/webp" },
+  ));
   await assertSucceeds(deleteObject(ref(memberStorage, attachmentPath)));
   await assertSucceeds(deleteObject(ref(memberStorage, thumbnailPath)));
 });

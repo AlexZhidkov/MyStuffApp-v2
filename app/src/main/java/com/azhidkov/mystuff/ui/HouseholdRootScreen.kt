@@ -3,6 +3,9 @@ package com.azhidkov.mystuff.ui
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
@@ -77,6 +80,7 @@ import com.azhidkov.mystuff.Item
 import com.azhidkov.mystuff.ItemAttachmentState
 import com.azhidkov.mystuff.ItemFormStage
 import com.azhidkov.mystuff.ItemFormPolicy
+import com.azhidkov.mystuff.ItemPhoto
 import com.azhidkov.mystuff.R
 import com.azhidkov.mystuff.carouselImages
 import com.azhidkov.mystuff.otherAttachmentCount
@@ -168,6 +172,11 @@ private fun HouseholdRootContent(
 
             ItemFormStage.Crop -> CropPhotoScreen(
                 photo = requireNotNull(itemDraft.photo),
+                processingPurpose = if (itemDraft.editingItemId == null) {
+                    PhotoProcessingPurpose.ItemAttachment
+                } else {
+                    PhotoProcessingPurpose.ItemPhoto
+                },
                 actions = inventoryActions,
             )
 
@@ -693,6 +702,11 @@ private fun ItemFormScreen(
 ) {
     val draft = requireNotNull(state.itemDraft)
     val editing = draft.editingItemId != null
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickMultipleVisualMedia(),
+    ) { uris ->
+        actions.photoPickerSelected(uris.map { ItemPhoto(it.toString()) })
+    }
     val formEnabled = !state.operationInProgress
     val saveDescription = stringResource(
         if (state.operationInProgress) R.string.saving_item else R.string.save_item,
@@ -738,8 +752,8 @@ private fun ItemFormScreen(
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
-            draft.photo?.let { photo ->
-                item {
+            if (draft.photos.isNotEmpty()) {
+                items(draft.photos) { photo ->
                     LocalItemPhoto(
                         photo = photo,
                         modifier = Modifier
@@ -764,23 +778,47 @@ private fun ItemFormScreen(
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(
-                        onClick = actions::beginReplaceItemPhoto,
+                        onClick = if (editing) {
+                            actions::beginReplaceItemPhoto
+                        } else {
+                            actions::addAnotherPhoto
+                        },
                         enabled = formEnabled,
                     ) {
                         Text(
                             stringResource(
-                                if (
-                                    draft.photo != null ||
-                                    storedPhotoItem?.photoUrl != null
-                                ) {
-                                    R.string.replace_photo
-                                } else {
+                                if (editing) {
+                                    if (
+                                        draft.photos.isNotEmpty() ||
+                                        storedPhotoItem?.photoUrl != null
+                                    ) {
+                                        R.string.replace_photo
+                                    } else {
+                                        R.string.add_photo
+                                    }
+                                } else if (draft.photos.isEmpty()) {
                                     R.string.add_photo
+                                } else {
+                                    R.string.add_another_photo
                                 },
                             ),
                         )
                     }
-                    if (draft.photo != null || storedPhotoItem?.photoUrl != null) {
+                    if (!editing) {
+                        TextButton(
+                            onClick = {
+                                photoPickerLauncher.launch(
+                                    PickVisualMediaRequest(
+                                        ActivityResultContracts.PickVisualMedia.ImageOnly,
+                                    ),
+                                )
+                            },
+                            enabled = formEnabled,
+                        ) {
+                            Text(stringResource(R.string.choose_photos))
+                        }
+                    }
+                    if (editing && (draft.photos.isNotEmpty() || storedPhotoItem?.photoUrl != null)) {
                         TextButton(
                             onClick = actions::removeItemPhoto,
                             enabled = formEnabled,

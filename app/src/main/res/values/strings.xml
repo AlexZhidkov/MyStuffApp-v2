@@ -43,6 +43,8 @@
     <string name="remove_tag">Remove</string>
     <string name="existing_household_tags">Existing Household Tags</string>
     <string name="add_photo">Add photo</string>
+    <string name="add_another_photo">Add another</string>
+    <string name="choose_photos">Choose photos</string>
     <string name="replace_photo">Replace photo</string>
     <string name="remove_photo">Remove photo</string>
     <string name="save_item">Save</string>
@@ -53,8 +55,10 @@
     <string name="retake_photo">Retake</string>
     <string name="continue_without_photo">Continue without photo</string>
     <string name="crop_photo">Crop photo</string>
-    <string name="crop_photo_body">Pinch to zoom and drag to choose the square crop.</string>
+    <string name="crop_photo_body">Pinch to zoom and drag to choose an optional crop.</string>
+    <string name="crop_aspect_ratio">Crop aspect ratio</string>
     <string name="use_photo">Use photo</string>
+    <string name="use_original_photo">Use original</string>
     <string name="cropping_photo">Cropping…</string>
     <string name="item_photo">Item photo</string>
     <string name="item_photo_unavailable">Photo unavailable</string>

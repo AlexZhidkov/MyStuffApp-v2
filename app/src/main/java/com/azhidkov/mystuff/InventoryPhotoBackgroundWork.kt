@@ -140,6 +140,10 @@ internal class BackgroundInventoryPhotoStore(
         queueUpload(revision.thumbnailStoragePath, photo.thumbnailUri)
     }
 
+    override fun uploadDisplayInBackground(revision: ItemPhotoRevision, photo: ItemPhoto) {
+        queueUpload(revision.fullStoragePath, photo.uri)
+    }
+
     override fun uploadThumbnailInBackground(revision: ItemPhotoRevision, photo: ItemPhoto) {
         queueUpload(revision.thumbnailStoragePath, photo.thumbnailUri)
     }

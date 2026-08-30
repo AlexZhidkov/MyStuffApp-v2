@@ -27,6 +27,23 @@ interface ItemAttachmentGateway {
         onResult: (Result<ItemAttachment>) -> Unit,
     )
 
+    fun createInOrder(
+        household: Household,
+        item: Item,
+        attachmentId: String,
+        creationOrder: Long,
+        contentType: String,
+        displayUrl: String,
+        onResult: (Result<ItemAttachment>) -> Unit,
+    ) = create(
+        household = household,
+        item = item,
+        attachmentId = attachmentId,
+        contentType = contentType,
+        displayUrl = displayUrl,
+        onResult = onResult,
+    )
+
     fun delete(
         household: Household,
         item: Item,
@@ -52,7 +69,14 @@ class FirebaseItemAttachmentGateway internal constructor(
         return store.observeAttachments(household.id, item.id) { result ->
             onResult(
                 result.mapCatching { documents ->
-                    documents.map { it.toItemAttachment(item.id) }
+                    documents
+                        .map { it.toItemAttachment(item.id) }
+                        .sortedWith(
+                            compareBy(
+                                { it.creationOrder ?: Long.MAX_VALUE },
+                                ItemAttachment::createdAt,
+                            ),
+                        )
                 },
             )
         }
@@ -69,6 +93,46 @@ class FirebaseItemAttachmentGateway internal constructor(
         displayUrl: String,
         onResult: (Result<ItemAttachment>) -> Unit,
     ) {
+        createAttachment(
+            household = household,
+            item = item,
+            attachmentId = attachmentId,
+            creationOrder = null,
+            contentType = contentType,
+            displayUrl = displayUrl,
+            onResult = onResult,
+        )
+    }
+
+    override fun createInOrder(
+        household: Household,
+        item: Item,
+        attachmentId: String,
+        creationOrder: Long,
+        contentType: String,
+        displayUrl: String,
+        onResult: (Result<ItemAttachment>) -> Unit,
+    ) {
+        createAttachment(
+            household = household,
+            item = item,
+            attachmentId = attachmentId,
+            creationOrder = creationOrder,
+            contentType = contentType,
+            displayUrl = displayUrl,
+            onResult = onResult,
+        )
+    }
+
+    private fun createAttachment(
+        household: Household,
+        item: Item,
+        attachmentId: String,
+        creationOrder: Long?,
+        contentType: String,
+        displayUrl: String,
+        onResult: (Result<ItemAttachment>) -> Unit,
+    ) {
         if (item.isRootOf(household)) {
             onResult(Result.failure(invalidAttachmentOwner()))
             return
@@ -81,11 +145,12 @@ class FirebaseItemAttachmentGateway internal constructor(
             householdId = household.id,
             itemId = item.id,
             attachmentId = attachmentId,
-            data = mapOf(
-                CREATED_AT to store.serverTimestamp,
-                CONTENT_TYPE to contentType,
-                DISPLAY_URL to displayUrl,
-            ),
+            data = buildMap {
+                put(CREATED_AT, store.serverTimestamp)
+                creationOrder?.let { put(CREATION_ORDER, it) }
+                put(CONTENT_TYPE, contentType)
+                put(DISPLAY_URL, displayUrl)
+            },
             onResult = { result ->
                 onResult(result.mapCatching { it.toItemAttachment(item.id) })
             },
@@ -117,6 +182,7 @@ internal data class ItemAttachmentDocument(
             createdAt = data.requiredTimestamp(CREATED_AT).toInstant(),
             contentType = data.requiredString(CONTENT_TYPE),
             displayUrl = data.requiredString(DISPLAY_URL),
+            creationOrder = data.optionalLong(CREATION_ORDER),
         )
     }
 }
@@ -245,6 +311,13 @@ private fun Map<String, Any?>.requiredString(key: String): String =
 private fun Map<String, Any?>.requiredTimestamp(key: String): Timestamp =
     this[key] as? Timestamp ?: throw InvalidItemAttachmentException()
 
+private fun Map<String, Any?>.optionalLong(key: String): Long? = when (val value = this[key]) {
+    null -> null
+    is Long -> value
+    is Int -> value.toLong()
+    else -> throw InvalidItemAttachmentException()
+}
+
 private class InvalidItemAttachmentException : IllegalStateException(
     "Item Attachment data is incomplete.",
 )
@@ -253,5 +326,6 @@ private const val HOUSEHOLDS = "households"
 private const val ITEMS = "items"
 private const val ATTACHMENTS = "attachments"
 private const val CREATED_AT = "createdAt"
+private const val CREATION_ORDER = "creationOrder"
 private const val CONTENT_TYPE = "contentType"
 private const val DISPLAY_URL = "displayUrl"

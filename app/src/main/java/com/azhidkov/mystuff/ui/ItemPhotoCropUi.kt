@@ -4,6 +4,7 @@ package com.azhidkov.mystuff.ui
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.ImageDecoder
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTransformGestures
@@ -22,10 +23,12 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -46,6 +49,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
+import androidx.core.net.toUri
 import com.azhidkov.mystuff.InventoryActions
 import com.azhidkov.mystuff.ItemPhoto
 import com.azhidkov.mystuff.R
@@ -59,6 +63,7 @@ import kotlinx.coroutines.withContext
 @Composable
 internal fun CropPhotoScreen(
     photo: ItemPhoto,
+    processingPurpose: PhotoProcessingPurpose = PhotoProcessingPurpose.ItemPhoto,
     actions: InventoryActions,
 ) {
     val context = LocalContext.current
@@ -67,7 +72,19 @@ internal fun CropPhotoScreen(
     var cropSize by remember { mutableStateOf(IntSize.Zero) }
     var zoom by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
+    var cropAspectRatio by remember(bitmap) {
+        mutableFloatStateOf(
+            if (processingPurpose == PhotoProcessingPurpose.ItemAttachment) {
+                bitmap?.let { it.width.toFloat() / it.height }
+                    ?.coerceIn(MIN_CROP_ASPECT_RATIO, MAX_CROP_ASPECT_RATIO)
+                    ?: 1f
+            } else {
+                1f
+            },
+        )
+    }
     var cropping by remember { mutableStateOf(false) }
+    LaunchedEffect(photo) { cropping = false }
 
     Scaffold(
         contentWindowInsets = WindowInsets.safeDrawing,
@@ -97,7 +114,13 @@ internal fun CropPhotoScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .aspectRatio(1f)
+                        .aspectRatio(
+                            if (processingPurpose == PhotoProcessingPurpose.ItemAttachment) {
+                                cropAspectRatio
+                            } else {
+                                1f
+                            },
+                        )
                         .clip(RoundedCornerShape(12.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant)
                         .onSizeChanged { cropSize = it }
@@ -129,12 +152,33 @@ internal fun CropPhotoScreen(
                         contentScale = ContentScale.Crop,
                     )
                 }
+                if (processingPurpose == PhotoProcessingPurpose.ItemAttachment) {
+                    Text(
+                        text = stringResource(R.string.crop_aspect_ratio),
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                    Slider(
+                        value = cropAspectRatio,
+                        onValueChange = {
+                            cropAspectRatio = it
+                            offset = Offset.Zero
+                        },
+                        valueRange = MIN_CROP_ASPECT_RATIO..MAX_CROP_ASPECT_RATIO,
+                    )
+                }
                 Button(
                     onClick = {
                         cropping = true
                         scope.launch {
                             runCatching {
-                                cropAndStorePhoto(context, loadedBitmap, cropSize, zoom, offset)
+                                cropAndStorePhoto(
+                                    context = context,
+                                    bitmap = loadedBitmap,
+                                    size = cropSize,
+                                    zoom = zoom,
+                                    offset = offset,
+                                    purpose = processingPurpose,
+                                )
                             }.onSuccess { photo ->
                                 actions.useCroppedPhoto(photo)
                             }.onFailure {
@@ -155,6 +199,27 @@ internal fun CropPhotoScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
+                    if (processingPurpose == PhotoProcessingPurpose.ItemAttachment) TextButton(
+                        onClick = {
+                            cropping = true
+                            scope.launch {
+                                runCatching {
+                                    processPhotoWithoutCropping(
+                                        context = context,
+                                        source = photo,
+                                        purpose = processingPurpose,
+                                    )
+                                }.onSuccess { processed ->
+                                    actions.usePhotoWithoutCropping(processed)
+                                }.onFailure {
+                                    cropping = false
+                                }
+                            }
+                        },
+                        enabled = !cropping,
+                    ) {
+                        Text(stringResource(R.string.use_original_photo))
+                    }
                     TextButton(onClick = actions::retakePhoto, enabled = !cropping) {
                         Text(stringResource(R.string.retake_photo))
                     }
@@ -209,6 +274,7 @@ private suspend fun cropAndStorePhoto(
     size: IntSize,
     zoom: Float,
     offset: Offset,
+    purpose: PhotoProcessingPurpose,
 ): ItemPhoto = withContext(Dispatchers.IO) {
     require(size != IntSize.Zero)
     val geometry = cropGeometry(bitmap, size, zoom, offset)
@@ -223,22 +289,49 @@ private suspend fun cropAndStorePhoto(
     val sourceHeight = (size.height / geometry.displayedScale).roundToInt()
         .coerceIn(1, bitmap.height - sourceY)
     val cropped = Bitmap.createBitmap(bitmap, sourceX, sourceY, sourceWidth, sourceHeight)
-    val files = ItemPhotoProcessor.writeVariants(
-        crop = cropped,
-        directory = File(context.filesDir, "item-photos"),
-    )
-    ItemPhoto(
-        uri = FileProvider.getUriForFile(
-            context,
-            "${context.packageName}.files",
-            files.full,
-        ).toString(),
-        thumbnailUri = FileProvider.getUriForFile(
-            context,
-            "${context.packageName}.files",
-            files.thumbnail,
-        ).toString(),
-    )
+    val files = try {
+        ItemPhotoProcessor.writeVariants(
+            crop = cropped,
+            directory = File(context.filesDir, "item-photos"),
+            purpose = purpose,
+        )
+    } finally {
+        cropped.recycle()
+    }
+    itemPhotoFromFiles(context, files)
+}
+
+private fun itemPhotoFromFiles(context: Context, files: ItemPhotoFiles): ItemPhoto = ItemPhoto(
+    uri = FileProvider.getUriForFile(
+        context,
+        "${context.packageName}.files",
+        files.full,
+    ).toString(),
+    thumbnailUri = FileProvider.getUriForFile(
+        context,
+        "${context.packageName}.files",
+        files.thumbnail,
+    ).toString(),
+)
+
+private suspend fun processPhotoWithoutCropping(
+    context: Context,
+    source: ItemPhoto,
+    purpose: PhotoProcessingPurpose,
+): ItemPhoto = withContext(Dispatchers.IO) {
+    val bitmap = ImageDecoder.decodeBitmap(
+        ImageDecoder.createSource(context.contentResolver, source.uri.toUri()),
+    ) { decoder, _, _ -> decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE }
+    val files = try {
+        ItemPhotoProcessor.writeVariants(
+            crop = bitmap,
+            directory = File(context.filesDir, "item-photos"),
+            purpose = purpose,
+        )
+    } finally {
+        bitmap.recycle()
+    }
+    itemPhotoFromFiles(context, files)
 }
 
 private data class CropGeometry(
@@ -247,3 +340,6 @@ private data class CropGeometry(
     val top: Float,
     val offsetBounds: Offset,
 )
+
+private const val MIN_CROP_ASPECT_RATIO = 0.1f
+private const val MAX_CROP_ASPECT_RATIO = 10f

@@ -39,6 +39,60 @@ class FirebaseInventoryGatewayTest {
     }
 
     @Test
+    fun `creating an Item with multiple photos creates ordered attachments and uploads displays`() {
+        val documents = FakeInventoryDocumentStore()
+        val photos = FakeInventoryPhotoStore()
+        val attachments = FakeItemPhotoAttachmentGateway()
+        val gateway = FirebaseInventoryGateway(documents, photos, attachments)
+        var result: Result<Item>? = null
+
+        gateway.createItem(
+            householdId = "household-1",
+            parentItemId = "garage",
+            creator = inventoryIdentity(),
+            details = inventoryDetails(),
+            photos = listOf(
+                ItemPhoto("content://first.webp", "content://first-thumb.webp"),
+                ItemPhoto("content://second.webp", "content://second-thumb.webp"),
+                ItemPhoto("content://third.webp", "content://third-thumb.webp"),
+            ),
+        ) { result = it }
+
+        val item = result?.getOrThrow()
+        assertEquals(
+            listOf("attachment-1", "attachment-2", "attachment-3"),
+            attachments.createdIds,
+        )
+        assertEquals("attachment-1", item?.photoAttachmentId)
+        assertEquals(item?.photoUrl, documents.updatedData?.get("photoUrl"))
+        assertEquals(
+            listOf(
+                QueuedPhotoUpload(
+                    ItemPhotoVariant.Full,
+                    "content://first.webp",
+                    "households/household-1/items/item-1/attachments/attachment-1.webp",
+                ),
+                QueuedPhotoUpload(
+                    ItemPhotoVariant.Thumbnail,
+                    "content://first-thumb.webp",
+                    "households/household-1/items/item-1/attachments/attachment-1-thumb.webp",
+                ),
+                QueuedPhotoUpload(
+                    ItemPhotoVariant.Full,
+                    "content://second.webp",
+                    "households/household-1/items/item-1/attachments/attachment-2.webp",
+                ),
+                QueuedPhotoUpload(
+                    ItemPhotoVariant.Full,
+                    "content://third.webp",
+                    "households/household-1/items/item-1/attachments/attachment-3.webp",
+                ),
+            ),
+            photos.uploads,
+        )
+    }
+
+    @Test
     fun `replacing an attachment-backed Item Photo creates a new attachment and removes the old logical attachment`() {
         val documents = FakeInventoryDocumentStore()
         val photos = FakeInventoryPhotoStore()
@@ -491,6 +545,18 @@ private class FakeInventoryPhotoStore(
         )
     }
 
+    override fun uploadDisplayInBackground(
+        revision: ItemPhotoRevision,
+        photo: ItemPhoto,
+    ) {
+        enqueueFailure?.let { throw it }
+        uploads += QueuedPhotoUpload(
+            ItemPhotoVariant.Full,
+            photo.uri,
+            revision.fullStoragePath,
+        )
+    }
+
     override fun uploadThumbnailInBackground(
         revision: ItemPhotoRevision,
         photo: ItemPhoto,
@@ -613,7 +679,9 @@ private class FakeItemPhotoAttachmentGateway : ItemAttachmentGateway {
         private set
     var createdDisplayUrl: String? = null
         private set
+    val createdIds = mutableListOf<String>()
     val deletedAttachmentIds = mutableListOf<String>()
+    private var nextId = 1
 
     override fun observe(
         household: Household,
@@ -621,7 +689,8 @@ private class FakeItemPhotoAttachmentGateway : ItemAttachmentGateway {
         onResult: (Result<List<ItemAttachment>>) -> Unit,
     ): InventorySubscription = InventorySubscription {}
 
-    override fun newAttachmentId(householdId: String, itemId: String): String = "attachment-1"
+    override fun newAttachmentId(householdId: String, itemId: String): String =
+        "attachment-${nextId++}"
 
     override fun create(
         household: Household,
@@ -632,6 +701,7 @@ private class FakeItemPhotoAttachmentGateway : ItemAttachmentGateway {
         onResult: (Result<ItemAttachment>) -> Unit,
     ) {
         createdDisplayUrl = displayUrl
+        createdIds += attachmentId
         createdAttachment = ItemAttachment(
             id = attachmentId,
             itemId = item.id,

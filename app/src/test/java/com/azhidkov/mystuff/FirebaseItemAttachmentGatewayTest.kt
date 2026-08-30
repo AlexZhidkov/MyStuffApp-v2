@@ -54,8 +54,8 @@ class FirebaseItemAttachmentGatewayTest {
 
     @Test
     fun `observing an Item returns attachments in creation order`() {
-        val first = attachmentDocument("attachment-1", 1)
-        val second = attachmentDocument("attachment-2", 2)
+        val first = attachmentDocument("attachment-1", 1, creationOrder = 0)
+        val second = attachmentDocument("attachment-2", 1, creationOrder = 1)
         val store = FakeItemAttachmentDocumentStore(
             documents = listOf(second, first),
         )
@@ -69,6 +69,25 @@ class FirebaseItemAttachmentGatewayTest {
             result?.getOrThrow()?.map(ItemAttachment::id),
         )
         assertEquals("item-1", store.observedItemId)
+    }
+
+    @Test
+    fun `creating an ordered Item Attachment persists its immutable creation order`() {
+        val store = FakeItemAttachmentDocumentStore(
+            createdDocument = attachmentDocument("attachment-1", 1, creationOrder = 4),
+        )
+        val gateway = FirebaseItemAttachmentGateway(store)
+
+        gateway.createInOrder(
+            household = attachmentHousehold(),
+            item = attachmentItem(),
+            attachmentId = "attachment-1",
+            creationOrder = 4,
+            contentType = "image/webp",
+            displayUrl = "gs://mystuff/attachment.webp",
+        ) { it.getOrThrow() }
+
+        assertEquals(4L, store.createdData?.get("creationOrder"))
     }
 
     @Test
@@ -147,13 +166,18 @@ private class FakeItemAttachmentDocumentStore(
     ) = onResult(Result.success(Unit))
 }
 
-private fun attachmentDocument(id: String, seconds: Long) = ItemAttachmentDocument(
+private fun attachmentDocument(
+    id: String,
+    seconds: Long,
+    creationOrder: Long? = null,
+) = ItemAttachmentDocument(
     id = id,
-    data = mapOf(
-        "createdAt" to Timestamp(seconds, 0),
-        "contentType" to "image/webp",
-        "displayUrl" to "gs://mystuff/$id.webp",
-    ),
+    data = buildMap {
+        put("createdAt", Timestamp(seconds, 0))
+        creationOrder?.let { put("creationOrder", it) }
+        put("contentType", "image/webp")
+        put("displayUrl", "gs://mystuff/$id.webp")
+    },
 )
 
 private fun attachmentHousehold() = Household(

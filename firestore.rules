@@ -181,9 +181,13 @@ service cloud.firestore {
       return isMember(householdId)
         && isNonRootItemInHousehold(householdId, itemId)
         && request.resource.data.keys().hasOnly([
-          'createdAt', 'contentType', 'displayUrl'
+          'createdAt', 'creationOrder', 'contentType', 'displayUrl'
         ])
         && request.resource.data.createdAt == request.time
+        && (
+          request.resource.data.get('creationOrder', null) == null
+          || request.resource.data.creationOrder is int
+        )
         && request.resource.data.contentType == 'image/webp'
         && request.resource.data.displayUrl is string
         && request.resource.data.displayUrl.matches('^.+$');

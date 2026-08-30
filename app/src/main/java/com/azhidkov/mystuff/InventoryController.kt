@@ -21,6 +21,24 @@ interface InventoryGateway {
         onResult: (Result<Item>) -> Unit,
     )
 
+    fun createItem(
+        householdId: String,
+        parentItemId: String,
+        creator: AuthenticatedIdentity,
+        details: ItemDetails,
+        photos: List<ItemPhoto>,
+        onResult: (Result<Item>) -> Unit,
+    ) {
+        createItem(
+            householdId = householdId,
+            parentItemId = parentItemId,
+            creator = creator,
+            details = details,
+            photo = photos.firstOrNull(),
+            onResult = onResult,
+        )
+    }
+
     fun updateItem(
         householdId: String,
         item: Item,
@@ -65,9 +83,12 @@ interface InventoryActions {
     fun resolveCameraPermission(granted: Boolean)
     fun photoCaptureFailed()
     fun photoCaptured(photo: ItemPhoto)
+    fun photoPickerSelected(photos: List<ItemPhoto>) = Unit
     fun retakePhoto()
     fun useCroppedPhoto(photo: ItemPhoto)
+    fun usePhotoWithoutCropping(photo: ItemPhoto) = Unit
     fun continueWithoutPhoto()
+    fun addAnotherPhoto() = Unit
     fun closeItemForm()
     fun changeItemName(name: String)
     fun changeItemDescription(description: String)
@@ -117,6 +138,8 @@ data class ItemFormState(
     val parentItemId: String,
     val stage: ItemFormStage = ItemFormStage.CameraPermission,
     val photo: ItemPhoto? = null,
+    val photos: List<ItemPhoto> = emptyList(),
+    val pendingPhotoUris: List<String> = emptyList(),
     val description: String = "",
     val webUrl: String = "",
     val tags: List<String> = emptyList(),
@@ -145,6 +168,7 @@ data class InventoryUiState(
     val canGenerateDescription: Boolean
         get() {
             val draft = itemDraft ?: return false
+            if (draft.photos.size > 1) return false
             if (draft.photoRemoved) return false
             if (draft.photo != null) return true
             val editingItemId = draft.editingItemId ?: return false
@@ -445,6 +469,8 @@ class InventoryController internal constructor(
                 itemDraft = draft.copy(
                     stage = ItemFormStage.CameraPermission,
                     photo = null,
+                    photos = emptyList(),
+                    pendingPhotoUris = emptyList(),
                 ),
                 errorMessage = null,
             ),
@@ -491,6 +517,22 @@ class InventoryController internal constructor(
         }
     }
 
+    override fun photoPickerSelected(photos: List<ItemPhoto>) {
+        val draft = state.itemDraft ?: return
+        if (draft.stage != ItemFormStage.Details || state.operationInProgress) return
+        val first = photos.firstOrNull() ?: return
+        updateState(
+            state.copy(
+                itemDraft = draft.copy(
+                    stage = ItemFormStage.Crop,
+                    photo = first,
+                    pendingPhotoUris = photos.drop(1).map(ItemPhoto::uri),
+                ),
+                errorMessage = null,
+            ),
+        )
+    }
+
     override fun retakePhoto() {
         transitionItemFormState(ItemFormStage.Crop) {
             it.copy(stage = ItemFormStage.Camera, photo = null)
@@ -499,18 +541,35 @@ class InventoryController internal constructor(
 
     override fun useCroppedPhoto(photo: ItemPhoto) {
         transitionItemFormState(ItemFormStage.Crop) {
-            it.copy(stage = ItemFormStage.Details, photo = photo, photoRemoved = false)
+            it.acceptPhoto(photo)
+        }
+    }
+
+    override fun usePhotoWithoutCropping(photo: ItemPhoto) {
+        transitionItemFormState(ItemFormStage.Crop) {
+            it.acceptPhoto(photo)
         }
     }
 
     override fun continueWithoutPhoto() {
         transitionItemFormState(ItemFormStage.Crop) {
-            it.copy(
-                stage = ItemFormStage.Details,
-                photo = null,
-                photoRemoved = it.editingItemId != null,
-            )
+            it.advancePhotoSelection(accepted = null)
         }
+    }
+
+    override fun addAnotherPhoto() {
+        val draft = state.itemDraft ?: return
+        if (draft.stage != ItemFormStage.Details || state.operationInProgress) return
+        updateState(
+            state.copy(
+                itemDraft = draft.copy(
+                    stage = ItemFormStage.CameraPermission,
+                    photo = null,
+                    pendingPhotoUris = emptyList(),
+                ),
+                errorMessage = null,
+            ),
+        )
     }
 
     override fun closeItemForm() {
@@ -620,7 +679,7 @@ class InventoryController internal constructor(
                 parentItemId = draft.parentItemId,
                 creator = identity,
                 details = details,
-                photo = draft.photo,
+                photos = draft.photos,
                 onResult = onResult,
             )
         } else {
@@ -858,6 +917,35 @@ class InventoryController internal constructor(
         val draft = state.itemDraft ?: return
         if (draft.stage != expectedStage) return
         updateState(state.copy(itemDraft = transition(draft)))
+    }
+
+    private fun ItemFormState.acceptPhoto(photo: ItemPhoto): ItemFormState =
+        advancePhotoSelection(accepted = photo)
+
+    private fun ItemFormState.advancePhotoSelection(accepted: ItemPhoto?): ItemFormState {
+        val acceptedPhotos = accepted?.let { photos + it } ?: photos
+        val nextUri = pendingPhotoUris.firstOrNull()
+        return if (nextUri != null) {
+            copy(
+                stage = ItemFormStage.Crop,
+                photo = ItemPhoto(nextUri),
+                photos = acceptedPhotos,
+                pendingPhotoUris = pendingPhotoUris.drop(1),
+                photoRemoved = false,
+            )
+        } else {
+            copy(
+                stage = ItemFormStage.Details,
+                photo = acceptedPhotos.firstOrNull(),
+                photos = acceptedPhotos,
+                pendingPhotoUris = emptyList(),
+                photoRemoved = if (acceptedPhotos.isEmpty()) {
+                    editingItemId != null
+                } else {
+                    false
+                },
+            )
+        }
     }
 
 }

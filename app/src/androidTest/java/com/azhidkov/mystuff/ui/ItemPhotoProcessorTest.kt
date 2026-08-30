@@ -29,6 +29,25 @@ class ItemPhotoProcessorTest {
         assertFalse(directory.listFiles().orEmpty().any { it.extension == "jpg" })
     }
 
+    @Test
+    fun attachmentDisplayImageUses2048LongestEdgeAndStaysWithinUploadLimit() {
+        val directory = File(
+            ApplicationProvider.getApplicationContext<android.content.Context>().cacheDir,
+            "item-photo-processor-attachment-test",
+        ).apply { mkdirs() }
+        directory.listFiles().orEmpty().forEach(File::delete)
+        val crop = Bitmap.createBitmap(4_000, 2_000, Bitmap.Config.ARGB_8888)
+
+        val files = ItemPhotoProcessor.writeVariants(
+            crop = crop,
+            directory = directory,
+            purpose = PhotoProcessingPurpose.ItemAttachment,
+        )
+
+        assertWebP(files.full, expectedWidth = 2_048, expectedHeight = 1_024)
+        assertTrue(files.full.length() <= 2L * 1024 * 1024)
+    }
+
     private fun assertWebP(file: File, expectedWidth: Int, expectedHeight: Int) {
         val header = file.readBytes().take(12).toByteArray().decodeToString()
         assertTrue(header.startsWith("RIFF"))

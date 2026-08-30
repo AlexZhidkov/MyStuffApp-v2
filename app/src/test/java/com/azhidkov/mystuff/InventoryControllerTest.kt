@@ -449,6 +449,41 @@ class InventoryControllerTest {
     }
 
     @Test
+    fun `photo picker selections are accepted in order and saved as multiple photos`() {
+        val gateway = FakeInventoryGateway(inventory())
+        val controller = InventoryController(household(), identity(), gateway)
+        val firstSource = ItemPhoto("content://picker/first.jpg")
+        val secondSource = ItemPhoto("content://picker/second.jpg")
+
+        controller.beginAddItem()
+        controller.resolveCameraPermission(granted = false)
+        controller.photoPickerSelected(listOf(firstSource, secondSource))
+
+        assertEquals(ItemFormStage.Crop, controller.state.itemFormStage)
+        assertEquals(firstSource, controller.state.itemDraft?.photo)
+
+        val firstAccepted = ItemPhoto("content://processed/first.webp")
+        val secondAccepted = ItemPhoto("content://processed/second.webp")
+        controller.usePhotoWithoutCropping(firstAccepted)
+
+        assertEquals(ItemFormStage.Crop, controller.state.itemFormStage)
+        assertEquals(listOf(firstAccepted), controller.state.itemDraft?.photos)
+        assertEquals(secondSource, controller.state.itemDraft?.photo)
+
+        controller.useCroppedPhoto(secondAccepted)
+
+        assertEquals(ItemFormStage.Details, controller.state.itemFormStage)
+        assertEquals(
+            listOf(firstAccepted, secondAccepted),
+            controller.state.itemDraft?.photos,
+        )
+        controller.changeItemName("Receipts")
+        controller.saveItem()
+
+        assertEquals(listOf(firstAccepted, secondAccepted), gateway.createdPhotos)
+    }
+
+    @Test
     fun `saved Item keeps its cropped photo`() {
         val gateway = FakeInventoryGateway(inventory())
         val controller = InventoryController(household(), identity(), gateway)
@@ -1356,6 +1391,8 @@ private class FakeInventoryGateway(
         private set
     var createdPhoto: ItemPhoto? = null
         private set
+    var createdPhotos: List<ItemPhoto> = emptyList()
+        private set
     var createdDetails: ItemDetails? = null
         private set
     var nextUpdateFailure: Throwable? = null
@@ -1383,18 +1420,37 @@ private class FakeInventoryGateway(
         photo: ItemPhoto?,
         onResult: (Result<Item>) -> Unit,
     ) {
+        createItem(
+            householdId = householdId,
+            parentItemId = parentItemId,
+            creator = creator,
+            details = details,
+            photos = listOfNotNull(photo),
+            onResult = onResult,
+        )
+    }
+
+    override fun createItem(
+        householdId: String,
+        parentItemId: String,
+        creator: AuthenticatedIdentity,
+        details: ItemDetails,
+        photos: List<ItemPhoto>,
+        onResult: (Result<Item>) -> Unit,
+    ) {
         createdParentItemId = parentItemId
         createdName = details.name
         createdDetails = details
-        createdPhoto = photo
+        createdPhotos = photos
+        createdPhoto = photos.firstOrNull()
         val created = item(
             id = newItemId(householdId),
             name = details.name,
             parentItemId = parentItemId,
-            photoUrl = photo?.let {
+            photoUrl = photos.firstOrNull()?.let {
                 "gs://mystuff/households/household-1/items/item-1.webp"
             },
-            photoThumbnailUrl = photo?.let {
+            photoThumbnailUrl = photos.firstOrNull()?.let {
                 "gs://mystuff/households/household-1/items/item-1-thumb.webp"
             },
             description = details.description,

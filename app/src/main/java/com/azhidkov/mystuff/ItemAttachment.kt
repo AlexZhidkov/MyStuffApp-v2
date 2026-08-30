@@ -15,6 +15,7 @@ data class ItemAttachment(
     val createdAt: Instant,
     val contentType: String,
     val displayUrl: String,
+    val creationOrder: Long? = null,
 )
 
 internal object NoItemAttachmentGateway : ItemAttachmentGateway {
@@ -55,7 +56,7 @@ fun Item.carouselImages(attachments: List<ItemAttachment>): List<CarouselImage> 
     attachments
         .asSequence()
         .filterNot { it.id == photoAttachmentId }
-        .sortedBy(ItemAttachment::createdAt)
+        .sortedWith(compareBy({ it.creationOrder ?: Long.MAX_VALUE }, ItemAttachment::createdAt))
         .map(CarouselImage::Attachment)
         .forEach(::add)
 }

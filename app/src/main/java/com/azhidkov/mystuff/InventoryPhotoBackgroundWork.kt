@@ -151,21 +151,32 @@ internal sealed interface PhotoTransferTask {
         val sourceUri: String,
         val additionalUploads: List<UploadPart> = emptyList(),
         override val uploadFailure: AttachmentUploadFailure? = null,
+        val cleanUpSourceUris: List<String> = emptyList(),
     ) : PhotoTransferTask {
         override val operationName = UPLOAD_OPERATION
 
         override fun execute(remoteStore: PhotoRemoteStore): Result<Unit> = runCatching {
             remoteStore.upload(storagePath, sourceUri).getOrThrow()
-            additionalUploads.forEach { upload ->
-                remoteStore.upload(upload.storagePath, upload.sourceUri).getOrThrow()
-            }
         }
 
         override fun cleanUpLocalSource(context: Context) {
-            (listOf(sourceUri) + additionalUploads.map(UploadPart::sourceUri)).forEach { uri ->
+            sourceUrisToClean.forEach { uri ->
                 runCatching { context.contentResolver.delete(uri.toUri(), null, null) }
             }
         }
+
+        fun followUpUploads(): List<Upload> = additionalUploads.map { upload ->
+            Upload(
+                storagePath = upload.storagePath,
+                sourceUri = upload.sourceUri,
+                uploadFailure = uploadFailure,
+                cleanUpSourceUris = sourceUrisToClean,
+            )
+        }
+
+        private val sourceUrisToClean: List<String>
+            get() = cleanUpSourceUris.takeIf { it.isNotEmpty() }
+                ?: (listOf(sourceUri) + additionalUploads.map(UploadPart::sourceUri))
     }
 
     data class UploadPart(
@@ -214,6 +225,12 @@ internal sealed interface PhotoTransferTask {
                 additionalUploads.map(UploadPart::sourceUri).toTypedArray(),
             )
         }
+        if (this is Upload && cleanUpSourceUris.isNotEmpty()) {
+            builder.putStringArray(
+                CLEAN_UP_SOURCE_URIS_KEY,
+                cleanUpSourceUris.toTypedArray(),
+            )
+        }
         uploadFailure?.let { failure ->
             builder
                 .putString(FAILURE_ID_KEY, failure.id)
@@ -258,6 +275,9 @@ internal sealed interface PhotoTransferTask {
                                 ),
                             )
                         },
+                        cleanUpSourceUris = data.getStringArray(CLEAN_UP_SOURCE_URIS_KEY)
+                            ?.toList()
+                            .orEmpty(),
                     )
                 }
                 DELETE_OPERATION -> Delete(storagePath)
@@ -274,6 +294,9 @@ internal sealed interface PhotoTransferTask {
 internal interface PhotoTransferQueue {
     fun replace(task: PhotoTransferTask)
 }
+
+internal fun photoTransferWorkName(storagePath: String): String =
+    "inventory-photo:$storagePath"
 
 internal class BackgroundInventoryPhotoStore(
     bucketUrl: String,
@@ -326,6 +349,11 @@ internal class BackgroundInventoryPhotoStore(
             thumbnailStoragePath = thumbnailStoragePath,
         )
     }
+
+    override fun displayUploadWorkName(location: String): String? =
+        location.removePrefix("$bucketUrl/")
+            .takeIf { it != location }
+            ?.let(::photoTransferWorkName)
 
     override fun uploadInBackground(
         revision: ItemPhotoRevision,
@@ -415,7 +443,7 @@ internal class WorkManagerPhotoTransferQueue(context: Context) : PhotoTransferQu
             )
             .build()
         workManager.enqueueUniqueWork(
-            "inventory-photo:${task.storagePath}",
+            photoTransferWorkName(task.storagePath),
             ExistingWorkPolicy.REPLACE,
             request,
         )
@@ -462,13 +490,28 @@ internal class InventoryPhotoTransferWorker(
 ) : Worker(appContext, workerParameters) {
     override fun doWork(): Result {
         val task = PhotoTransferTask.fromWorkData(inputData) ?: return Result.failure()
+        val remoteStore = FirebasePhotoRemoteStore()
         val result = PhotoTransferRunner(
-            remoteStore = FirebasePhotoRemoteStore(),
+            remoteStore = remoteStore,
             failureHandler = FirebaseAttachmentUploadFailureHandler(),
         ).run(task)
         if (result == PhotoTransferResult.Success) {
-            task.uploadFailure?.let { processAttachmentUploadFailures.complete(it.id) }
-            task.cleanUpLocalSource(applicationContext)
+            if (task is PhotoTransferTask.Upload && task.additionalUploads.isNotEmpty()) {
+                runCatching {
+                    val queue = WorkManagerPhotoTransferQueue(applicationContext)
+                    task.followUpUploads().forEach(queue::replace)
+                }.onFailure { failure ->
+                    task.uploadFailure?.let { uploadFailure ->
+                        runCatching {
+                            FirebaseAttachmentUploadFailureHandler().handle(uploadFailure, remoteStore)
+                        }
+                        processAttachmentUploadFailures.markFailed(uploadFailure, failure)
+                    }
+                }
+            } else {
+                task.uploadFailure?.let { processAttachmentUploadFailures.complete(it.id) }
+                task.cleanUpLocalSource(applicationContext)
+            }
         } else {
             task.uploadFailure?.let { failure ->
                 processAttachmentUploadFailures.markFailed(failure, null)
@@ -476,7 +519,11 @@ internal class InventoryPhotoTransferWorker(
         }
         return when (result) {
             PhotoTransferResult.Success -> Result.success()
-            PhotoTransferResult.Failure -> Result.failure()
+            PhotoTransferResult.Failure -> {
+                // Keep dependent Description Generation work runnable so it can report its
+                // stage-specific photo failure after the attachment cleanup has completed.
+                Result.success()
+            }
         }
     }
 }
@@ -603,6 +650,7 @@ private const val SOURCE_URI_KEY = "source-uri"
 private const val SOURCE_LOCATION_KEY = "source-location"
 private const val ADDITIONAL_STORAGE_PATHS_KEY = "additional-storage-paths"
 private const val ADDITIONAL_SOURCE_URIS_KEY = "additional-source-uris"
+private const val CLEAN_UP_SOURCE_URIS_KEY = "clean-up-source-uris"
 private const val FAILURE_ID_KEY = "failure-id"
 private const val FAILURE_HOUSEHOLD_ID_KEY = "failure-household-id"
 private const val FAILURE_ITEM_ID_KEY = "failure-item-id"

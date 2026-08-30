@@ -9,6 +9,7 @@ import androidx.core.net.toUri
 import androidx.lifecycle.Observer
 import androidx.work.Constraints
 import androidx.work.Data
+import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
@@ -364,7 +365,8 @@ internal class WorkManagerInventoryDescriptionGenerationWork(
     private val mainHandler = Handler(Looper.getMainLooper())
     private val workManager = WorkManager.getInstance(context)
     private val workStore = DescriptionGenerationWorkStore(context.noBackupFilesDir)
-    private val requestCapture = DescriptionGenerationRequestCapture(firebaseInventoryPhotoStore())
+    private val photoStore = firebaseInventoryPhotoStore()
+    private val requestCapture = DescriptionGenerationRequestCapture(photoStore)
     private val observers = mutableSetOf<(DescriptionGenerationWorkState) -> Unit>()
     private val workInfoObserver = Observer<List<WorkInfo>> { emitState() }
     private val completedOutcomeObserver = object : FileObserver(
@@ -406,7 +408,20 @@ internal class WorkManagerInventoryDescriptionGenerationWork(
                 )
                 .addTag(DESCRIPTION_GENERATION_WORK_TAG)
                 .build()
-            workManager.enqueue(work)
+            val displayUploadWorkName = if (capturedRequest.replacementPhoto == null) {
+                capturedRequest.item.photoUrl?.let(photoStore::displayUploadWorkName)
+            } else {
+                null
+            }
+            if (displayUploadWorkName == null) {
+                workManager.enqueue(work)
+            } else {
+                workManager.beginUniqueWork(
+                    displayUploadWorkName,
+                    ExistingWorkPolicy.APPEND_OR_REPLACE,
+                    work,
+                ).enqueue()
+            }
         } catch (failure: RuntimeException) {
             workStore.discardPending(id)
             throw failure
@@ -496,16 +511,36 @@ private class FirebaseDescriptionGenerationItemStore(
         }
         val updatedData = mapOf(
             ITEM_NAME_FIELD to draftItem.name,
-            ITEM_PHOTO_ATTACHMENT_ID_FIELD to draftItem.photoAttachmentId,
-            ITEM_PHOTO_URL_FIELD to draftItem.photoUrl,
-            ITEM_PHOTO_THUMBNAIL_URL_FIELD to draftItem.photoThumbnailUrl,
             ITEM_DESCRIPTION_FIELD to draftItem.description,
             ITEM_TAGS_FIELD to draftItem.tags,
             ITEM_WEB_URL_FIELD to draftItem.webUrl,
             ITEM_UPDATED_AT_FIELD to FieldValue.serverTimestamp(),
             ITEM_UPDATED_BY_ID_FIELD to request.requestingMember.id,
             ITEM_UPDATED_BY_DISPLAY_NAME_FIELD to request.requestingMember.displayName,
-        )
+        ) + if (request.replacementPhoto == null && request.item.photoAttachmentId != null) {
+            val attachmentExists = Tasks.await(
+                attachmentDocument(
+                    request.householdId,
+                    item.id,
+                    request.item.photoAttachmentId,
+                ).get(),
+            ).exists()
+            if (attachmentExists) {
+                mapOf(
+                    ITEM_PHOTO_ATTACHMENT_ID_FIELD to draftItem.photoAttachmentId,
+                    ITEM_PHOTO_URL_FIELD to draftItem.photoUrl,
+                    ITEM_PHOTO_THUMBNAIL_URL_FIELD to draftItem.photoThumbnailUrl,
+                )
+            } else {
+                emptyMap()
+            }
+        } else {
+            mapOf(
+                ITEM_PHOTO_ATTACHMENT_ID_FIELD to draftItem.photoAttachmentId,
+                ITEM_PHOTO_URL_FIELD to draftItem.photoUrl,
+                ITEM_PHOTO_THUMBNAIL_URL_FIELD to draftItem.photoThumbnailUrl,
+            )
+        }
         val document = itemDocument(request.householdId, item.id)
         val save = when (request.saveMode) {
             DescriptionGenerationSaveMode.Create -> document.set(

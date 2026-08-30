@@ -1105,6 +1105,9 @@ private data class AttachmentPhotoPlan(
 internal interface InventoryPhotoStore {
     fun newRevision(householdId: String, itemId: String): ItemPhotoRevision
 
+    /** Returns the unique display-upload work for a stored location, when this store can track it. */
+    fun displayUploadWorkName(location: String): String? = null
+
     fun newAttachmentId(householdId: String, itemId: String): String = UUID.randomUUID().toString()
 
     fun newAttachmentRevision(

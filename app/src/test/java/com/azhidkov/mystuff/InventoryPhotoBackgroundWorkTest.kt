@@ -29,6 +29,24 @@ class InventoryPhotoBackgroundWorkTest {
     }
 
     @Test
+    fun `stored photo locations identify their exact display upload work`() {
+        val store = BackgroundInventoryPhotoStore(
+            bucketUrl = "gs://mystuff",
+            queue = RecordingPhotoTransferQueue(),
+        )
+        val revision = store.newAttachmentRevision("household-1", "item-1", "attachment-1")
+
+        assertEquals(
+            "inventory-photo:${revision.fullStoragePath}",
+            store.displayUploadWorkName(revision.locations.full),
+        )
+        assertEquals(
+            null,
+            store.displayUploadWorkName("gs://another-bucket/${revision.fullStoragePath}"),
+        )
+    }
+
+    @Test
     fun `new photo revisions use distinct random UUIDs`() {
         val store = BackgroundInventoryPhotoStore(
             bucketUrl = "gs://mystuff",
@@ -81,6 +99,37 @@ class InventoryPhotoBackgroundWorkTest {
         assertEquals(PhotoTransferResult.Failure, fullResult)
         assertEquals(PhotoTransferResult.Success, thumbnailResult)
         assertEquals(1, remote.attempts[fullPath])
+        assertEquals(1, remote.attempts[thumbnailPath])
+    }
+
+    @Test
+    fun `display upload completes before its thumbnail follow-up`() {
+        val fullPath = "households/household-1/items/item-1/attachments/attachment-1.webp"
+        val thumbnailPath =
+            "households/household-1/items/item-1/attachments/attachment-1-thumb.webp"
+        val remote = FakePhotoRemoteStore(
+            outcomes = mutableMapOf(
+                fullPath to mutableListOf(Result.success(Unit)),
+                thumbnailPath to mutableListOf(Result.success(Unit)),
+            ),
+        )
+        val task = PhotoTransferTask.Upload(
+            storagePath = fullPath,
+            sourceUri = "content://mystuff/full.webp",
+            additionalUploads = listOf(
+                PhotoTransferTask.UploadPart(thumbnailPath, "content://mystuff/thumb.webp"),
+            ),
+        )
+        val runner = PhotoTransferRunner(remote)
+
+        assertEquals(PhotoTransferResult.Success, runner.run(task))
+        assertEquals(1, remote.attempts[fullPath])
+        assertEquals(null, remote.attempts[thumbnailPath])
+
+        assertEquals(
+            PhotoTransferResult.Success,
+            runner.run(task.followUpUploads().single()),
+        )
         assertEquals(1, remote.attempts[thumbnailPath])
     }
 

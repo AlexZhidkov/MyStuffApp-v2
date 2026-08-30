@@ -141,6 +141,10 @@ internal class AttachmentDisplayPhotoCache<T>(
     private val decode: suspend (ByteArray) -> T,
     private val writeTemporaryFile: (File, ByteArray) -> Unit = File::writeBytes,
 ) {
+    fun remove(location: String) {
+        directory.resolve(attachmentDisplayCacheFileName(location)).delete()
+    }
+
     suspend fun load(location: String): T = withContext(Dispatchers.IO) {
         val cacheFile = directory.resolve(attachmentDisplayCacheFileName(location))
         val cached = readCached(cacheFile)

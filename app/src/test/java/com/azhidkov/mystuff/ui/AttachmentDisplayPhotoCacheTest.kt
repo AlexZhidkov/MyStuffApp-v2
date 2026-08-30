@@ -31,6 +31,25 @@ class AttachmentDisplayPhotoCacheTest {
             directory.deleteRecursively()
         }
     }
+
+    @Test
+    fun `deleting a display image removes its cached bytes`() = runBlocking {
+        val directory = Files.createTempDirectory("attachment-display-cache").toFile()
+        try {
+            val cache = AttachmentDisplayPhotoCache(
+                directory = directory,
+                download = { byteArrayOf(1, 2, 3) },
+                decode = { it.size },
+            )
+
+            cache.load(DISPLAY_LOCATION)
+            cache.remove(DISPLAY_LOCATION)
+
+            assertTrue(!directory.resolve(attachmentDisplayCacheFileName(DISPLAY_LOCATION)).exists())
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
 }
 
 private const val DISPLAY_LOCATION = "gs://mystuff/households/household-1/items/item-1/attachments/attachment-1.webp"

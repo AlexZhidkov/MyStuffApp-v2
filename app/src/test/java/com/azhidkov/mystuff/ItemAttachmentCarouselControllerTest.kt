@@ -11,10 +11,11 @@ class ItemAttachmentCarouselControllerTest {
     @Test
     fun `opening carousel exposes loading then complete attachment collection`() {
         val gateway = RecordingItemAttachmentGateway()
+        val inventoryGateway = CarouselInventoryGateway()
         val controller = InventoryController(
             household = carouselHousehold(),
             identity = carouselIdentity(),
-            gateway = CarouselInventoryGateway(),
+            gateway = inventoryGateway,
             rootChildItemCache = NoRootChildItemCache,
             itemAttachmentGateway = gateway,
         )
@@ -61,11 +62,86 @@ class ItemAttachmentCarouselControllerTest {
 
         assertNull(controller.state.itemAttachmentCarousel)
     }
+
+    @Test
+    fun `designating an attachment updates the Item Photo projection`() {
+        val gateway = RecordingItemAttachmentGateway()
+        val inventoryGateway = CarouselInventoryGateway()
+        val controller = InventoryController(
+            household = carouselHousehold(),
+            identity = carouselIdentity(),
+            gateway = inventoryGateway,
+            rootChildItemCache = NoRootChildItemCache,
+            itemAttachmentGateway = gateway,
+        )
+        val attachment = carouselControllerAttachment("receipt", 2)
+
+        controller.openItem("item-1")
+        controller.openItemAttachmentCarousel()
+        gateway.complete(listOf(carouselControllerAttachment("photo", 1), attachment))
+        controller.designateItemPhoto(attachment)
+
+        assertEquals("receipt", controller.state.selectedItem.photoAttachmentId)
+        assertEquals(attachment.displayUrl, controller.state.selectedItem.photoUrl)
+        assertEquals("receipt", inventoryGateway.designatedAttachment?.id)
+    }
+
+    @Test
+    fun `deleting an Item Photo promotes the oldest remaining attachment`() {
+        val gateway = RecordingItemAttachmentGateway()
+        val inventoryGateway = CarouselInventoryGateway()
+        val controller = InventoryController(
+            household = carouselHousehold(),
+            identity = carouselIdentity(),
+            gateway = inventoryGateway,
+            rootChildItemCache = NoRootChildItemCache,
+            itemAttachmentGateway = gateway,
+        )
+        val photo = carouselControllerAttachment("photo", 1)
+        val receipt = carouselControllerAttachment("receipt", 2)
+
+        controller.openItem("item-1")
+        controller.openItemAttachmentCarousel()
+        gateway.complete(listOf(photo, receipt))
+        controller.deleteItemAttachment(photo)
+
+        assertEquals("receipt", controller.state.selectedItem.photoAttachmentId)
+        assertEquals(
+            listOf("receipt"),
+            controller.state.itemAttachmentCarousel?.attachments?.map(ItemAttachment::id),
+        )
+        assertEquals("photo", inventoryGateway.deletedAttachment?.id)
+    }
+
+    @Test
+    fun `deleting the last attachment clears the Item Photo and closes the carousel`() {
+        val attachmentGateway = RecordingItemAttachmentGateway()
+        val inventoryGateway = CarouselInventoryGateway()
+        val controller = InventoryController(
+            household = carouselHousehold(),
+            identity = carouselIdentity(),
+            gateway = inventoryGateway,
+            rootChildItemCache = NoRootChildItemCache,
+            itemAttachmentGateway = attachmentGateway,
+        )
+        val photo = carouselControllerAttachment("photo", 1)
+
+        controller.openItem("item-1")
+        controller.openItemAttachmentCarousel()
+        attachmentGateway.complete(listOf(photo))
+        controller.deleteItemAttachment(photo)
+
+        assertNull(controller.state.selectedItem.photoAttachmentId)
+        assertNull(controller.state.selectedItem.photoUrl)
+        assertNull(controller.state.itemAttachmentCarousel)
+    }
 }
 
 private class RecordingItemAttachmentGateway : ItemAttachmentGateway {
     var observedItem: Item? = null
     private var callback: ((Result<List<ItemAttachment>>) -> Unit)? = null
+    var designatedAttachment: ItemAttachment? = null
+    var deletedAttachment: ItemAttachment? = null
 
     override fun observe(
         household: Household,
@@ -101,11 +177,16 @@ private class RecordingItemAttachmentGateway : ItemAttachmentGateway {
         item: Item,
         attachment: ItemAttachment,
         onResult: (Result<Unit>) -> Unit,
-    ) = error("Not used")
+    ) {
+        deletedAttachment = attachment
+        onResult(Result.success(Unit))
+    }
 }
 
 private class CarouselInventoryGateway : InventoryGateway {
     private val household = carouselHousehold()
+    var designatedAttachment: ItemAttachment? = null
+    var deletedAttachment: ItemAttachment? = null
 
     override fun observe(
         household: Household,
@@ -134,6 +215,45 @@ private class CarouselInventoryGateway : InventoryGateway {
         photoUpdate: ItemPhotoUpdate,
         onResult: (Result<Item>) -> Unit,
     ) = error("Not used")
+
+    override fun designateItemPhoto(
+        householdId: String,
+        item: Item,
+        updater: AuthenticatedIdentity,
+        attachment: ItemAttachment,
+        onResult: (Result<Item>) -> Unit,
+    ) = onResult(
+        Result.success(
+            item.copy(
+                photoAttachmentId = attachment.id,
+                photoUrl = attachment.displayUrl,
+                photoThumbnailUrl = "gs://mystuff/${attachment.id}-thumb.webp",
+            ),
+        ),
+    ).also { designatedAttachment = attachment }
+
+    override fun deleteItemAttachment(
+        householdId: String,
+        item: Item,
+        updater: AuthenticatedIdentity,
+        attachment: ItemAttachment,
+        remainingAttachments: List<ItemAttachment>,
+        onResult: (Result<Item>) -> Unit,
+    ) {
+        deletedAttachment = attachment
+        val promoted = remainingAttachments.minWithOrNull(
+            compareBy<ItemAttachment>({ it.creationOrder ?: Long.MAX_VALUE }, ItemAttachment::createdAt),
+        ).takeIf { item.photoAttachmentId == attachment.id }
+        onResult(
+            Result.success(
+                item.copy(
+                    photoAttachmentId = promoted?.id,
+                    photoUrl = promoted?.displayUrl,
+                    photoThumbnailUrl = promoted?.let { "gs://mystuff/${it.id}-thumb.webp" },
+                ),
+            ),
+        )
+    }
 }
 
 private fun carouselHousehold() = Household(

@@ -27,6 +27,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -77,6 +78,7 @@ import com.azhidkov.mystuff.InvitationUiState
 import com.azhidkov.mystuff.InventoryActions
 import com.azhidkov.mystuff.InventoryUiState
 import com.azhidkov.mystuff.Item
+import com.azhidkov.mystuff.ItemAttachment
 import com.azhidkov.mystuff.ItemAttachmentState
 import com.azhidkov.mystuff.ItemFormStage
 import com.azhidkov.mystuff.ItemFormPolicy
@@ -201,6 +203,9 @@ private fun HouseholdRootContent(
             item = inventoryState.selectedItem,
             state = carouselState,
             onClose = inventoryActions::closeItemAttachmentCarousel,
+            onDesignate = inventoryActions::designateItemPhoto,
+            onDeleteAttachment = inventoryActions::deleteItemAttachment,
+            operationInProgress = inventoryState.operationInProgress,
         )
         return
     }
@@ -564,10 +569,21 @@ private fun ItemAttachmentCarouselScreen(
     item: Item,
     state: ItemAttachmentState,
     onClose: () -> Unit,
+    onDesignate: (ItemAttachment) -> Unit,
+    onDeleteAttachment: (ItemAttachment) -> Unit,
+    operationInProgress: Boolean,
 ) {
     val images = item.carouselImages(state.attachments)
     val pagerState = rememberPagerState(pageCount = { images.size.coerceAtLeast(1) })
     val loader = attachmentDisplayPhotoLoader(LocalContext.current.applicationContext)
+    var deleteCandidate by remember { mutableStateOf<ItemAttachment?>(null) }
+    val currentAttachment = when (val image = images.getOrNull(pagerState.currentPage)) {
+        is CarouselImage.Attachment -> image.attachment
+        is CarouselImage.ItemPhoto -> state.attachments.firstOrNull {
+            it.id == item.photoAttachmentId
+        }
+        null -> null
+    }
     LaunchedEffect(state.itemId, state.attachments) {
         buildList {
             item.photoUrl?.let(::add)
@@ -657,7 +673,59 @@ private fun ItemAttachmentCarouselScreen(
                     style = MaterialTheme.typography.labelLarge,
                 )
             }
+            currentAttachment?.let { attachment ->
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 64.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (attachment.id != item.photoAttachmentId) {
+                        TextButton(
+                            onClick = { onDesignate(attachment) },
+                            enabled = !operationInProgress,
+                        ) {
+                            Text(
+                                text = stringResource(R.string.designate_item_photo),
+                                color = Color.White,
+                            )
+                        }
+                    }
+                    TextButton(
+                        onClick = { deleteCandidate = attachment },
+                        enabled = !operationInProgress,
+                    ) {
+                        Text(
+                            text = stringResource(R.string.delete_attachment),
+                            color = Color.White,
+                        )
+                    }
+                }
+            }
         }
+    }
+    deleteCandidate?.let { attachment ->
+        AlertDialog(
+            onDismissRequest = { deleteCandidate = null },
+            title = { Text(stringResource(R.string.delete_attachment_title)) },
+            text = { Text(stringResource(R.string.delete_attachment_confirmation)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        loader.remove(attachment.displayUrl)
+                        onDeleteAttachment(attachment)
+                        deleteCandidate = null
+                    },
+                ) {
+                    Text(stringResource(R.string.delete_attachment))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteCandidate = null }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
     }
 }
 

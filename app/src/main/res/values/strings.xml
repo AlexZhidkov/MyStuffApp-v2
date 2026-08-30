@@ -67,6 +67,10 @@
     <string name="item_photo_unavailable">Photo unavailable</string>
     <string name="item_attachment">Item attachment</string>
     <string name="attachment_unavailable">Attachment unavailable</string>
+    <string name="designate_item_photo">Use as Item photo</string>
+    <string name="delete_attachment">Delete</string>
+    <string name="delete_attachment_title">Delete attachment?</string>
+    <string name="delete_attachment_confirmation">This attachment will be permanently deleted, including its stored file.</string>
     <string name="household_invitations">Household invitations</string>
     <string name="household_invitations_body">Invite one person at a time using the email address for their Google Account. Each link expires after seven days.</string>
     <string name="google_email_address">Gmail address</string>

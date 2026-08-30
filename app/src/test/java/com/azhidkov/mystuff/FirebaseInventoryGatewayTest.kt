@@ -571,6 +571,89 @@ class FirebaseInventoryGatewayTest {
             photos.deletedLocations,
         )
     }
+
+    @Test
+    fun `designating an attachment updates the projection generates its thumbnail and removes only the old thumbnail`() {
+        val store = FakeInventoryDocumentStore()
+        val photos = FakeInventoryPhotoStore()
+        val attachments = FakeItemPhotoAttachmentGateway()
+        val gateway = FirebaseInventoryGateway(store, photos, attachments)
+        val item = inventoryItem(
+            id = "item-1",
+            name = "Drill",
+            parentItemId = "garage",
+            photoAttachmentId = "old",
+            photoUrl = "gs://mystuff/old.webp",
+            photoThumbnailUrl = "gs://mystuff/old-thumb.webp",
+        )
+        val replacement = attachment("replacement", "gs://mystuff/replacement.webp")
+
+        gateway.designateItemPhoto(
+            householdId = "household-1",
+            item = item,
+            updater = inventoryIdentity(),
+            attachment = replacement,
+        ) { it.getOrThrow() }
+
+        assertEquals("replacement", store.updatedData?.get("photoAttachmentId"))
+        assertEquals(replacement.displayUrl, store.updatedData?.get("photoUrl"))
+        assertEquals(
+            listOf("gs://mystuff/old-thumb.webp"),
+            photos.deletedLocations,
+        )
+        assertEquals(
+            listOf(replacement.displayUrl),
+            photos.generatedThumbnailSources,
+        )
+    }
+
+    @Test
+    fun `deleting the designated attachment promotes the oldest remaining attachment and removes its files`() {
+        val store = FakeInventoryDocumentStore()
+        val photos = FakeInventoryPhotoStore()
+        val attachments = FakeItemPhotoAttachmentGateway()
+        val gateway = FirebaseInventoryGateway(store, photos, attachments)
+        val item = inventoryItem(
+            id = "item-1",
+            name = "Drill",
+            parentItemId = "garage",
+            photoAttachmentId = "photo",
+            photoUrl = "gs://mystuff/photo.webp",
+            photoThumbnailUrl = "gs://mystuff/photo-thumb.webp",
+        )
+        val deleted = attachment("photo", item.photoUrl!!, creationOrder = 0)
+        val remaining = attachment("receipt", "gs://mystuff/receipt.webp", creationOrder = 1)
+
+        gateway.deleteItemAttachment(
+            householdId = "household-1",
+            item = item,
+            updater = inventoryIdentity(),
+            attachment = deleted,
+            remainingAttachments = listOf(remaining),
+        ) { it.getOrThrow() }
+
+        assertEquals("receipt", store.updatedData?.get("photoAttachmentId"))
+        assertEquals(remaining.displayUrl, store.updatedData?.get("photoUrl"))
+        assertEquals(listOf("photo"), attachments.deletedAttachmentIds)
+        assertEquals(
+            listOf("gs://mystuff/photo.webp", "gs://mystuff/photo-thumb.webp"),
+            photos.deletedLocations,
+        )
+        assertEquals(listOf(remaining.displayUrl), photos.generatedThumbnailSources)
+    }
+
+    private fun attachment(
+        id: String,
+        displayUrl: String,
+        creationOrder: Long = 0,
+    ) = ItemAttachment(
+        id = id,
+        itemId = "item-1",
+        createdAt = Instant.ofEpochSecond(creationOrder),
+        contentType = OPTIMIZED_ATTACHMENT_IMAGE_CONTENT_TYPE,
+        displayUrl = displayUrl,
+        creationOrder = creationOrder,
+    )
 }
 
 private fun inventoryDetails() = ItemDetails(
@@ -590,6 +673,7 @@ private class FakeInventoryPhotoStore(
 ) : InventoryPhotoStore {
     val uploads = mutableListOf<QueuedPhotoUpload>()
     val deletedLocations = mutableListOf<String>()
+    val generatedThumbnailSources = mutableListOf<String>()
 
     override fun newRevision(householdId: String, itemId: String) = ItemPhotoRevision(
         locations = ItemPhotoLocations(
@@ -652,6 +736,13 @@ private class FakeInventoryPhotoStore(
             photo.thumbnailUri,
             revision.thumbnailStoragePath,
         )
+    }
+
+    override fun generateAttachmentThumbnailInBackground(
+        revision: ItemPhotoRevision,
+        sourceLocation: String,
+    ) {
+        generatedThumbnailSources += sourceLocation
     }
 
     override fun deleteInBackground(locations: StoredItemPhotoLocations) {

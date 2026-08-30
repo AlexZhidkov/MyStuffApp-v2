@@ -186,6 +186,41 @@ class InventoryPhotoBackgroundWorkTest {
             queue.tasks,
         )
     }
+
+    @Test
+    fun `designating an attachment queues thumbnail generation from its display image`() {
+        val queue = RecordingPhotoTransferQueue()
+        val store = BackgroundInventoryPhotoStore(
+            bucketUrl = "gs://mystuff",
+            queue = queue,
+        )
+        val revision = store.newAttachmentRevision("household-1", "item-1", "attachment-1")
+
+        store.generateAttachmentThumbnailInBackground(
+            revision = revision,
+            sourceLocation = "gs://mystuff/${revision.fullStoragePath}",
+        )
+
+        assertEquals(
+            listOf(
+                PhotoTransferTask.GenerateThumbnail(
+                    storagePath = revision.thumbnailStoragePath,
+                    sourceLocation = "gs://mystuff/${revision.fullStoragePath}",
+                ),
+            ),
+            queue.tasks,
+        )
+    }
+
+    @Test
+    fun `thumbnail generation tasks survive WorkManager data round trips`() {
+        val task = PhotoTransferTask.GenerateThumbnail(
+            storagePath = "households/household-1/items/item-1/attachments/attachment-1-thumb.webp",
+            sourceLocation = "gs://mystuff/households/household-1/items/item-1/attachments/attachment-1.webp",
+        )
+
+        assertEquals(task, PhotoTransferTask.fromWorkData(task.toWorkData()))
+    }
 }
 
 private class FakePhotoRemoteStore(

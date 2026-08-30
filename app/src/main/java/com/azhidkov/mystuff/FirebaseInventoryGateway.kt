@@ -474,6 +474,130 @@ class FirebaseInventoryGateway internal constructor(
         }
     }
 
+    override fun designateItemPhoto(
+        householdId: String,
+        item: Item,
+        updater: AuthenticatedIdentity,
+        attachment: ItemAttachment,
+        onResult: (Result<Item>) -> Unit,
+    ) {
+        if (item.parentItemId == null || attachment.itemId != item.id) {
+            onResult(Result.failure(IllegalArgumentException("The Item Photo designation is invalid.")))
+            return
+        }
+        val revision = photoStore.newAttachmentRevision(householdId, item.id, attachment.id)
+        val updated = item.copy(
+            photoAttachmentId = attachment.id,
+            photoUrl = attachment.displayUrl,
+            photoThumbnailUrl = revision.locations.thumbnail,
+        )
+        store.updateItem(
+            householdId = householdId,
+            itemId = item.id,
+            data = photoProjectionData(updated, updater),
+        ) { result ->
+            result.onFailure { onResult(Result.failure(it)) }
+                .onSuccess {
+                    if (item.photoAttachmentId != attachment.id) {
+                        runCatching {
+                            photoStore.deleteInBackground(
+                                StoredItemPhotoLocations(
+                                    full = null,
+                                    thumbnail = item.photoThumbnailUrl,
+                                ),
+                            )
+                        }
+                    }
+                    runCatching {
+                        photoStore.generateAttachmentThumbnailInBackground(
+                            revision = revision,
+                            sourceLocation = attachment.displayUrl,
+                        )
+                    }
+                    onResult(Result.success(updated))
+                }
+        }
+    }
+
+    override fun deleteItemAttachment(
+        householdId: String,
+        item: Item,
+        updater: AuthenticatedIdentity,
+        attachment: ItemAttachment,
+        remainingAttachments: List<ItemAttachment>,
+        onResult: (Result<Item>) -> Unit,
+    ) {
+        if (item.parentItemId == null || attachment.itemId != item.id) {
+            onResult(Result.failure(IllegalArgumentException("The Item Attachment deletion is invalid.")))
+            return
+        }
+        val deletingItemPhoto = item.photoAttachmentId == attachment.id
+        val promoted = if (deletingItemPhoto) {
+            remainingAttachments.minWithOrNull(
+                compareBy<ItemAttachment>({ it.creationOrder ?: Long.MAX_VALUE }, ItemAttachment::createdAt),
+            )
+        } else {
+            null
+        }
+        val updated = if (deletingItemPhoto) {
+            item.copy(
+                photoAttachmentId = promoted?.id,
+                photoUrl = promoted?.displayUrl,
+                photoThumbnailUrl = promoted?.let {
+                    photoStore.newAttachmentRevision(householdId, item.id, it.id).locations.thumbnail
+                },
+            )
+        } else {
+            item
+        }
+
+        fun removeRecordAndFiles() {
+            attachmentGateway?.delete(
+                household = householdFor(householdId),
+                item = item,
+                attachment = attachment,
+            ) { result ->
+                result.onFailure { onResult(Result.failure(it)) }
+                    .onSuccess {
+                        runCatching {
+                            photoStore.deleteInBackground(
+                                StoredItemPhotoLocations(
+                                    full = attachment.displayUrl,
+                                    thumbnail = item.photoThumbnailUrl.takeIf { deletingItemPhoto },
+                                ),
+                            )
+                        }
+                        promoted?.let { next ->
+                            runCatching {
+                                photoStore.generateAttachmentThumbnailInBackground(
+                                    revision = photoStore.newAttachmentRevision(
+                                        householdId,
+                                        item.id,
+                                        next.id,
+                                    ),
+                                    sourceLocation = next.displayUrl,
+                                )
+                            }
+                        }
+                        onResult(Result.success(updated))
+                    }
+            } ?: onResult(Result.failure(UnsupportedOperationException("Item Attachments are unavailable.")))
+        }
+
+        if (!deletingItemPhoto) {
+            removeRecordAndFiles()
+            return
+        }
+        store.updateItem(
+            householdId = householdId,
+            itemId = item.id,
+            data = photoProjectionData(updated, updater),
+        ) { result ->
+            result.onFailure { onResult(Result.failure(it)) }
+                .onSuccess { removeRecordAndFiles() }
+        }
+    }
+
     private fun createAdditionalPhotoAttachments(
         householdId: String,
         item: Item,
@@ -714,6 +838,18 @@ class FirebaseInventoryGateway internal constructor(
         )
     }
 
+    private fun photoProjectionData(
+        item: Item,
+        updater: AuthenticatedIdentity,
+    ): Map<String, Any?> = mapOf(
+        PHOTO_ATTACHMENT_ID to item.photoAttachmentId,
+        PHOTO_URL to item.photoUrl,
+        PHOTO_THUMBNAIL_URL to item.photoThumbnailUrl,
+        UPDATED_AT to store.serverTimestamp,
+        UPDATED_BY_ID to updater.id,
+        UPDATED_BY_DISPLAY_NAME to updater.attributionDisplayName(),
+    )
+
     private fun householdFor(householdId: String): Household = Household(
         id = householdId,
         ownerMemberId = "",
@@ -817,6 +953,11 @@ internal interface InventoryPhotoStore {
         revision: ItemPhotoRevision,
         photo: ItemPhoto,
     )
+
+    fun generateAttachmentThumbnailInBackground(
+        revision: ItemPhotoRevision,
+        sourceLocation: String,
+    ) = Unit
 
     fun deleteInBackground(locations: StoredItemPhotoLocations)
 }

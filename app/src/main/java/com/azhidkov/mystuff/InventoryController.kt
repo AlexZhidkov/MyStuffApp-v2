@@ -88,6 +88,23 @@ interface InventoryGateway {
         additionalPhotos = additionalPhotos,
         onResult = onResult,
     )
+
+    fun designateItemPhoto(
+        householdId: String,
+        item: Item,
+        updater: AuthenticatedIdentity,
+        attachment: ItemAttachment,
+        onResult: (Result<Item>) -> Unit,
+    ) = onResult(Result.failure(UnsupportedOperationException("Item Photo designation is unavailable.")))
+
+    fun deleteItemAttachment(
+        householdId: String,
+        item: Item,
+        updater: AuthenticatedIdentity,
+        attachment: ItemAttachment,
+        remainingAttachments: List<ItemAttachment>,
+        onResult: (Result<Item>) -> Unit,
+    ) = onResult(Result.failure(UnsupportedOperationException("Item Attachment deletion is unavailable.")))
 }
 
 data class ItemDetails(
@@ -145,6 +162,8 @@ interface InventoryActions {
     fun consumeDeferredError(id: String)
     fun openItemAttachmentCarousel()
     fun closeItemAttachmentCarousel()
+    fun designateItemPhoto(attachment: ItemAttachment)
+    fun deleteItemAttachment(attachment: ItemAttachment)
 }
 
 data class ItemAttachmentState(
@@ -887,6 +906,96 @@ class InventoryController internal constructor(
     override fun closeItemAttachmentCarousel() {
         if (state.itemAttachmentCarousel != null) {
             updateState(state.copy(itemAttachmentCarousel = null))
+        }
+    }
+
+    override fun designateItemPhoto(attachment: ItemAttachment) {
+        val item = state.selectedItem
+        val collection = state.itemAttachments
+            ?.takeIf { it.itemId == item.id && !it.loading && it.errorMessage == null }
+        if (
+            state.operationInProgress ||
+            state.itemAttachmentCarousel?.itemId != item.id ||
+            attachment.itemId != item.id ||
+            item.photoAttachmentId == attachment.id ||
+            collection == null ||
+            collection.attachments.none { it.id == attachment.id }
+        ) {
+            return
+        }
+        updateState(state.copy(operationInProgress = true, errorMessage = null))
+        gateway.designateItemPhoto(
+            householdId = household.id,
+            item = item,
+            updater = identity,
+            attachment = attachment,
+        ) { result ->
+            result.onSuccess { updated ->
+                observedInventory = observedInventory.withItem(updated)
+                updateState(
+                    state.copy(
+                        inventory = state.inventory.withItem(updated),
+                        operationInProgress = false,
+                        errorMessage = null,
+                    ),
+                )
+            }.onFailure { failure ->
+                updateState(
+                    state.copy(
+                        operationInProgress = false,
+                        errorMessage = failure.message ?: "Couldn't designate the Item Photo.",
+                    ),
+                )
+            }
+        }
+    }
+
+    override fun deleteItemAttachment(attachment: ItemAttachment) {
+        val item = state.selectedItem
+        val collection = state.itemAttachments
+            ?.takeIf { it.itemId == item.id && !it.loading && it.errorMessage == null }
+            ?: return
+        if (
+            state.operationInProgress ||
+            state.itemAttachmentCarousel?.itemId != item.id ||
+            attachment.itemId != item.id ||
+            collection.attachments.none { it.id == attachment.id }
+        ) {
+            return
+        }
+        val remaining = collection.attachments.filterNot { it.id == attachment.id }
+        updateState(state.copy(operationInProgress = true, errorMessage = null))
+        gateway.deleteItemAttachment(
+            householdId = household.id,
+            item = item,
+            updater = identity,
+            attachment = attachment,
+            remainingAttachments = remaining,
+        ) { result ->
+            result.onSuccess { updated ->
+                observedInventory = observedInventory.withItem(updated)
+                val nextCollection = collection.copy(attachments = remaining)
+                updateState(
+                    state.copy(
+                        inventory = state.inventory.withItem(updated),
+                        operationInProgress = false,
+                        errorMessage = null,
+                        itemAttachments = nextCollection,
+                        itemAttachmentCarousel = if (updated.photoUrl == null) {
+                            null
+                        } else {
+                            nextCollection
+                        },
+                    ),
+                )
+            }.onFailure { failure ->
+                updateState(
+                    state.copy(
+                        operationInProgress = false,
+                        errorMessage = failure.message ?: "Couldn't delete the Item Attachment.",
+                    ),
+                )
+            }
         }
     }
 

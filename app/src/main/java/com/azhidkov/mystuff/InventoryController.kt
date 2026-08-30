@@ -69,6 +69,25 @@ interface InventoryGateway {
         photoUpdate = photoUpdate,
         onResult = onResult,
     )
+
+    fun updateItemWithAttachments(
+        householdId: String,
+        item: Item,
+        updater: AuthenticatedIdentity,
+        details: ItemDetails,
+        photoUpdate: ItemPhotoUpdate,
+        additionalPhotos: List<ItemPhoto>,
+        existingAttachments: List<ItemAttachment>,
+        onResult: (Result<Item>) -> Unit,
+    ) = updateItemWithAttachments(
+        householdId = householdId,
+        item = item,
+        updater = updater,
+        details = details,
+        photoUpdate = photoUpdate,
+        additionalPhotos = additionalPhotos,
+        onResult = onResult,
+    )
 }
 
 data class ItemDetails(
@@ -778,6 +797,14 @@ class InventoryController internal constructor(
                 additionalPhotos = draft.photos.takeIf {
                     draft.photoSelectionPurpose == ItemPhotoSelectionPurpose.AddAttachments
                 }.orEmpty(),
+                existingAttachments = state.itemAttachments
+                    ?.takeIf {
+                        it.itemId == item.id &&
+                            !it.loading &&
+                            it.errorMessage == null
+                    }
+                    ?.attachments
+                    .orEmpty(),
                 onResult = onResult,
             )
         }

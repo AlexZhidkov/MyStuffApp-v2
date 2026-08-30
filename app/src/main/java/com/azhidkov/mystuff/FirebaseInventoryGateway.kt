@@ -315,6 +315,26 @@ class FirebaseInventoryGateway internal constructor(
         photoUpdate: ItemPhotoUpdate,
         additionalPhotos: List<ItemPhoto>,
         onResult: (Result<Item>) -> Unit,
+    ) = updateItemWithAttachments(
+        householdId = householdId,
+        item = item,
+        updater = updater,
+        details = details,
+        photoUpdate = photoUpdate,
+        additionalPhotos = additionalPhotos,
+        existingAttachments = emptyList(),
+        onResult = onResult,
+    )
+
+    override fun updateItemWithAttachments(
+        householdId: String,
+        item: Item,
+        updater: AuthenticatedIdentity,
+        details: ItemDetails,
+        photoUpdate: ItemPhotoUpdate,
+        additionalPhotos: List<ItemPhoto>,
+        existingAttachments: List<ItemAttachment>,
+        onResult: (Result<Item>) -> Unit,
     ) {
         if (additionalPhotos.isEmpty()) {
             updateItem(
@@ -362,6 +382,10 @@ class FirebaseInventoryGateway internal constructor(
             else -> null
         }
         val plansToCreate = listOfNotNull(replacementPlan) + additionalPlans
+        val creationOrderStart = existingAttachments
+            .takeIf { it.isNotEmpty() && it.all { attachment -> attachment.creationOrder != null } }
+            ?.maxOf { requireNotNull(it.creationOrder) }
+            ?.plus(1)
         val projected = item.copy(
             name = details.name,
             description = details.description,
@@ -402,6 +426,7 @@ class FirebaseInventoryGateway internal constructor(
             householdId = householdId,
             item = item,
             plans = plansToCreate,
+            creationOrderStart = creationOrderStart,
             onFailure = { failure, created ->
                 deletePhotoAttachments(householdId, item, created) {
                     onResult(Result.failure(failure))
@@ -453,6 +478,7 @@ class FirebaseInventoryGateway internal constructor(
         householdId: String,
         item: Item,
         plans: List<AttachmentPhotoPlan>,
+        creationOrderStart: Long?,
         onFailure: (Throwable, List<AttachmentPhotoPlan>) -> Unit,
         onCreated: (List<AttachmentPhotoPlan>) -> Unit,
     ) {
@@ -464,13 +490,31 @@ class FirebaseInventoryGateway internal constructor(
                 return
             }
             val plan = plans[index]
-            gateway.create(
-                household = householdFor(householdId),
-                item = item,
-                attachmentId = requireNotNull(plan.photoPlan.attachmentId),
-                contentType = OPTIMIZED_ATTACHMENT_IMAGE_CONTENT_TYPE,
-                displayUrl = requireNotNull(plan.photoPlan.revision).locations.full,
-            ) { result ->
+            val create = if (creationOrderStart == null) {
+                { callback: (Result<ItemAttachment>) -> Unit ->
+                    gateway.create(
+                        household = householdFor(householdId),
+                        item = item,
+                        attachmentId = requireNotNull(plan.photoPlan.attachmentId),
+                        contentType = OPTIMIZED_ATTACHMENT_IMAGE_CONTENT_TYPE,
+                        displayUrl = requireNotNull(plan.photoPlan.revision).locations.full,
+                        onResult = callback,
+                    )
+                }
+            } else {
+                { callback: (Result<ItemAttachment>) -> Unit ->
+                    gateway.createInOrder(
+                        household = householdFor(householdId),
+                        item = item,
+                        attachmentId = requireNotNull(plan.photoPlan.attachmentId),
+                        creationOrder = creationOrderStart + index,
+                        contentType = OPTIMIZED_ATTACHMENT_IMAGE_CONTENT_TYPE,
+                        displayUrl = requireNotNull(plan.photoPlan.revision).locations.full,
+                        onResult = callback,
+                    )
+                }
+            }
+            create { result ->
                 result.onSuccess {
                     createNext(index + 1, created + plan)
                 }.onFailure { failure -> onFailure(failure, created) }

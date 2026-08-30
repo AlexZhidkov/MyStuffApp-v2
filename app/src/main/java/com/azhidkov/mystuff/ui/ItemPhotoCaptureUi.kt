@@ -6,6 +6,7 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -65,6 +66,15 @@ internal fun CameraCaptureStep(
         }
     }
 
+    val cancel = {
+        pendingPhotoUri?.let {
+            discardUnsavedPhotoSources(context, listOf(ItemPhoto(it.toString())))
+        }
+        discardUnsavedPhotoSources(context, unsavedPhotos)
+        actions.closeItemForm()
+    }
+    BackHandler(onBack = cancel)
+
     LaunchedEffect(stage) {
         when (stage) {
             ItemFormStage.CameraPermission -> {
@@ -84,7 +94,12 @@ internal fun CameraCaptureStep(
                         pendingPhotoUri = uri
                         cameraLauncher.launch(uri)
                     }
-                }.onFailure { actions.photoCaptureFailed() }
+                }.onFailure {
+                    pendingPhotoUri?.let {
+                        discardUnsavedPhotoSources(context, listOf(ItemPhoto(it.toString())))
+                    }
+                    actions.photoCaptureFailed()
+                }
             }
 
             else -> Unit
@@ -94,13 +109,7 @@ internal fun CameraCaptureStep(
     ItemCreationMessageScreen(
         title = stringResource(R.string.opening_camera),
         body = stringResource(R.string.opening_camera_body),
-        onCancel = {
-            pendingPhotoUri?.let {
-                discardUnsavedPhotoSources(context, listOf(ItemPhoto(it.toString())))
-            }
-            discardUnsavedPhotoSources(context, unsavedPhotos)
-            actions.closeItemForm()
-        },
+        onCancel = cancel,
     )
 }
 

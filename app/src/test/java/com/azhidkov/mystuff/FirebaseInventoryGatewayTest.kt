@@ -147,10 +147,21 @@ class FirebaseInventoryGatewayTest {
                 ItemPhoto("content://receipt.webp", "content://receipt-thumb.webp"),
                 ItemPhoto("content://manual.webp", "content://manual-thumb.webp"),
             ),
+            existingAttachments = listOf(
+                ItemAttachment(
+                    id = "old-attachment",
+                    itemId = "item-1",
+                    createdAt = Instant.EPOCH,
+                    contentType = OPTIMIZED_ATTACHMENT_IMAGE_CONTENT_TYPE,
+                    displayUrl = "gs://mystuff/old.webp",
+                    creationOrder = 0,
+                ),
+            ),
         ) { result = it }
 
         assertEquals(existing.photoAttachmentId, result?.getOrThrow()?.photoAttachmentId)
         assertEquals(listOf("attachment-1", "attachment-2"), attachments.createdIds)
+        assertEquals(listOf(1L, 2L), attachments.createdOrders)
         assertTrue(attachments.deletedAttachmentIds.isEmpty())
         assertEquals(
             listOf(
@@ -754,6 +765,7 @@ private class FakeItemPhotoAttachmentGateway : ItemAttachmentGateway {
     var createdDisplayUrl: String? = null
         private set
     val createdIds = mutableListOf<String>()
+    val createdOrders = mutableListOf<Long?>()
     val deletedAttachmentIds = mutableListOf<String>()
     private var nextId = 1
 
@@ -774,6 +786,7 @@ private class FakeItemPhotoAttachmentGateway : ItemAttachmentGateway {
         displayUrl: String,
         onResult: (Result<ItemAttachment>) -> Unit,
     ) {
+        createdOrders += null
         createdDisplayUrl = displayUrl
         createdIds += attachmentId
         createdAttachment = ItemAttachment(
@@ -782,6 +795,29 @@ private class FakeItemPhotoAttachmentGateway : ItemAttachmentGateway {
             createdAt = Instant.EPOCH,
             contentType = contentType,
             displayUrl = displayUrl,
+        )
+        onResult(Result.success(createdAttachment!!))
+    }
+
+    override fun createInOrder(
+        household: Household,
+        item: Item,
+        attachmentId: String,
+        creationOrder: Long,
+        contentType: String,
+        displayUrl: String,
+        onResult: (Result<ItemAttachment>) -> Unit,
+    ) {
+        createdOrders += creationOrder
+        createdDisplayUrl = displayUrl
+        createdIds += attachmentId
+        createdAttachment = ItemAttachment(
+            id = attachmentId,
+            itemId = item.id,
+            createdAt = Instant.EPOCH,
+            contentType = contentType,
+            displayUrl = displayUrl,
+            creationOrder = creationOrder,
         )
         onResult(Result.success(createdAttachment!!))
     }

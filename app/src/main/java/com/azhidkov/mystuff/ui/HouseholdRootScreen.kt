@@ -729,6 +729,20 @@ private fun ItemFormScreen(
                 (draft.photo != null &&
                     draft.photoSelectionPurpose == ItemPhotoSelectionPurpose.ReplaceItemPhoto)
         }
+    val replaceItemPhoto = {
+        discardUnsavedPhotoSources(context, unsavedPhotos)
+        actions.beginReplaceItemPhoto()
+    }
+    val addItemAttachments = {
+        discardUnsavedPhotoSources(context, unsavedPhotos)
+        actions.beginAddItemAttachments()
+    }
+    val photoAction: () -> Unit = when {
+        !editing -> actions::addAnotherPhoto
+        draft.photoSelectionPurpose == ItemPhotoSelectionPurpose.AddAttachments ->
+            actions::addAnotherPhoto
+        else -> replaceItemPhoto
+    }
     Scaffold(
         contentWindowInsets = WindowInsets.safeDrawing,
         topBar = {
@@ -794,13 +808,7 @@ private fun ItemFormScreen(
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(
-                        onClick = when {
-                            !editing -> actions::addAnotherPhoto
-                            draft.photoSelectionPurpose ==
-                                ItemPhotoSelectionPurpose.AddAttachments ->
-                                actions::addAnotherPhoto
-                            else -> actions::beginReplaceItemPhoto
-                        },
+                        onClick = photoAction,
                         enabled = formEnabled,
                     ) {
                         Text(
@@ -836,7 +844,7 @@ private fun ItemFormScreen(
                         draft.photoSelectionPurpose != ItemPhotoSelectionPurpose.AddAttachments
                     ) {
                         TextButton(
-                            onClick = actions::beginAddItemAttachments,
+                            onClick = addItemAttachments,
                             enabled = formEnabled,
                         ) {
                             Text(stringResource(R.string.add_attachments))
@@ -867,7 +875,10 @@ private fun ItemFormScreen(
                         (draft.photos.isNotEmpty() || storedPhotoItem?.photoUrl != null)
                     ) {
                         TextButton(
-                            onClick = actions::removeItemPhoto,
+                            onClick = {
+                                discardUnsavedPhotoSources(context, unsavedPhotos)
+                                actions.removeItemPhoto()
+                            },
                             enabled = formEnabled,
                         ) {
                             Text(stringResource(R.string.remove_photo))

@@ -8,7 +8,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.layout.Arrangement
@@ -60,8 +59,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -726,6 +723,7 @@ private fun ItemAttachmentCarouselScreen(
     val pagerState = rememberPagerState(pageCount = { images.size.coerceAtLeast(1) })
     val loader = attachmentDisplayPhotoLoader(LocalContext.current.applicationContext)
     var deleteCandidate by remember { mutableStateOf<ItemAttachment?>(null) }
+    var currentPageZoomed by remember { mutableStateOf(false) }
     val currentAttachment = when (val image = images.getOrNull(pagerState.currentPage)) {
         is CarouselImage.Attachment -> image.attachment
         is CarouselImage.ItemPhoto -> state.attachments.firstOrNull {
@@ -746,6 +744,7 @@ private fun ItemAttachmentCarouselScreen(
                 launch { runCatching { loader.load(location) } }
             }
     }
+    LaunchedEffect(pagerState.currentPage) { currentPageZoomed = false }
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -756,17 +755,26 @@ private fun ItemAttachmentCarouselScreen(
                 HorizontalPager(
                     state = pagerState,
                     modifier = Modifier.fillMaxSize(),
+                    userScrollEnabled = !currentPageZoomed,
                 ) { page ->
                     when (val image = images[page]) {
                         is CarouselImage.ItemPhoto -> AttachmentDisplayPhoto(
                             location = requireNotNull(image.item.photoUrl),
                             previewLocation = image.item.photoThumbnailUrl,
+                            active = page == pagerState.currentPage,
+                            onZoomChanged = { zoomed ->
+                                if (page == pagerState.currentPage) currentPageZoomed = zoomed
+                            },
                             modifier = Modifier
                                 .fillMaxSize()
                                 .padding(horizontal = 16.dp, vertical = 72.dp),
                         )
                         is CarouselImage.Attachment -> AttachmentDisplayPhoto(
                             location = image.attachment.displayUrl,
+                            active = page == pagerState.currentPage,
+                            onZoomChanged = { zoomed ->
+                                if (page == pagerState.currentPage) currentPageZoomed = zoomed
+                            },
                             modifier = Modifier
                                 .fillMaxSize()
                                 .padding(horizontal = 16.dp, vertical = 72.dp),
@@ -882,6 +890,8 @@ private fun ItemAttachmentCarouselScreen(
 private fun AttachmentDisplayPhoto(
     location: String,
     previewLocation: String? = null,
+    active: Boolean,
+    onZoomChanged: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val state by rememberAttachmentDisplayPhoto(location, previewLocation)
@@ -893,11 +903,12 @@ private fun AttachmentDisplayPhoto(
                 text = stringResource(R.string.attachment_unavailable),
                 color = Color.White,
             )
-            is PhotoLoadState.Available -> Image(
-                bitmap = photoState.value.asImageBitmap(),
+            is PhotoLoadState.Available -> ZoomablePhoto(
+                bitmap = photoState.value,
                 contentDescription = stringResource(R.string.item_attachment),
+                active = active,
+                onZoomChanged = onZoomChanged,
                 modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Fit,
             )
         }
     }

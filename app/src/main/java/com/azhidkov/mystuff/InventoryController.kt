@@ -47,6 +47,28 @@ interface InventoryGateway {
         photoUpdate: ItemPhotoUpdate,
         onResult: (Result<Item>) -> Unit,
     )
+
+    /**
+     * Saves an Item and, when requested, appends new Item Attachments as part
+     * of the same gateway operation. Older gateway implementations retain the
+     * existing edit behaviour until they implement attachment persistence.
+     */
+    fun updateItemWithAttachments(
+        householdId: String,
+        item: Item,
+        updater: AuthenticatedIdentity,
+        details: ItemDetails,
+        photoUpdate: ItemPhotoUpdate,
+        additionalPhotos: List<ItemPhoto>,
+        onResult: (Result<Item>) -> Unit,
+    ) = updateItem(
+        householdId = householdId,
+        item = item,
+        updater = updater,
+        details = details,
+        photoUpdate = photoUpdate,
+        onResult = onResult,
+    )
 }
 
 data class ItemDetails(
@@ -77,6 +99,8 @@ interface InventoryActions {
     fun openParentItem()
     fun beginAddItem()
     fun beginEditItem()
+    fun beginAddItemAttachments()
+    fun beginChooseItemAttachments() = Unit
     fun beginReplaceItemPhoto()
     fun removeItemPhoto()
     fun cameraUnavailable()
@@ -133,10 +157,18 @@ enum class ItemFormStage {
     Details,
 }
 
+enum class ItemPhotoSelectionPurpose {
+    CreateAttachments,
+    ReplaceItemPhoto,
+    AddAttachments,
+}
+
 data class ItemFormState(
     val name: String = "",
     val parentItemId: String,
     val stage: ItemFormStage = ItemFormStage.CameraPermission,
+    val photoSelectionPurpose: ItemPhotoSelectionPurpose =
+        ItemPhotoSelectionPurpose.CreateAttachments,
     val photo: ItemPhoto? = null,
     val photos: List<ItemPhoto> = emptyList(),
     val pendingPhotoUris: List<String> = emptyList(),
@@ -168,6 +200,9 @@ data class InventoryUiState(
     val canGenerateDescription: Boolean
         get() {
             val draft = itemDraft ?: return false
+            if (draft.photoSelectionPurpose == ItemPhotoSelectionPurpose.AddAttachments) {
+                return false
+            }
             if (draft.photos.size > 1) return false
             if (draft.photoRemoved) return false
             if (draft.photo != null) return true
@@ -445,6 +480,7 @@ class InventoryController internal constructor(
                     name = item.name,
                     parentItemId = item.parentItemId ?: return,
                     stage = ItemFormStage.Details,
+                    photoSelectionPurpose = ItemPhotoSelectionPurpose.ReplaceItemPhoto,
                     description = item.description.orEmpty(),
                     webUrl = item.webUrl.orEmpty(),
                     tags = item.tags,
@@ -452,6 +488,47 @@ class InventoryController internal constructor(
                 ),
                 errorMessage = null,
                 successMessage = null,
+            ),
+        )
+    }
+
+    override fun beginAddItemAttachments() {
+        val draft = state.itemDraft ?: return
+        if (state.operationInProgress || draft.editingItemId == null) return
+        updateState(
+            state.copy(
+                itemDraft = draft.copy(
+                    stage = ItemFormStage.CameraPermission,
+                    photoSelectionPurpose = ItemPhotoSelectionPurpose.AddAttachments,
+                    photo = null,
+                    photos = emptyList(),
+                    pendingPhotoUris = emptyList(),
+                    photoRemoved = false,
+                ),
+                errorMessage = null,
+            ),
+        )
+    }
+
+    override fun beginChooseItemAttachments() {
+        val draft = state.itemDraft ?: return
+        if (
+            state.operationInProgress ||
+            draft.editingItemId == null ||
+            draft.stage != ItemFormStage.Details
+        ) return
+        updateState(
+            state.copy(
+                itemDraft = draft.copy(
+                    photoSelectionPurpose = ItemPhotoSelectionPurpose.AddAttachments,
+                    photo = null,
+                    photos = draft.photos.takeIf {
+                        draft.photoSelectionPurpose == ItemPhotoSelectionPurpose.AddAttachments
+                    }.orEmpty(),
+                    pendingPhotoUris = emptyList(),
+                    photoRemoved = false,
+                ),
+                errorMessage = null,
             ),
         )
     }
@@ -468,6 +545,7 @@ class InventoryController internal constructor(
             state.copy(
                 itemDraft = draft.copy(
                     stage = ItemFormStage.CameraPermission,
+                    photoSelectionPurpose = ItemPhotoSelectionPurpose.ReplaceItemPhoto,
                     photo = null,
                     photos = emptyList(),
                     pendingPhotoUris = emptyList(),
@@ -685,16 +763,21 @@ class InventoryController internal constructor(
         } else {
             val item = state.inventory.item(editingItemId)
             val photoUpdate = when {
+                draft.photoSelectionPurpose == ItemPhotoSelectionPurpose.AddAttachments ->
+                    ItemPhotoUpdate.Unchanged
                 draft.photo != null -> ItemPhotoUpdate.Replaced(draft.photo)
                 draft.photoRemoved -> ItemPhotoUpdate.Removed
                 else -> ItemPhotoUpdate.Unchanged
             }
-            gateway.updateItem(
+            gateway.updateItemWithAttachments(
                 householdId = household.id,
                 item = item,
                 updater = identity,
                 details = details,
                 photoUpdate = photoUpdate,
+                additionalPhotos = draft.photos.takeIf {
+                    draft.photoSelectionPurpose == ItemPhotoSelectionPurpose.AddAttachments
+                }.orEmpty(),
                 onResult = onResult,
             )
         }

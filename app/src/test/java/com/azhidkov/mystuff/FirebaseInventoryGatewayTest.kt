@@ -122,6 +122,80 @@ class FirebaseInventoryGatewayTest {
     }
 
     @Test
+    fun `adding attachments while editing preserves the current Item Photo and uploads displays`() {
+        val documents = FakeInventoryDocumentStore()
+        val photos = FakeInventoryPhotoStore()
+        val attachments = FakeItemPhotoAttachmentGateway()
+        val gateway = FirebaseInventoryGateway(documents, photos, attachments)
+        val existing = inventoryItem(
+            "item-1",
+            "Drill",
+            "garage",
+            photoAttachmentId = "old-attachment",
+            photoUrl = "gs://mystuff/old.webp",
+            photoThumbnailUrl = "gs://mystuff/old-thumb.webp",
+        )
+        var result: Result<Item>? = null
+
+        gateway.updateItemWithAttachments(
+            householdId = "household-1",
+            item = existing,
+            updater = inventoryIdentity(),
+            details = inventoryDetails(),
+            photoUpdate = ItemPhotoUpdate.Unchanged,
+            additionalPhotos = listOf(
+                ItemPhoto("content://receipt.webp", "content://receipt-thumb.webp"),
+                ItemPhoto("content://manual.webp", "content://manual-thumb.webp"),
+            ),
+        ) { result = it }
+
+        assertEquals(existing.photoAttachmentId, result?.getOrThrow()?.photoAttachmentId)
+        assertEquals(listOf("attachment-1", "attachment-2"), attachments.createdIds)
+        assertTrue(attachments.deletedAttachmentIds.isEmpty())
+        assertEquals(
+            listOf(
+                QueuedPhotoUpload(
+                    ItemPhotoVariant.Full,
+                    "content://receipt.webp",
+                    "households/household-1/items/item-1/attachments/attachment-1.webp",
+                ),
+                QueuedPhotoUpload(
+                    ItemPhotoVariant.Full,
+                    "content://manual.webp",
+                    "households/household-1/items/item-1/attachments/attachment-2.webp",
+                ),
+            ),
+            photos.uploads,
+        )
+    }
+
+    @Test
+    fun `adding an attachment to an Item without a photo projects the first attachment`() {
+        val documents = FakeInventoryDocumentStore()
+        val photos = FakeInventoryPhotoStore()
+        val attachments = FakeItemPhotoAttachmentGateway()
+        val gateway = FirebaseInventoryGateway(documents, photos, attachments)
+        var result: Result<Item>? = null
+
+        gateway.updateItemWithAttachments(
+            householdId = "household-1",
+            item = inventoryItem("item-1", "Drill", "garage"),
+            updater = inventoryIdentity(),
+            details = inventoryDetails(),
+            photoUpdate = ItemPhotoUpdate.Unchanged,
+            additionalPhotos = listOf(ItemPhoto("content://receipt.webp")),
+        ) { result = it }
+
+        assertEquals("attachment-1", result?.getOrThrow()?.photoAttachmentId)
+        assertEquals(
+            "gs://mystuff/households/household-1/items/item-1/attachments/attachment-1.webp",
+            result?.getOrThrow()?.photoUrl,
+        )
+        assertEquals("attachment-1", documents.updatedData?.get("photoAttachmentId"))
+        assertEquals(2, photos.uploads.size)
+    }
+
+    @Test
     fun `removing an attachment-backed Item Photo deletes its attachment and clears the projection`() {
         val documents = FakeInventoryDocumentStore()
         val photos = FakeInventoryPhotoStore()

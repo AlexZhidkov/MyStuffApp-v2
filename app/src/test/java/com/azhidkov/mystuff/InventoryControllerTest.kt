@@ -1323,6 +1323,75 @@ class InventoryControllerTest {
     }
 
     @Test
+    fun `Member can add several attachments from Edit without replacing the Item Photo`() {
+        val household = household()
+        val existing = item(
+            id = "drill",
+            name = "Drill",
+            parentItemId = household.id,
+            photoUrl = "gs://mystuff/drill.webp",
+            photoThumbnailUrl = "gs://mystuff/drill-thumb.webp",
+        )
+        val gateway = FakeInventoryGateway(
+            Inventory.from(household, listOf(household.rootItem, existing)),
+        )
+        val controller = InventoryController(household, identity(), gateway)
+
+        controller.openItem(existing.id)
+        controller.beginEditItem()
+        controller.beginAddItemAttachments()
+        controller.cameraUnavailable()
+        controller.photoPickerSelected(
+            listOf(
+                ItemPhoto("content://receipt.webp"),
+                ItemPhoto("content://manual.webp"),
+            ),
+        )
+        controller.usePhotoWithoutCropping(ItemPhoto("content://receipt-optimized.webp"))
+        controller.usePhotoWithoutCropping(ItemPhoto("content://manual-optimized.webp"))
+        controller.saveItem()
+
+        assertEquals(
+            listOf(
+                ItemPhoto("content://receipt-optimized.webp"),
+                ItemPhoto("content://manual-optimized.webp"),
+            ),
+            gateway.updatedAdditionalPhotos,
+        )
+        assertEquals(ItemPhotoUpdate.Unchanged, gateway.updatedPhotoUpdate)
+        assertEquals("gs://mystuff/drill.webp", controller.state.selectedItem.photoUrl)
+        assertNull(controller.state.itemDraft)
+    }
+
+    @Test
+    fun `first added attachment can supply a missing Item Photo`() {
+        val household = household()
+        val existing = item("drill", "Drill", household.id)
+        val gateway = FakeInventoryGateway(
+            Inventory.from(household, listOf(household.rootItem, existing)),
+        )
+        val controller = InventoryController(household, identity(), gateway)
+
+        controller.openItem(existing.id)
+        controller.beginEditItem()
+        controller.beginAddItemAttachments()
+        controller.resolveCameraPermission(granted = true)
+        controller.photoCaptured(ItemPhoto("content://receipt.jpg"))
+        controller.usePhotoWithoutCropping(ItemPhoto("content://receipt-optimized.webp"))
+        controller.saveItem()
+
+        assertEquals(
+            ItemPhoto("content://receipt-optimized.webp"),
+            gateway.updatedAdditionalPhotos.single(),
+        )
+        assertEquals(ItemPhotoUpdate.Unchanged, gateway.updatedPhotoUpdate)
+        assertEquals(
+            "gs://mystuff/households/household-1/items/drill.webp",
+            controller.state.selectedItem.photoUrl,
+        )
+    }
+
+    @Test
     fun `invalid Description Generation draft stays open and submits no work`() {
         val household = household()
         val existing = item(
@@ -1397,6 +1466,10 @@ private class FakeInventoryGateway(
         private set
     var nextUpdateFailure: Throwable? = null
     var updateAttempts: Int = 0
+        private set
+    var updatedPhotoUpdate: ItemPhotoUpdate? = null
+        private set
+    var updatedAdditionalPhotos: List<ItemPhoto> = emptyList()
         private set
     var deferCreates: Boolean = false
     private var pendingCreate: (() -> Unit)? = null
@@ -1512,6 +1585,39 @@ private class FakeInventoryGateway(
         )
         inventory = inventory.withItem(updated)
         onResult(Result.success(updated))
+    }
+
+    override fun updateItemWithAttachments(
+        householdId: String,
+        item: Item,
+        updater: AuthenticatedIdentity,
+        details: ItemDetails,
+        photoUpdate: ItemPhotoUpdate,
+        additionalPhotos: List<ItemPhoto>,
+        onResult: (Result<Item>) -> Unit,
+    ) {
+        updatedPhotoUpdate = photoUpdate
+        updatedAdditionalPhotos = additionalPhotos
+        updateItem(
+            householdId = householdId,
+            item = item,
+            updater = updater,
+            details = details,
+            photoUpdate = photoUpdate,
+        ) { result ->
+            val saved = result.getOrNull()
+            if (saved != null && saved.photoUrl == null && additionalPhotos.isNotEmpty()) {
+                val projected = saved.copy(
+                    photoUrl = "gs://mystuff/households/$householdId/items/${item.id}.webp",
+                    photoThumbnailUrl =
+                        "gs://mystuff/households/$householdId/items/${item.id}-thumb.webp",
+                )
+                inventory = inventory.withItem(projected)
+                onResult(Result.success(projected))
+            } else {
+                onResult(result)
+            }
+        }
     }
 }
 

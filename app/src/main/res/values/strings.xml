@@ -45,6 +45,9 @@
     <string name="add_photo">Add photo</string>
     <string name="add_another_photo">Add another</string>
     <string name="choose_photos">Choose photos</string>
+    <string name="add_attachments">Add attachments</string>
+    <string name="add_another_attachment">Add another</string>
+    <string name="choose_attachments">Choose attachments</string>
     <string name="replace_photo">Replace photo</string>
     <string name="remove_photo">Remove photo</string>
     <string name="save_item">Save</string>

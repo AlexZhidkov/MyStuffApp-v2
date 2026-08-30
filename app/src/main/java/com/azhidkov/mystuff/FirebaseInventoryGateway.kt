@@ -307,6 +307,179 @@ class FirebaseInventoryGateway internal constructor(
         }
     }
 
+    override fun updateItemWithAttachments(
+        householdId: String,
+        item: Item,
+        updater: AuthenticatedIdentity,
+        details: ItemDetails,
+        photoUpdate: ItemPhotoUpdate,
+        additionalPhotos: List<ItemPhoto>,
+        onResult: (Result<Item>) -> Unit,
+    ) {
+        if (additionalPhotos.isEmpty()) {
+            updateItem(
+                householdId = householdId,
+                item = item,
+                updater = updater,
+                details = details,
+                photoUpdate = photoUpdate,
+                onResult = onResult,
+            )
+            return
+        }
+        if (attachmentGateway == null) {
+            onResult(
+                Result.failure(
+                    IllegalStateException("Item Attachments are unavailable."),
+                ),
+            )
+            return
+        }
+        details.validationFailure()?.let { error ->
+            onResult(Result.failure(IllegalArgumentException(error)))
+            return
+        }
+
+        val additionalPlans = additionalPhotos.map { photo ->
+            AttachmentPhotoPlan(
+                photo = photo,
+                photoPlan = newPhotoPlan(householdId, item.id),
+            )
+        }
+        val replacementPlan = if (photoUpdate is ItemPhotoUpdate.Replaced) {
+            AttachmentPhotoPlan(
+                photo = photoUpdate.photo,
+                photoPlan = newPhotoPlan(householdId, item.id),
+            )
+        } else {
+            null
+        }
+        val firstNewPhotoPlan = additionalPlans.firstOrNull()
+        val projectedPlan = replacementPlan ?: when {
+            photoUpdate == ItemPhotoUpdate.Removed -> firstNewPhotoPlan
+            photoUpdate == ItemPhotoUpdate.Unchanged && item.photoUrl == null ->
+                firstNewPhotoPlan
+            else -> null
+        }
+        val plansToCreate = listOfNotNull(replacementPlan) + additionalPlans
+        val projected = item.copy(
+            name = details.name,
+            description = details.description,
+            tags = details.tags,
+            webUrl = details.webUrl,
+            photoAttachmentId = projectedPlan?.photoPlan?.attachmentId
+                ?: if (projectedPlan == null && photoUpdate == ItemPhotoUpdate.Unchanged) {
+                    item.photoAttachmentId
+                } else {
+                    null
+                },
+            photoUrl = projectedPlan?.photoPlan?.full
+                ?: if (projectedPlan == null && photoUpdate == ItemPhotoUpdate.Unchanged) {
+                    item.photoUrl
+                } else {
+                    null
+                },
+            photoThumbnailUrl = projectedPlan?.photoPlan?.thumbnail
+                ?: if (projectedPlan == null && photoUpdate == ItemPhotoUpdate.Unchanged) {
+                    item.photoThumbnailUrl
+                } else {
+                    null
+                },
+        )
+        val data = mapOf(
+            NAME to projected.name,
+            PHOTO_ATTACHMENT_ID to projected.photoAttachmentId,
+            PHOTO_URL to projected.photoUrl,
+            PHOTO_THUMBNAIL_URL to projected.photoThumbnailUrl,
+            DESCRIPTION to projected.description,
+            TAGS to projected.tags,
+            WEB_URL to projected.webUrl,
+            UPDATED_AT to store.serverTimestamp,
+            UPDATED_BY_ID to updater.id,
+            UPDATED_BY_DISPLAY_NAME to updater.attributionDisplayName(),
+        )
+        createAdditionalPhotoAttachments(
+            householdId = householdId,
+            item = item,
+            plans = plansToCreate,
+            onFailure = { failure, created ->
+                deletePhotoAttachments(householdId, item, created) {
+                    onResult(Result.failure(failure))
+                }
+            },
+        ) { created ->
+            store.updateItem(householdId, item.id, data) { result ->
+                result.onFailure { failure ->
+                    deletePhotoAttachments(householdId, item, created) {
+                        onResult(Result.failure(failure))
+                    }
+                }.onSuccess {
+                    uploadCreatedPhotosAndComplete(
+                        result = Result.success(projected),
+                        firstPhotoPlan = projectedPlan,
+                        additionalPhotos = created.filterNot { it === projectedPlan },
+                        onResult = { saved ->
+                            val oldAttachmentId = item.photoAttachmentId
+                            val shouldDeleteOldAttachment =
+                                photoUpdate !is ItemPhotoUpdate.Unchanged &&
+                                    oldAttachmentId != null
+                            if (!shouldDeleteOldAttachment) {
+                                if (photoUpdate == ItemPhotoUpdate.Removed) {
+                                    deleteStoredPhoto(item)
+                                }
+                                onResult(saved)
+                                return@uploadCreatedPhotosAndComplete
+                            }
+                            requireNotNull(attachmentGateway).delete(
+                                household = householdFor(householdId),
+                                item = item,
+                                attachment = projectedAttachment(item, oldAttachmentId),
+                            ) { deleteResult ->
+                                deleteResult.onSuccess {
+                                    if (photoUpdate == ItemPhotoUpdate.Removed) {
+                                        deleteStoredPhoto(item)
+                                    }
+                                    onResult(saved)
+                                }.onFailure { onResult(Result.failure(it)) }
+                            }
+                        },
+                    )
+                }
+            }
+        }
+    }
+
+    private fun createAdditionalPhotoAttachments(
+        householdId: String,
+        item: Item,
+        plans: List<AttachmentPhotoPlan>,
+        onFailure: (Throwable, List<AttachmentPhotoPlan>) -> Unit,
+        onCreated: (List<AttachmentPhotoPlan>) -> Unit,
+    ) {
+        val gateway = requireNotNull(attachmentGateway)
+
+        fun createNext(index: Int, created: List<AttachmentPhotoPlan>) {
+            if (index == plans.size) {
+                onCreated(created)
+                return
+            }
+            val plan = plans[index]
+            gateway.create(
+                household = householdFor(householdId),
+                item = item,
+                attachmentId = requireNotNull(plan.photoPlan.attachmentId),
+                contentType = OPTIMIZED_ATTACHMENT_IMAGE_CONTENT_TYPE,
+                displayUrl = requireNotNull(plan.photoPlan.revision).locations.full,
+            ) { result ->
+                result.onSuccess {
+                    createNext(index + 1, created + plan)
+                }.onFailure { failure -> onFailure(failure, created) }
+            }
+        }
+
+        createNext(0, emptyList())
+    }
+
     private fun newPhotoPlan(householdId: String, itemId: String): ItemPhotoUpdatePlan {
         val attachmentId = attachmentGateway?.newAttachmentId(householdId, itemId)
         val revision = if (attachmentId == null) {
@@ -385,16 +558,18 @@ class FirebaseInventoryGateway internal constructor(
 
     private fun uploadCreatedPhotosAndComplete(
         result: Result<Item>,
-        firstPhotoPlan: AttachmentPhotoPlan,
+        firstPhotoPlan: AttachmentPhotoPlan?,
         additionalPhotos: List<AttachmentPhotoPlan>,
         onResult: (Result<Item>) -> Unit,
     ) {
         try {
-            runCatching {
-                photoStore.uploadInBackground(
-                    requireNotNull(firstPhotoPlan.photoPlan.revision),
-                    firstPhotoPlan.photo,
-                )
+            firstPhotoPlan?.let { plan ->
+                runCatching {
+                    photoStore.uploadInBackground(
+                        requireNotNull(plan.photoPlan.revision),
+                        plan.photo,
+                    )
+                }
             }
             additionalPhotos.forEach { plan ->
                 runCatching {

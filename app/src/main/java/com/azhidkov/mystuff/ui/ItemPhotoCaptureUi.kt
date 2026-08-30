@@ -44,6 +44,7 @@ import java.util.UUID
 @Composable
 internal fun CameraCaptureStep(
     stage: ItemFormStage,
+    unsavedPhotos: List<ItemPhoto>,
     actions: InventoryActions,
 ) {
     val context = LocalContext.current
@@ -59,6 +60,7 @@ internal fun CameraCaptureStep(
         if (captured && uri != null) {
             actions.photoCaptured(ItemPhoto(uri.toString()))
         } else {
+            uri?.let { discardUnsavedPhotoSources(context, listOf(ItemPhoto(it.toString()))) }
             actions.photoCaptureFailed()
         }
     }
@@ -92,7 +94,13 @@ internal fun CameraCaptureStep(
     ItemCreationMessageScreen(
         title = stringResource(R.string.opening_camera),
         body = stringResource(R.string.opening_camera_body),
-        onCancel = actions::closeItemForm,
+        onCancel = {
+            pendingPhotoUri?.let {
+                discardUnsavedPhotoSources(context, listOf(ItemPhoto(it.toString())))
+            }
+            discardUnsavedPhotoSources(context, unsavedPhotos)
+            actions.closeItemForm()
+        },
     )
 }
 

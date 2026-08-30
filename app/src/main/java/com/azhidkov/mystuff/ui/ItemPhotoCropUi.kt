@@ -63,6 +63,7 @@ import kotlinx.coroutines.withContext
 @Composable
 internal fun CropPhotoScreen(
     photo: ItemPhoto,
+    unsavedPhotos: List<ItemPhoto>,
     processingPurpose: PhotoProcessingPurpose = PhotoProcessingPurpose.ItemPhoto,
     actions: InventoryActions,
 ) {
@@ -92,7 +93,13 @@ internal fun CropPhotoScreen(
             TopAppBar(
                 title = { Text(stringResource(R.string.crop_photo)) },
                 navigationIcon = {
-                    TextButton(onClick = actions::closeItemForm, enabled = !cropping) {
+                    TextButton(
+                        onClick = {
+                            discardUnsavedPhotoSources(context, unsavedPhotos + photo)
+                            actions.closeItemForm()
+                        },
+                        enabled = !cropping,
+                    ) {
                         Text(stringResource(R.string.cancel))
                     }
                 },
@@ -179,8 +186,9 @@ internal fun CropPhotoScreen(
                                     offset = offset,
                                     purpose = processingPurpose,
                                 )
-                            }.onSuccess { photo ->
-                                actions.useCroppedPhoto(photo)
+                            }.onSuccess { processedPhoto ->
+                                discardUnsavedPhotoSources(context, listOf(photo))
+                                actions.useCroppedPhoto(processedPhoto)
                             }.onFailure {
                                 cropping = false
                             }
@@ -210,6 +218,7 @@ internal fun CropPhotoScreen(
                                         purpose = processingPurpose,
                                     )
                                 }.onSuccess { processed ->
+                                    discardUnsavedPhotoSources(context, listOf(photo))
                                     actions.usePhotoWithoutCropping(processed)
                                 }.onFailure {
                                     cropping = false
@@ -220,10 +229,22 @@ internal fun CropPhotoScreen(
                     ) {
                         Text(stringResource(R.string.use_original_photo))
                     }
-                    TextButton(onClick = actions::retakePhoto, enabled = !cropping) {
+                    TextButton(
+                        onClick = {
+                            discardUnsavedPhotoSources(context, listOf(photo))
+                            actions.retakePhoto()
+                        },
+                        enabled = !cropping,
+                    ) {
                         Text(stringResource(R.string.retake_photo))
                     }
-                    TextButton(onClick = actions::continueWithoutPhoto, enabled = !cropping) {
+                    TextButton(
+                        onClick = {
+                            discardUnsavedPhotoSources(context, listOf(photo))
+                            actions.continueWithoutPhoto()
+                        },
+                        enabled = !cropping,
+                    ) {
                         Text(stringResource(R.string.continue_without_photo))
                     }
                 }

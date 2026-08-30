@@ -81,6 +81,7 @@ import com.azhidkov.mystuff.ItemAttachmentState
 import com.azhidkov.mystuff.ItemFormStage
 import com.azhidkov.mystuff.ItemFormPolicy
 import com.azhidkov.mystuff.ItemPhoto
+import com.azhidkov.mystuff.ItemPhotoSelectionPurpose
 import com.azhidkov.mystuff.R
 import com.azhidkov.mystuff.carouselImages
 import com.azhidkov.mystuff.otherAttachmentCount
@@ -162,17 +163,23 @@ private fun HouseholdRootContent(
 ) {
     val itemDraft = inventoryState.itemDraft
     if (itemDraft != null) {
+        val context = LocalContext.current
+        val unsavedPhotos = itemDraft.photos + listOfNotNull(itemDraft.photo)
         BackHandler(enabled = !inventoryState.operationInProgress) {
+            discardUnsavedPhotoSources(context, unsavedPhotos)
             inventoryActions.closeItemForm()
         }
         when (itemDraft.stage) {
             ItemFormStage.CameraPermission,
             ItemFormStage.Camera,
-            -> CameraCaptureStep(itemDraft.stage, inventoryActions)
+            -> CameraCaptureStep(itemDraft.stage, unsavedPhotos, inventoryActions)
 
             ItemFormStage.Crop -> CropPhotoScreen(
                 photo = requireNotNull(itemDraft.photo),
-                processingPurpose = if (itemDraft.editingItemId == null) {
+                unsavedPhotos = unsavedPhotos,
+                processingPurpose = if (
+                    itemDraft.photoSelectionPurpose != ItemPhotoSelectionPurpose.ReplaceItemPhoto
+                ) {
                     PhotoProcessingPurpose.ItemAttachment
                 } else {
                     PhotoProcessingPurpose.ItemPhoto
@@ -702,6 +709,8 @@ private fun ItemFormScreen(
 ) {
     val draft = requireNotNull(state.itemDraft)
     val editing = draft.editingItemId != null
+    val context = LocalContext.current
+    val unsavedPhotos = draft.photos + listOfNotNull(draft.photo)
     val photoPickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.PickMultipleVisualMedia(),
     ) { uris ->
@@ -715,7 +724,11 @@ private fun ItemFormScreen(
     val storedPhotoItem = draft.editingItemId
         ?.takeIf(state.inventory::contains)
         ?.let(state.inventory::item)
-        ?.takeUnless { draft.photoRemoved || draft.photo != null }
+        ?.takeUnless {
+            draft.photoRemoved ||
+                (draft.photo != null &&
+                    draft.photoSelectionPurpose == ItemPhotoSelectionPurpose.ReplaceItemPhoto)
+        }
     Scaffold(
         contentWindowInsets = WindowInsets.safeDrawing,
         topBar = {
@@ -727,7 +740,10 @@ private fun ItemFormScreen(
                 },
                 navigationIcon = {
                     TextButton(
-                        onClick = actions::closeItemForm,
+                        onClick = {
+                            discardUnsavedPhotoSources(context, unsavedPhotos)
+                            actions.closeItemForm()
+                        },
                         enabled = !state.operationInProgress,
                     ) {
                         Text(stringResource(R.string.cancel))
@@ -778,16 +794,27 @@ private fun ItemFormScreen(
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(
-                        onClick = if (editing) {
-                            actions::beginReplaceItemPhoto
-                        } else {
-                            actions::addAnotherPhoto
+                        onClick = when {
+                            !editing -> actions::addAnotherPhoto
+                            draft.photoSelectionPurpose ==
+                                ItemPhotoSelectionPurpose.AddAttachments ->
+                                actions::addAnotherPhoto
+                            else -> actions::beginReplaceItemPhoto
                         },
                         enabled = formEnabled,
                     ) {
                         Text(
                             stringResource(
-                                if (editing) {
+                                if (editing &&
+                                    draft.photoSelectionPurpose ==
+                                        ItemPhotoSelectionPurpose.AddAttachments
+                                ) {
+                                    if (draft.photos.isEmpty()) {
+                                        R.string.add_attachments
+                                    } else {
+                                        R.string.add_another_attachment
+                                    }
+                                } else if (editing) {
                                     if (
                                         draft.photos.isNotEmpty() ||
                                         storedPhotoItem?.photoUrl != null
@@ -804,9 +831,21 @@ private fun ItemFormScreen(
                             ),
                         )
                     }
-                    if (!editing) {
+                    if (
+                        editing &&
+                        draft.photoSelectionPurpose != ItemPhotoSelectionPurpose.AddAttachments
+                    ) {
+                        TextButton(
+                            onClick = actions::beginAddItemAttachments,
+                            enabled = formEnabled,
+                        ) {
+                            Text(stringResource(R.string.add_attachments))
+                        }
+                    }
+                    if (!editing || draft.photoSelectionPurpose == ItemPhotoSelectionPurpose.AddAttachments) {
                         TextButton(
                             onClick = {
+                                if (editing) actions.beginChooseItemAttachments()
                                 photoPickerLauncher.launch(
                                     PickVisualMediaRequest(
                                         ActivityResultContracts.PickVisualMedia.ImageOnly,
@@ -815,10 +854,18 @@ private fun ItemFormScreen(
                             },
                             enabled = formEnabled,
                         ) {
-                            Text(stringResource(R.string.choose_photos))
+                            Text(
+                                stringResource(
+                                    if (editing) R.string.choose_attachments else R.string.choose_photos,
+                                ),
+                            )
                         }
                     }
-                    if (editing && (draft.photos.isNotEmpty() || storedPhotoItem?.photoUrl != null)) {
+                    if (
+                        editing &&
+                        draft.photoSelectionPurpose == ItemPhotoSelectionPurpose.ReplaceItemPhoto &&
+                        (draft.photos.isNotEmpty() || storedPhotoItem?.photoUrl != null)
+                    ) {
                         TextButton(
                             onClick = actions::removeItemPhoto,
                             enabled = formEnabled,

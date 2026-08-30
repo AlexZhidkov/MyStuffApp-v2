@@ -10,10 +10,12 @@ class FirebaseInventoryGatewayTest {
     @Test
     fun `moving an Item updates only its Parent Item and attribution`() {
         val documents = FakeInventoryDocumentStore()
+        val moveService = RecordingItemMoveService()
         val gateway = FirebaseInventoryGateway(
             documents,
             FakeInventoryPhotoStore(),
             FakeItemPhotoAttachmentGateway(),
+            itemMoveService = moveService,
         )
         val item = inventoryItem("item-1", "Cabinet", "garage")
         var result: Result<Item>? = null
@@ -27,13 +29,8 @@ class FirebaseInventoryGatewayTest {
 
         assertEquals("shed", result?.getOrThrow()?.parentItemId)
         assertEquals(
-            mapOf(
-                "parentItemId" to "shed",
-                "updatedAt" to documents.serverTimestamp,
-                "updatedById" to "member-1",
-                "updatedByDisplayName" to "Alex",
-            ),
-            documents.updatedData,
+            Triple("household-1", "item-1", "shed"),
+            moveService.move,
         )
         assertEquals(item.copy(parentItemId = "shed"), result?.getOrThrow())
     }
@@ -1016,6 +1013,20 @@ private class FakeItemPhotoAttachmentGateway : ItemAttachmentGateway {
         onResult: (Result<Unit>) -> Unit,
     ) {
         deletedAttachmentIds += attachment.id
+        onResult(Result.success(Unit))
+    }
+}
+
+private class RecordingItemMoveService : ItemMoveService {
+    var move: Triple<String, String, String>? = null
+
+    override fun move(
+        householdId: String,
+        itemId: String,
+        newParentItemId: String,
+        onResult: (Result<Unit>) -> Unit,
+    ) {
+        move = Triple(householdId, itemId, newParentItemId)
         onResult(Result.success(Unit))
     }
 }

@@ -14,3 +14,7 @@
 - [x] A move is rejected if the Item or selected Parent Item no longer exists or no longer belongs to the same Household.
 - [x] Firebase authorization permits current Members to move Items and rejects non-Members.
 - [x] Automated checks cover successful subtree movement, root protection, cycle prevention, missing Items, and cross-Household rejection.
+
+## Comments
+
+- Implemented with Android move UI/domain validation and the authenticated `moveInventoryItem` callable. The callable validates ancestry transactionally and updates only the moved Item; direct client Parent Item writes remain denied by Firestore rules.

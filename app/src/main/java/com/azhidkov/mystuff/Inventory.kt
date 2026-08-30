@@ -57,6 +57,15 @@ class Inventory private constructor(
         return withItem(item.copy(parentItemId = newParentItemId))
     }
 
+    fun isValidMoveTarget(itemId: String, newParentItemId: String): Boolean {
+        return try {
+            moveItem(itemId, newParentItemId)
+            true
+        } catch (error: InvalidItemMoveException) {
+            false
+        }
+    }
+
     companion object {
         fun from(household: Household, items: List<Item>): Inventory = from(
             householdId = household.id,

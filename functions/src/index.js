@@ -10,6 +10,8 @@ import { createFirestoreSearchRepository } from "./firestore-search-repository.j
 import { createGeminiEmbedder } from "./gemini-embedder.js";
 import { createSearchHandlers } from "./search-handlers.js";
 import { createSearchModule } from "./search-module.js";
+import { createItemMoveHandlers } from "./item-move-handlers.js";
+import { createItemMoveModule } from "./item-move-module.js";
 
 if (getApps().length === 0) initializeApp();
 
@@ -22,6 +24,7 @@ const runtimeOptions = {
   secrets: emulator ? [] : [GEMINI_API_KEY],
 };
 let handlers;
+let itemMoveHandlers;
 
 function getHandlers() {
   if (handlers !== undefined) return handlers;
@@ -47,4 +50,17 @@ export const refreshItemSearchIndex = onDocumentWritten(
 
 export const searchInventory = onCall(runtimeOptions, (request) =>
   getHandlers().searchInventory(request),
+);
+
+function getItemMoveHandlers() {
+  if (itemMoveHandlers !== undefined) return itemMoveHandlers;
+  itemMoveHandlers = createItemMoveHandlers({
+    itemMoveModule: createItemMoveModule({ database: getFirestore() }),
+    logger,
+  });
+  return itemMoveHandlers;
+}
+
+export const moveInventoryItem = onCall(runtimeOptions, (request) =>
+  getItemMoveHandlers().moveInventoryItem(request),
 );

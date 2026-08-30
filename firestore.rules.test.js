@@ -705,7 +705,7 @@ test("Child Item update cannot change creation attribution Parent Item or root f
   ));
 });
 
-test("Household Member can move an Item while preserving its other fields", async () => {
+test("Item Parent Items cannot be changed by direct client writes", async () => {
   await seedHousehold();
   await seedHouseholdMember();
   await testEnvironment.withSecurityRulesDisabled(async (context) => {
@@ -724,7 +724,7 @@ test("Household Member can move an Item while preserving its other fields", asyn
   });
   const database = testEnvironment.authenticatedContext("member-2").firestore();
 
-  await assertSucceeds(updateDoc(
+  await assertFails(updateDoc(
     doc(database, "households/household-1/items/item-1"),
     {
       parentItemId: "item-2",
@@ -733,13 +733,13 @@ test("Household Member can move an Item while preserving its other fields", asyn
       updatedByDisplayName: "Sam",
     },
   ));
-  const moved = (await getDoc(
+  const unchanged = (await getDoc(
     doc(database, "households/household-1/items/item-1"),
   )).data();
-  assert.equal(moved.parentItemId, "item-2");
-  assert.equal(moved.name, "Cabinet");
-  assert.equal(moved.description, "West wall");
-  assert.deepEqual(moved.tags, ["Storage"]);
+  assert.equal(unchanged.parentItemId, "household-1");
+  assert.equal(unchanged.name, "Cabinet");
+  assert.equal(unchanged.description, "West wall");
+  assert.deepEqual(unchanged.tags, ["Storage"]);
 });
 
 test("Item moves reject the root, self, missing Parent Items, cross-Household Parents, and non-Members", async () => {
@@ -754,6 +754,10 @@ test("Item moves reject the root, self, missing Parent Items, cross-Household Pa
     await setDoc(
       doc(database, "households/household-1/items/item-2"),
       childItemData("Shed", "household-1"),
+    );
+    await setDoc(
+      doc(database, "households/household-1/items/item-3"),
+      childItemData("Foreign", "household-1", { householdId: "household-2" }),
     );
   });
   const memberDatabase = testEnvironment.authenticatedContext("member-1").firestore();
@@ -775,6 +779,15 @@ test("Item moves reject the root, self, missing Parent Items, cross-Household Pa
   await assertFails(updateDoc(
     doc(memberDatabase, "households/household-1/items/missing-item"),
     moveFields("item-2"),
+  ));
+  await assertFails(updateDoc(
+    doc(memberDatabase, "households/household-1/items/item-3"),
+    {
+      name: "Foreign",
+      updatedAt: serverTimestamp(),
+      updatedById: "member-1",
+      updatedByDisplayName: "Alex",
+    },
   ));
 
   const nonMemberDatabase = testEnvironment.authenticatedContext("member-4").firestore();

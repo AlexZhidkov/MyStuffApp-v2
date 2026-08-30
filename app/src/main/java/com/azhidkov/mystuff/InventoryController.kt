@@ -205,9 +205,8 @@ data class InventoryUiState(
             val move = itemMove ?: return emptyList()
             val item = inventory.item(move.itemId)
             return inventory.allItems.filter { candidate ->
-                candidate.id != item.id &&
                     candidate.id != item.parentItemId &&
-                    inventory.pathTo(candidate.id).none { it.id == item.id }
+                    inventory.isValidMoveTarget(item.id, candidate.id)
             }
         }
 
@@ -553,10 +552,7 @@ class InventoryController internal constructor(
         val move = state.itemMove ?: return
         if (
             state.operationInProgress ||
-            !state.inventory.contains(itemId) ||
-            itemId == move.itemId ||
-            runCatching { state.inventory.pathTo(itemId) }.getOrNull()
-                ?.any { it.id == move.itemId } == true
+            state.moveParentItems.none { it.id == itemId }
         ) {
             return
         }

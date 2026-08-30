@@ -317,9 +317,10 @@ service cloud.firestore {
 
     function validChildItemUpdate(householdId, itemId) {
       return itemId != householdId
+        && resource.data.get('householdId', null) == householdId
         && resource.data.parentItemId is string
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'name', 'parentItemId', 'photoAttachmentId', 'photoUrl', 'photoThumbnailUrl', 'description', 'tags',
+          'name', 'photoAttachmentId', 'photoUrl', 'photoThumbnailUrl', 'description', 'tags',
           'webUrl',
           'updatedAt', 'updatedById', 'updatedByDisplayName'
         ])

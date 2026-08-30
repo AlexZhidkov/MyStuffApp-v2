@@ -22,6 +22,9 @@ const householdId = "e2e-search-household";
 const otherHouseholdId = "e2e-other-household";
 const itemId = "e2e-clock";
 const otherItemId = "e2e-private-clock";
+const moveSourceId = "e2e-move-source";
+const moveChildId = "e2e-move-child";
+const moveTargetId = "e2e-move-target";
 let clientApp;
 let database;
 let memberId;
@@ -49,6 +52,10 @@ after(async () => {
   await database.doc(`households/${householdId}/searchIndex/${itemId}`).delete();
   await database.doc(`households/${otherHouseholdId}/items/${otherItemId}`).delete();
   await database.doc(`households/${otherHouseholdId}/searchIndex/${otherItemId}`).delete();
+  await database.doc(`households/${householdId}/items/${householdId}`).delete();
+  await database.doc(`households/${householdId}/items/${moveSourceId}`).delete();
+  await database.doc(`households/${householdId}/items/${moveChildId}`).delete();
+  await database.doc(`households/${householdId}/items/${moveTargetId}`).delete();
   await deleteApp(clientApp);
 });
 
@@ -107,6 +114,65 @@ test(
         .get();
       return !deletedIndex.exists;
     });
+  },
+);
+
+test(
+  "an authenticated Member moves an Item subtree transactionally",
+  { skip: !emulatorAvailable, timeout: 20_000 },
+  async () => {
+    await database.doc(`memberships/${memberId}`).set({ householdId });
+    await database.doc(`households/${householdId}/items/${householdId}`).set({
+      householdId,
+      parentItemId: null,
+    });
+    await database.doc(`households/${householdId}/items/${moveSourceId}`).set({
+      householdId,
+      parentItemId: householdId,
+      name: "Source",
+      tags: [],
+      description: "",
+    });
+    await database.doc(`households/${householdId}/items/${moveChildId}`).set({
+      householdId,
+      parentItemId: moveSourceId,
+      name: "Child",
+      tags: [],
+      description: "",
+    });
+    await database.doc(`households/${householdId}/items/${moveTargetId}`).set({
+      householdId,
+      parentItemId: householdId,
+      name: "Target",
+      tags: [],
+      description: "",
+    });
+
+    const functions = getFunctions(clientApp, "australia-southeast1");
+    const [host, port] = (process.env.FUNCTIONS_EMULATOR_HOST ?? "127.0.0.1:5001")
+      .split(":");
+    connectFunctionsEmulator(functions, host, Number(port));
+    const move = httpsCallable(functions, "moveInventoryItem");
+    const result = await move({
+      householdId,
+      itemId: moveSourceId,
+      newParentItemId: moveTargetId,
+    });
+
+    assert.deepEqual(result.data, {
+      itemId: moveSourceId,
+      parentItemId: moveTargetId,
+    });
+    const source = await database
+      .doc(`households/${householdId}/items/${moveSourceId}`)
+      .get();
+    const child = await database
+      .doc(`households/${householdId}/items/${moveChildId}`)
+      .get();
+    assert.equal(source.data()?.parentItemId, moveTargetId);
+    assert.equal(source.data()?.name, "Source");
+    assert.equal(source.data()?.updatedById, memberId);
+    assert.equal(child.data()?.parentItemId, moveSourceId);
   },
 );
 

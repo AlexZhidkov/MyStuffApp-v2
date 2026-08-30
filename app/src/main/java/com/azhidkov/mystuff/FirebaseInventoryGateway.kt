@@ -3,6 +3,7 @@ package com.azhidkov.mystuff
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.FirebaseApp
+import com.google.firebase.functions.FirebaseFunctions
 import com.google.firebase.storage.FirebaseStorage
 import java.time.Instant
 import java.util.UUID
@@ -13,6 +14,7 @@ class FirebaseInventoryGateway internal constructor(
     private val attachmentGateway: ItemAttachmentGateway,
     private val uploadFailureRegistry: AttachmentUploadFailureRegistry =
         processAttachmentUploadFailures,
+    private val itemMoveService: ItemMoveService? = null,
 ) : InventoryGateway {
     constructor() : this(
         store = FirestoreInventoryDocumentStore(),
@@ -330,23 +332,21 @@ class FirebaseInventoryGateway internal constructor(
         updater: AuthenticatedIdentity,
         onResult: (Result<Item>) -> Unit,
     ) {
+        // The callable derives attribution from the authenticated Firebase user;
+        // updater remains part of the shared gateway contract for client writes.
         if (item.parentItemId == null || item.id == newParentItemId) {
             onResult(Result.failure(InvalidItemMoveException("The Item move is invalid.")))
             return
         }
         val moved = item.copy(parentItemId = newParentItemId)
-        store.updateItem(
+        (itemMoveService ?: FirebaseItemMoveService()).move(
             householdId = householdId,
             itemId = item.id,
-            data = mapOf(
-                PARENT_ITEM_ID to newParentItemId,
-                UPDATED_AT to store.serverTimestamp,
-                UPDATED_BY_ID to updater.id,
-                UPDATED_BY_DISPLAY_NAME to updater.attributionDisplayName(),
-            ),
-        ) { result ->
-            onResult(result.map { moved })
-        }
+            newParentItemId = newParentItemId,
+            onResult = { result ->
+                onResult(result.map { moved })
+            },
+        )
     }
 
     override fun designateItemPhoto(
@@ -862,6 +862,50 @@ private data class ItemPhotoUpdatePlan(
     val revision: ItemPhotoRevision?,
 )
 
+internal fun interface ItemMoveService {
+    fun move(
+        householdId: String,
+        itemId: String,
+        newParentItemId: String,
+        onResult: (Result<Unit>) -> Unit,
+    )
+}
+
+private class FirebaseItemMoveService(
+    private val functions: FirebaseFunctions =
+        FirebaseFunctions.getInstance(ITEM_MOVE_FUNCTION_REGION),
+) : ItemMoveService {
+    override fun move(
+        householdId: String,
+        itemId: String,
+        newParentItemId: String,
+        onResult: (Result<Unit>) -> Unit,
+    ) {
+        functions
+            .getHttpsCallable(ITEM_MOVE_FUNCTION_NAME)
+            .call(
+                mapOf(
+                    "householdId" to householdId,
+                    "itemId" to itemId,
+                    "newParentItemId" to newParentItemId,
+                ),
+            )
+            .addOnCompleteListener { task ->
+                val result = if (task.isSuccessful) {
+                    runCatching {
+                        val response = task.result?.data as? Map<*, *>
+                            ?: error("Move returned an invalid response.")
+                        check(response["itemId"] == itemId)
+                        check(response["parentItemId"] == newParentItemId)
+                    }
+                } else {
+                    Result.failure(task.exception ?: IllegalStateException("Move failed."))
+                }
+                onResult(result.map { Unit })
+            }
+    }
+}
+
 private data class AttachmentPhotoPlan(
     val photo: ItemPhoto,
     val photoPlan: ItemPhotoUpdatePlan,
@@ -1070,3 +1114,5 @@ private const val CREATED_BY_ID = "createdById"
 private const val CREATED_BY_DISPLAY_NAME = "createdByDisplayName"
 private const val UPDATED_BY_ID = "updatedById"
 private const val UPDATED_BY_DISPLAY_NAME = "updatedByDisplayName"
+private const val ITEM_MOVE_FUNCTION_REGION = "australia-southeast1"
+private const val ITEM_MOVE_FUNCTION_NAME = "moveInventoryItem"

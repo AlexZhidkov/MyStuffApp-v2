@@ -39,6 +39,20 @@ class Inventory private constructor(
     )
 
     fun moveItem(itemId: String, newParentItemId: String): Inventory {
+        val item = validateMove(itemId, newParentItemId)
+        return withItem(item.copy(parentItemId = newParentItemId))
+    }
+
+    fun isValidMoveTarget(itemId: String, newParentItemId: String): Boolean {
+        return try {
+            validateMove(itemId, newParentItemId)
+            true
+        } catch (_: InvalidItemMoveException) {
+            false
+        }
+    }
+
+    private fun validateMove(itemId: String, newParentItemId: String): Item {
         val item = itemsById[itemId]
             ?: throw InvalidItemMoveException("The Item no longer exists.")
         itemsById[newParentItemId]
@@ -54,16 +68,7 @@ class Inventory private constructor(
                 "An Item cannot be moved beneath one of its Child Items.",
             )
         }
-        return withItem(item.copy(parentItemId = newParentItemId))
-    }
-
-    fun isValidMoveTarget(itemId: String, newParentItemId: String): Boolean {
-        return try {
-            moveItem(itemId, newParentItemId)
-            true
-        } catch (error: InvalidItemMoveException) {
-            false
-        }
+        return item
     }
 
     companion object {

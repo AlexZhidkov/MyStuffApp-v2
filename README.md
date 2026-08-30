@@ -29,7 +29,8 @@ Currently implemented:
 - Owner-only, seven-day Household invitations with revocation and link replacement
 - Child Item creation and editing with names, descriptions, web URLs, Tags, and camera-first
   optional mobile-sized WebP photos and thumbnails
-- Independent persistent background upload and retry for each Item photo variant
+- Independent persistent background uploads with terminal failure cleanup and
+  process-local retry for Item Attachments
 - Deep Inventory browsing and hybrid literal/semantic Household Search with immediate Child Items
   and complete Item Paths
 - Firebase rules and emulator tests for Household, Item, invitation, and photo authorization

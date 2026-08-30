@@ -160,6 +160,8 @@ interface InventoryActions {
     fun saveItem()
     fun saveAndGenerateDescription()
     fun consumeDeferredError(id: String)
+    fun retryFailedAttachment(id: String) = Unit
+    fun removeFailedAttachment(id: String) = Unit
     fun openItemAttachmentCarousel()
     fun closeItemAttachmentCarousel()
     fun designateItemPhoto(attachment: ItemAttachment)
@@ -232,6 +234,7 @@ data class InventoryUiState(
     val errorMessage: String? = null,
     val successMessage: String? = null,
     val deferredError: DeferredInventoryError? = null,
+    val failedAttachmentDrafts: List<FailedItemAttachmentDraft> = emptyList(),
     val itemAttachments: ItemAttachmentState? = null,
     val itemAttachmentCarousel: ItemAttachmentState? = null,
 ) {
@@ -330,6 +333,8 @@ class InventoryController internal constructor(
     private val searchGateway: SearchGateway = NoSearchGateway,
     private val searchDebouncer: SearchDebouncer = NoSearchDebouncer,
     private val itemAttachmentGateway: ItemAttachmentGateway = NoItemAttachmentGateway,
+    private val attachmentUploadFailureRegistry: AttachmentUploadFailureRegistry =
+        processAttachmentUploadFailures,
 ) : InventoryActions, AutoCloseable {
     constructor(
         household: Household,
@@ -357,6 +362,18 @@ class InventoryController internal constructor(
     private var searchDebounceSubscription: SearchSubscription? = null
     private var searchRequestSubscription: SearchSubscription? = null
     private var itemAttachmentSubscription: InventorySubscription? = null
+
+    private val attachmentUploadFailureSubscription =
+        attachmentUploadFailureRegistry.observe { drafts ->
+            updateState(
+                state.copy(
+                    failedAttachmentDrafts = drafts.filter {
+                        it.householdId == household.id &&
+                            it.originatingMemberId == identity.id
+                    },
+                ),
+            )
+        }
 
     private val subscription = gateway.observe(household) { result ->
         result.onSuccess { inventory ->
@@ -889,6 +906,16 @@ class InventoryController internal constructor(
         descriptionGenerationWork.consumeOutcome(id)
     }
 
+    override fun retryFailedAttachment(id: String) {
+        if (state.operationInProgress) return
+        attachmentUploadFailureRegistry.retry(id)
+    }
+
+    override fun removeFailedAttachment(id: String) {
+        if (state.operationInProgress) return
+        attachmentUploadFailureRegistry.remove(id)
+    }
+
     override fun openItemAttachmentCarousel() {
         val item = state.selectedItem
         if (item.photoUrl == null || item.id == household.rootItem.id || state.itemDraft != null) return
@@ -1100,6 +1127,7 @@ class InventoryController internal constructor(
         searchDebouncer.close()
         subscription.cancel()
         itemAttachmentSubscription?.cancel()
+        attachmentUploadFailureSubscription.cancel()
         descriptionGenerationSubscription.cancel()
         onStateChanged = {}
     }

@@ -67,6 +67,8 @@
     <string name="item_photo_unavailable">Photo unavailable</string>
     <string name="item_attachment">Item attachment</string>
     <string name="attachment_unavailable">Attachment unavailable</string>
+    <string name="retry_attachment">Retry</string>
+    <string name="remove_attachment_draft">Remove</string>
     <string name="designate_item_photo">Use as Item photo</string>
     <string name="delete_attachment">Delete</string>
     <string name="delete_attachment_title">Delete attachment?</string>

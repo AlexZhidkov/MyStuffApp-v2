@@ -11,6 +11,8 @@ class FirebaseInventoryGateway internal constructor(
     private val store: InventoryDocumentStore,
     private val photoStore: InventoryPhotoStore,
     private val attachmentGateway: ItemAttachmentGateway?,
+    private val uploadFailureRegistry: AttachmentUploadFailureRegistry =
+        processAttachmentUploadFailures,
 ) : InventoryGateway {
     internal constructor(
         store: InventoryDocumentStore,
@@ -137,9 +139,11 @@ class FirebaseInventoryGateway internal constructor(
                 projectCreatedPhoto(
                     householdId = householdId,
                     item = item,
-                    photoPlan = requireNotNull(firstPhotoPlan).photoPlan,
+                    photoPlan = createdPlans.firstOrNull()?.photoPlan
+                        ?: requireNotNull(firstPhotoPlan).photoPlan,
                     updater = creator,
                     photo = requireNotNull(firstPhotoPlan).photo,
+                    creationOrder = createdPlans.firstOrNull()?.creationOrder,
                     additionalPhotos = createdPlans.drop(1),
                     onResult = onResult,
                 )
@@ -174,7 +178,7 @@ class FirebaseInventoryGateway internal constructor(
                 displayUrl = requireNotNull(plan.photoPlan.revision).locations.full,
             ) { result ->
                 result.onSuccess {
-                    createNext(index + 1, created + plan)
+                    createNext(index + 1, created + plan.copy(creationOrder = index.toLong()))
                 }.onFailure { failure ->
                     deletePhotoAttachments(householdId, item, created) {
                         onResult(Result.failure(failure))
@@ -286,6 +290,7 @@ class FirebaseInventoryGateway internal constructor(
                         householdId = householdId,
                         item = item,
                         updated = updated,
+                        updater = updater,
                         photoUpdate = photoUpdate,
                         photoPlan = photoPlan,
                         onResult = onResult,
@@ -440,9 +445,16 @@ class FirebaseInventoryGateway internal constructor(
                     }
                 }.onSuccess {
                     uploadCreatedPhotosAndComplete(
+                        householdId = householdId,
                         result = Result.success(projected),
-                        firstPhotoPlan = projectedPlan,
-                        additionalPhotos = created.filterNot { it === projectedPlan },
+                        item = item,
+                        updater = updater,
+                        firstPhotoPlan = created.firstOrNull {
+                            it.photoPlan.attachmentId == projectedPlan?.photoPlan?.attachmentId
+                        } ?: projectedPlan,
+                        additionalPhotos = created.filterNot {
+                            it.photoPlan.attachmentId == projectedPlan?.photoPlan?.attachmentId
+                        },
                         onResult = { saved ->
                             val oldAttachmentId = item.photoAttachmentId
                             val shouldDeleteOldAttachment =
@@ -640,7 +652,12 @@ class FirebaseInventoryGateway internal constructor(
             }
             create { result ->
                 result.onSuccess {
-                    createNext(index + 1, created + plan)
+                    createNext(
+                        index + 1,
+                        created + plan.copy(
+                            creationOrder = creationOrderStart?.plus(index),
+                        ),
+                    )
                 }.onFailure { failure -> onFailure(failure, created) }
             }
         }
@@ -685,6 +702,7 @@ class FirebaseInventoryGateway internal constructor(
         photoPlan: ItemPhotoUpdatePlan,
         updater: AuthenticatedIdentity,
         photo: ItemPhoto,
+        creationOrder: Long? = null,
         additionalPhotos: List<AttachmentPhotoPlan> = emptyList(),
         onResult: (Result<Item>) -> Unit,
     ) {
@@ -707,8 +725,11 @@ class FirebaseInventoryGateway internal constructor(
         ) { result ->
             result.onSuccess {
                 uploadCreatedPhotosAndComplete(
+                    householdId = householdId,
                     result = Result.success(projected),
-                    firstPhotoPlan = AttachmentPhotoPlan(photo, photoPlan),
+                    item = item,
+                    updater = updater,
+                    firstPhotoPlan = AttachmentPhotoPlan(photo, photoPlan, creationOrder),
                     additionalPhotos = additionalPhotos,
                     onResult = onResult,
                 )
@@ -725,30 +746,174 @@ class FirebaseInventoryGateway internal constructor(
     }
 
     private fun uploadCreatedPhotosAndComplete(
+        householdId: String,
         result: Result<Item>,
+        item: Item,
+        updater: AuthenticatedIdentity,
         firstPhotoPlan: AttachmentPhotoPlan?,
         additionalPhotos: List<AttachmentPhotoPlan>,
         onResult: (Result<Item>) -> Unit,
     ) {
         try {
             firstPhotoPlan?.let { plan ->
-                runCatching {
-                    photoStore.uploadInBackground(
-                        requireNotNull(plan.photoPlan.revision),
-                        plan.photo,
-                    )
-                }
+                enqueueAttachmentUpload(
+                    householdId = householdId,
+                    item = item,
+                    updater = updater,
+                    plan = plan,
+                    projected = plan === firstPhotoPlan,
+                    uploadThumbnail = true,
+                )
             }
             additionalPhotos.forEach { plan ->
-                runCatching {
-                    photoStore.uploadDisplayInBackground(
-                        requireNotNull(plan.photoPlan.revision),
-                        plan.photo,
-                    )
-                }
+                enqueueAttachmentUpload(
+                    householdId = householdId,
+                    item = item,
+                    updater = updater,
+                    plan = plan,
+                    projected = false,
+                    uploadThumbnail = false,
+                )
             }
         } finally {
             onResult(result)
+        }
+    }
+
+    private fun enqueueAttachmentUpload(
+        householdId: String,
+        item: Item,
+        updater: AuthenticatedIdentity,
+        plan: AttachmentPhotoPlan,
+        projected: Boolean,
+        uploadThumbnail: Boolean,
+    ) {
+        val revision = plan.photoPlan.revision ?: return
+        val attachmentId = plan.photoPlan.attachmentId
+        if (attachmentGateway == null || attachmentId == null) {
+            runCatching {
+                if (uploadThumbnail) {
+                    photoStore.uploadInBackground(revision, plan.photo)
+                } else {
+                    photoStore.uploadDisplayInBackground(revision, plan.photo)
+                }
+            }
+            return
+        }
+
+        val failure = AttachmentUploadFailure(
+            id = attachmentId,
+            householdId = householdId,
+            itemId = item.id,
+            attachmentId = attachmentId,
+            originatingMemberId = updater.id,
+            displayStoragePath = revision.fullStoragePath,
+            thumbnailStoragePath = revision.thumbnailStoragePath,
+        )
+        val sourceUris = if (uploadThumbnail) {
+            listOf(plan.photo.uri, plan.photo.thumbnailUri)
+        } else {
+            listOf(plan.photo.uri)
+        }
+        uploadFailureRegistry.prepare(
+            failure = failure,
+            sourceUris = sourceUris,
+            retry = {
+                republishAttachmentUpload(
+                    householdId = householdId,
+                    item = item,
+                    updater = updater,
+                    plan = plan,
+                    projected = projected,
+                    uploadThumbnail = uploadThumbnail,
+                    failure = failure,
+                )
+            },
+        )
+        runCatching {
+            if (uploadThumbnail) {
+                photoStore.uploadInBackground(revision, plan.photo, failure)
+            } else {
+                photoStore.uploadDisplayInBackground(revision, plan.photo, failure)
+            }
+        }.onFailure { uploadFailureRegistry.markFailed(failure, it) }
+    }
+
+    private fun republishAttachmentUpload(
+        householdId: String,
+        item: Item,
+        updater: AuthenticatedIdentity,
+        plan: AttachmentPhotoPlan,
+        projected: Boolean,
+        uploadThumbnail: Boolean,
+        failure: AttachmentUploadFailure,
+    ) {
+        val gateway = requireNotNull(attachmentGateway)
+        val attachmentId = requireNotNull(plan.photoPlan.attachmentId)
+        val create: ((Result<ItemAttachment>) -> Unit) -> Unit = { callback ->
+            if (plan.creationOrder == null) {
+                gateway.create(
+                    household = householdFor(householdId),
+                    item = item,
+                    attachmentId = attachmentId,
+                    contentType = OPTIMIZED_ATTACHMENT_IMAGE_CONTENT_TYPE,
+                    displayUrl = requireNotNull(plan.photoPlan.full),
+                    onResult = callback,
+                )
+            } else {
+                gateway.createInOrder(
+                    household = householdFor(householdId),
+                    item = item,
+                    attachmentId = attachmentId,
+                    creationOrder = plan.creationOrder,
+                    contentType = OPTIMIZED_ATTACHMENT_IMAGE_CONTENT_TYPE,
+                    displayUrl = requireNotNull(plan.photoPlan.full),
+                    onResult = callback,
+                )
+            }
+        }
+        create { result ->
+            result.onFailure { uploadFailureRegistry.markFailed(failure, it) }
+                .onSuccess {
+                    if (!projected) {
+                        enqueueAttachmentUpload(
+                            householdId,
+                            item,
+                            updater,
+                            plan,
+                            projected = false,
+                            uploadThumbnail = uploadThumbnail,
+                        )
+                        return@onSuccess
+                    }
+                    val restored = item.copy(
+                        photoAttachmentId = attachmentId,
+                        photoUrl = plan.photoPlan.full,
+                        photoThumbnailUrl = plan.photoPlan.thumbnail,
+                    )
+                    store.updateItem(
+                        householdId = householdId,
+                        itemId = item.id,
+                        data = photoProjectionData(restored, updater),
+                    ) { projectionResult ->
+                        projectionResult.onFailure { failureCause ->
+                            gateway.delete(
+                                household = householdFor(householdId),
+                                item = item,
+                                attachment = projectedAttachment(restored, attachmentId),
+                            ) { uploadFailureRegistry.markFailed(failure, failureCause) }
+                        }.onSuccess {
+                            enqueueAttachmentUpload(
+                                householdId,
+                                restored,
+                                updater,
+                                plan,
+                                projected = true,
+                                uploadThumbnail = uploadThumbnail,
+                            )
+                        }
+                    }
+                }
         }
     }
 
@@ -792,16 +957,24 @@ class FirebaseInventoryGateway internal constructor(
         householdId: String,
         item: Item,
         updated: Item,
+        updater: AuthenticatedIdentity,
         photoUpdate: ItemPhotoUpdate,
         photoPlan: ItemPhotoUpdatePlan,
         onResult: (Result<Item>) -> Unit,
     ) {
-        try {
-            if (photoUpdate is ItemPhotoUpdate.Replaced && photoPlan.revision != null) {
-                photoStore.uploadInBackground(photoPlan.revision, photoUpdate.photo)
+        if (photoUpdate is ItemPhotoUpdate.Replaced && photoPlan.revision != null) {
+            if (attachmentGateway == null) {
+                runCatching { photoStore.uploadInBackground(photoPlan.revision, photoUpdate.photo) }
+            } else {
+                enqueueAttachmentUpload(
+                    householdId = householdId,
+                    item = item,
+                    updater = updater,
+                    plan = AttachmentPhotoPlan(photoUpdate.photo, photoPlan),
+                    projected = true,
+                    uploadThumbnail = true,
+                )
             }
-        } catch (_: RuntimeException) {
-            // The Item remains usable with its photo placeholder.
         }
 
         val oldAttachmentId = item.photoAttachmentId
@@ -926,6 +1099,7 @@ private data class ItemPhotoUpdatePlan(
 private data class AttachmentPhotoPlan(
     val photo: ItemPhoto,
     val photoPlan: ItemPhotoUpdatePlan,
+    val creationOrder: Long? = null,
 )
 
 internal interface InventoryPhotoStore {
@@ -944,10 +1118,22 @@ internal interface InventoryPhotoStore {
         photo: ItemPhoto,
     )
 
+    fun uploadInBackground(
+        revision: ItemPhotoRevision,
+        photo: ItemPhoto,
+        failure: AttachmentUploadFailure?,
+    ) = uploadInBackground(revision, photo)
+
     fun uploadDisplayInBackground(
         revision: ItemPhotoRevision,
         photo: ItemPhoto,
     ) = uploadInBackground(revision, photo)
+
+    fun uploadDisplayInBackground(
+        revision: ItemPhotoRevision,
+        photo: ItemPhoto,
+        failure: AttachmentUploadFailure?,
+    ) = uploadDisplayInBackground(revision, photo)
 
     fun uploadThumbnailInBackground(
         revision: ItemPhotoRevision,

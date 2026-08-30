@@ -1423,6 +1423,33 @@ class InventoryControllerTest {
         assertTrue(work.requests.isEmpty())
     }
 
+    @Test
+    fun `originating Member sees a failed attachment draft and can remove it`() {
+        val registry = AttachmentUploadFailureRegistry()
+        val failure = AttachmentUploadFailure(
+            id = "attachment-1",
+            householdId = household().id,
+            itemId = "drill",
+            attachmentId = "attachment-1",
+            originatingMemberId = identity().id,
+            displayStoragePath = "display.webp",
+            thumbnailStoragePath = "thumb.webp",
+        )
+        val controller = InventoryController(
+            household = household(),
+            identity = identity(),
+            gateway = FakeInventoryGateway(inventory()),
+            rootChildItemCache = NoRootChildItemCache,
+            attachmentUploadFailureRegistry = registry,
+        )
+        registry.prepare(failure, emptyList()) {}
+        registry.markFailed(failure, IllegalStateException("offline"))
+
+        assertEquals("attachment-1", controller.state.failedAttachmentDrafts.single().id)
+        controller.removeFailedAttachment("attachment-1")
+        assertTrue(controller.state.failedAttachmentDrafts.isEmpty())
+    }
+
     @Test(expected = InvalidInventoryException::class)
     fun `Inventory rejects a disconnected Item`() {
         Inventory.from(

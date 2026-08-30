@@ -2,6 +2,7 @@ package com.azhidkov.mystuff
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.UUID
 
@@ -49,7 +50,7 @@ class InventoryPhotoBackgroundWorkTest {
     }
 
     @Test
-    fun `versioned full upload retries independently without preventing thumbnail success`() {
+    fun `failed upload is terminal and does not retry automatically`() {
         val revision = "11111111-1111-1111-1111-111111111111"
         val fullPath = "households/household-1/items/item-1-$revision.webp"
         val thumbnailPath = "households/household-1/items/item-1-$revision-thumb.webp"
@@ -57,7 +58,6 @@ class InventoryPhotoBackgroundWorkTest {
             outcomes = mutableMapOf(
                 fullPath to mutableListOf(
                     Result.failure(IllegalStateException("offline")),
-                    Result.success(Unit),
                 ),
                 thumbnailPath to mutableListOf(
                     Result.success(Unit),
@@ -78,18 +78,85 @@ class InventoryPhotoBackgroundWorkTest {
                 sourceUri = "content://mystuff/thumb.webp",
             ),
         )
-        val retriedFullResult = runner.run(
-            PhotoTransferTask.Upload(
-                storagePath = fullPath,
-                sourceUri = "content://mystuff/full.webp",
+        assertEquals(PhotoTransferResult.Failure, fullResult)
+        assertEquals(PhotoTransferResult.Success, thumbnailResult)
+        assertEquals(1, remote.attempts[fullPath])
+        assertEquals(1, remote.attempts[thumbnailPath])
+    }
+
+    @Test
+    fun `attachment upload failure metadata survives WorkManager data round trips`() {
+        val failure = AttachmentUploadFailure(
+            id = "attachment-1",
+            householdId = "household-1",
+            itemId = "item-1",
+            attachmentId = "attachment-1",
+            originatingMemberId = "member-1",
+            displayStoragePath = "households/household-1/items/item-1/attachments/attachment-1.webp",
+            thumbnailStoragePath = "households/household-1/items/item-1/attachments/attachment-1-thumb.webp",
+        )
+        val task = PhotoTransferTask.Upload(
+            storagePath = failure.displayStoragePath,
+            sourceUri = "content://mystuff/full.webp",
+            additionalUploads = listOf(
+                PhotoTransferTask.UploadPart(
+                    failure.thumbnailStoragePath,
+                    "content://mystuff/thumb.webp",
+                ),
             ),
+            uploadFailure = failure,
         )
 
-        assertEquals(PhotoTransferResult.Retry, fullResult)
-        assertEquals(PhotoTransferResult.Success, thumbnailResult)
-        assertEquals(PhotoTransferResult.Success, retriedFullResult)
-        assertEquals(2, remote.attempts[fullPath])
-        assertEquals(1, remote.attempts[thumbnailPath])
+        assertEquals(task, PhotoTransferTask.fromWorkData(task.toWorkData()))
+    }
+
+    @Test
+    fun `one failed attachment does not prevent sibling transfers from being queued`() {
+        val queue = RecordingPhotoTransferQueue()
+        val store = BackgroundInventoryPhotoStore("gs://mystuff", queue)
+        val first = store.newAttachmentRevision("household-1", "item-1", "first")
+        val second = store.newAttachmentRevision("household-1", "item-1", "second")
+
+        store.uploadDisplayInBackground(first, ItemPhoto("content://first.webp"))
+        store.uploadDisplayInBackground(second, ItemPhoto("content://second.webp"))
+
+        assertEquals(2, queue.tasks.size)
+    }
+
+    @Test
+    fun `failure registry exposes retry and remove only for the current process`() {
+        val registry = AttachmentUploadFailureRegistry()
+        val failure = AttachmentUploadFailure(
+            id = "attachment-1",
+            householdId = "household-1",
+            itemId = "item-1",
+            attachmentId = "attachment-1",
+            originatingMemberId = "member-1",
+            displayStoragePath = "display.webp",
+            thumbnailStoragePath = "thumb.webp",
+        )
+        val events = mutableListOf<List<FailedItemAttachmentDraft>>()
+        val cleaned = mutableListOf<String>()
+        var retries = 0
+        registry.sourceCleaner = { cleaned += it }
+        val subscription = registry.observe { events += it }
+        registry.prepare(
+            failure = failure,
+            sourceUris = listOf("content://full", "content://thumb"),
+            retry = { retries += 1 },
+        )
+        registry.markFailed(failure, IllegalStateException("offline"))
+
+        assertEquals("attachment-1", events.last().single().attachmentId)
+        registry.retry("attachment-1")
+        assertEquals(1, retries)
+        assertTrue(events.last().isEmpty())
+
+        registry.markFailed(failure, IllegalStateException("still offline"))
+        registry.remove("attachment-1")
+        assertEquals(listOf("content://full", "content://thumb"), cleaned)
+        assertTrue(events.last().isEmpty())
+        subscription.cancel()
     }
 
     @Test
@@ -122,20 +189,24 @@ class InventoryPhotoBackgroundWorkTest {
         assertEquals(
             listOf(
                 PhotoTransferTask.Upload(
-                    "households/household-1/items/item-1-11111111-1111-1111-1111-111111111111.webp",
-                    "content://old-full.webp",
+                    storagePath = "households/household-1/items/item-1-11111111-1111-1111-1111-111111111111.webp",
+                    sourceUri = "content://old-full.webp",
+                    additionalUploads = listOf(
+                        PhotoTransferTask.UploadPart(
+                            "households/household-1/items/item-1-11111111-1111-1111-1111-111111111111-thumb.webp",
+                            "content://old-thumb.webp",
+                        ),
+                    ),
                 ),
                 PhotoTransferTask.Upload(
-                    "households/household-1/items/item-1-11111111-1111-1111-1111-111111111111-thumb.webp",
-                    "content://old-thumb.webp",
-                ),
-                PhotoTransferTask.Upload(
-                    "households/household-1/items/item-1-22222222-2222-2222-2222-222222222222.webp",
-                    "content://new-full.webp",
-                ),
-                PhotoTransferTask.Upload(
-                    "households/household-1/items/item-1-22222222-2222-2222-2222-222222222222-thumb.webp",
-                    "content://new-thumb.webp",
+                    storagePath = "households/household-1/items/item-1-22222222-2222-2222-2222-222222222222.webp",
+                    sourceUri = "content://new-full.webp",
+                    additionalUploads = listOf(
+                        PhotoTransferTask.UploadPart(
+                            "households/household-1/items/item-1-22222222-2222-2222-2222-222222222222-thumb.webp",
+                            "content://new-thumb.webp",
+                        ),
+                    ),
                 ),
             ),
             queue.tasks,

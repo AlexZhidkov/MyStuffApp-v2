@@ -4,28 +4,144 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.core.net.toUri
-import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.Data
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
-import androidx.work.WorkRequest
 import androidx.work.Worker
 import androidx.work.WorkerParameters
 import com.google.android.gms.tasks.Tasks
+import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.storage.FirebaseStorage
 import com.google.firebase.storage.StorageException
 import com.google.firebase.storage.StorageMetadata
 import java.io.File
 import java.util.UUID
-import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
+
+/** Metadata needed to remove a failed attachment without making the failure durable. */
+internal data class AttachmentUploadFailure(
+    val id: String,
+    val householdId: String,
+    val itemId: String,
+    val attachmentId: String,
+    val originatingMemberId: String,
+    val displayStoragePath: String,
+    val thumbnailStoragePath: String,
+)
+
+data class FailedItemAttachmentDraft(
+    val id: String,
+    val householdId: String,
+    val itemId: String,
+    val attachmentId: String,
+    val originatingMemberId: String,
+    val message: String,
+)
+
+internal class AttachmentUploadFailureRegistry {
+    private data class PendingUpload(
+        val failure: AttachmentUploadFailure,
+        val sourceUris: List<String>,
+        val retry: () -> Unit,
+    )
+
+    private val lock = Any()
+    private val pending = mutableMapOf<String, PendingUpload>()
+    private val failed = linkedMapOf<String, FailedItemAttachmentDraft>()
+    private val observers = mutableSetOf<(List<FailedItemAttachmentDraft>) -> Unit>()
+
+    fun prepare(
+        failure: AttachmentUploadFailure,
+        sourceUris: List<String>,
+        retry: () -> Unit,
+    ) {
+        synchronized(lock) {
+            pending[failure.id] = PendingUpload(failure, sourceUris, retry)
+        }
+    }
+
+    fun markFailed(failure: AttachmentUploadFailure, cause: Throwable?) {
+        val shouldNotify = synchronized(lock) {
+            if (!pending.containsKey(failure.id)) {
+                false
+            } else {
+                failed[failure.id] = FailedItemAttachmentDraft(
+                    id = failure.id,
+                    householdId = failure.householdId,
+                    itemId = failure.itemId,
+                    attachmentId = failure.attachmentId,
+                    originatingMemberId = failure.originatingMemberId,
+                    message = "Couldn't upload the Item Attachment. Tap Retry to try again.",
+                )
+                true
+            }
+        }
+        if (shouldNotify) notifyObservers()
+    }
+
+    fun complete(id: String) {
+        val (upload, hadFailure) = synchronized(lock) {
+            pending.remove(id) to (failed.remove(id) != null)
+        }
+        upload?.sourceUris?.forEach(::forgetSource)
+        if (hadFailure) notifyObservers()
+    }
+
+    fun retry(id: String) {
+        val upload = synchronized(lock) {
+            if (!pending.containsKey(id)) return@synchronized null
+            failed.remove(id)
+            pending[id]
+        }
+        upload ?: return
+        notifyObservers()
+        runCatching { upload.retry() }
+            .onFailure { markFailed(upload.failure, it) }
+    }
+
+    fun remove(id: String) {
+        val (upload, hadFailure) = synchronized(lock) {
+            pending.remove(id) to (failed.remove(id) != null)
+        }
+        upload ?: return
+        upload.sourceUris.forEach(::forgetSource)
+        if (hadFailure) notifyObservers()
+    }
+
+    fun observe(onChanged: (List<FailedItemAttachmentDraft>) -> Unit): InventorySubscription {
+        val snapshot = synchronized(lock) {
+            observers += onChanged
+            failed.values.toList()
+        }
+        onChanged(snapshot)
+        return InventorySubscription { synchronized(lock) { observers -= onChanged } }
+    }
+
+    private fun notifyObservers() {
+        val (snapshot, listeners) = synchronized(lock) {
+            failed.values.toList() to observers.toList()
+        }
+        listeners.forEach { it(snapshot) }
+    }
+
+    private fun forgetSource(uri: String) {
+        sourceCleaner(uri)
+    }
+
+    @Volatile
+    var sourceCleaner: (String) -> Unit = {}
+}
+
+internal val processAttachmentUploadFailures = AttachmentUploadFailureRegistry()
 
 internal sealed interface PhotoTransferTask {
     val storagePath: String
     val operationName: String
+    val uploadFailure: AttachmentUploadFailure?
+        get() = null
 
     fun execute(remoteStore: PhotoRemoteStore): Result<Unit>
     fun cleanUpLocalSource(context: Context)
@@ -33,18 +149,29 @@ internal sealed interface PhotoTransferTask {
     data class Upload(
         override val storagePath: String,
         val sourceUri: String,
+        val additionalUploads: List<UploadPart> = emptyList(),
+        override val uploadFailure: AttachmentUploadFailure? = null,
     ) : PhotoTransferTask {
         override val operationName = UPLOAD_OPERATION
 
-        override fun execute(remoteStore: PhotoRemoteStore): Result<Unit> =
-            remoteStore.upload(storagePath, sourceUri)
+        override fun execute(remoteStore: PhotoRemoteStore): Result<Unit> = runCatching {
+            remoteStore.upload(storagePath, sourceUri).getOrThrow()
+            additionalUploads.forEach { upload ->
+                remoteStore.upload(upload.storagePath, upload.sourceUri).getOrThrow()
+            }
+        }
 
         override fun cleanUpLocalSource(context: Context) {
-            runCatching {
-                context.contentResolver.delete(sourceUri.toUri(), null, null)
+            (listOf(sourceUri) + additionalUploads.map(UploadPart::sourceUri)).forEach { uri ->
+                runCatching { context.contentResolver.delete(uri.toUri(), null, null) }
             }
         }
     }
+
+    data class UploadPart(
+        val storagePath: String,
+        val sourceUri: String,
+    )
 
     data class Delete(
         override val storagePath: String,
@@ -77,6 +204,26 @@ internal sealed interface PhotoTransferTask {
         )
             .putString(STORAGE_PATH_KEY, storagePath)
         if (this is Upload) builder.putString(SOURCE_URI_KEY, sourceUri)
+        if (this is Upload && additionalUploads.isNotEmpty()) {
+            builder.putStringArray(
+                ADDITIONAL_STORAGE_PATHS_KEY,
+                additionalUploads.map(UploadPart::storagePath).toTypedArray(),
+            )
+            builder.putStringArray(
+                ADDITIONAL_SOURCE_URIS_KEY,
+                additionalUploads.map(UploadPart::sourceUri).toTypedArray(),
+            )
+        }
+        uploadFailure?.let { failure ->
+            builder
+                .putString(FAILURE_ID_KEY, failure.id)
+                .putString(FAILURE_HOUSEHOLD_ID_KEY, failure.householdId)
+                .putString(FAILURE_ITEM_ID_KEY, failure.itemId)
+                .putString(FAILURE_ATTACHMENT_ID_KEY, failure.attachmentId)
+                .putString(FAILURE_MEMBER_ID_KEY, failure.originatingMemberId)
+                .putString(FAILURE_DISPLAY_PATH_KEY, failure.displayStoragePath)
+                .putString(FAILURE_THUMBNAIL_PATH_KEY, failure.thumbnailStoragePath)
+        }
         if (this is GenerateThumbnail) builder.putString(SOURCE_LOCATION_KEY, sourceLocation)
         return builder.build()
     }
@@ -85,10 +232,34 @@ internal sealed interface PhotoTransferTask {
         fun fromWorkData(data: Data): PhotoTransferTask? = runCatching {
             val storagePath = requireNotNull(data.getString(STORAGE_PATH_KEY))
             when (requireNotNull(data.getString(OPERATION_KEY))) {
-                UPLOAD_OPERATION -> Upload(
-                    storagePath,
-                    requireNotNull(data.getString(SOURCE_URI_KEY)),
-                )
+                UPLOAD_OPERATION -> {
+                    val additionalPaths = data.getStringArray(ADDITIONAL_STORAGE_PATHS_KEY)
+                        ?: emptyArray()
+                    val additionalSources = data.getStringArray(ADDITIONAL_SOURCE_URIS_KEY)
+                        ?: emptyArray()
+                    require(additionalPaths.size == additionalSources.size)
+                    Upload(
+                        storagePath = storagePath,
+                        sourceUri = requireNotNull(data.getString(SOURCE_URI_KEY)),
+                        additionalUploads = additionalPaths.zip(additionalSources)
+                            .map { (path, source) -> UploadPart(path, source) },
+                        uploadFailure = data.getString(FAILURE_ID_KEY)?.let {
+                            AttachmentUploadFailure(
+                                id = it,
+                                householdId = requireNotNull(data.getString(FAILURE_HOUSEHOLD_ID_KEY)),
+                                itemId = requireNotNull(data.getString(FAILURE_ITEM_ID_KEY)),
+                                attachmentId = requireNotNull(data.getString(FAILURE_ATTACHMENT_ID_KEY)),
+                                originatingMemberId = requireNotNull(data.getString(FAILURE_MEMBER_ID_KEY)),
+                                displayStoragePath = requireNotNull(
+                                    data.getString(FAILURE_DISPLAY_PATH_KEY),
+                                ),
+                                thumbnailStoragePath = requireNotNull(
+                                    data.getString(FAILURE_THUMBNAIL_PATH_KEY),
+                                ),
+                            )
+                        },
+                    )
+                }
                 DELETE_OPERATION -> Delete(storagePath)
                 GENERATE_THUMBNAIL_OPERATION -> GenerateThumbnail(
                     storagePath,
@@ -156,24 +327,53 @@ internal class BackgroundInventoryPhotoStore(
         )
     }
 
-    override fun uploadInBackground(revision: ItemPhotoRevision, photo: ItemPhoto) {
-        queueUpload(revision.fullStoragePath, photo.uri)
-        queueUpload(revision.thumbnailStoragePath, photo.thumbnailUri)
+    override fun uploadInBackground(
+        revision: ItemPhotoRevision,
+        photo: ItemPhoto,
+    ) = uploadInBackground(revision, photo, null)
+
+    override fun uploadInBackground(
+        revision: ItemPhotoRevision,
+        photo: ItemPhoto,
+        failure: AttachmentUploadFailure?,
+    ) {
+        queue.replace(
+            PhotoTransferTask.Upload(
+                storagePath = revision.fullStoragePath,
+                sourceUri = photo.uri,
+                additionalUploads = listOf(
+                    PhotoTransferTask.UploadPart(
+                        storagePath = revision.thumbnailStoragePath,
+                        sourceUri = photo.thumbnailUri,
+                    ),
+                ),
+                uploadFailure = failure,
+            ),
+        )
     }
 
-    override fun uploadDisplayInBackground(revision: ItemPhotoRevision, photo: ItemPhoto) {
-        queueUpload(revision.fullStoragePath, photo.uri)
+    override fun uploadDisplayInBackground(
+        revision: ItemPhotoRevision,
+        photo: ItemPhoto,
+        failure: AttachmentUploadFailure?,
+    ) {
+        queueUpload(revision.fullStoragePath, photo.uri, failure)
     }
 
     override fun uploadThumbnailInBackground(revision: ItemPhotoRevision, photo: ItemPhoto) {
         queueUpload(revision.thumbnailStoragePath, photo.thumbnailUri)
     }
 
-    private fun queueUpload(storagePath: String, sourceUri: String) {
+    private fun queueUpload(
+        storagePath: String,
+        sourceUri: String,
+        failure: AttachmentUploadFailure? = null,
+    ) {
         queue.replace(
             PhotoTransferTask.Upload(
-                storagePath,
-                sourceUri,
+                storagePath = storagePath,
+                sourceUri = sourceUri,
+                uploadFailure = failure,
             ),
         )
     }
@@ -213,11 +413,6 @@ internal class WorkManagerPhotoTransferQueue(context: Context) : PhotoTransferQu
                     .setRequiredNetworkType(NetworkType.CONNECTED)
                     .build(),
             )
-            .setBackoffCriteria(
-                BackoffPolicy.EXPONENTIAL,
-                WorkRequest.MIN_BACKOFF_MILLIS,
-                TimeUnit.MILLISECONDS,
-            )
             .build()
         workManager.enqueueUniqueWork(
             "inventory-photo:${task.storagePath}",
@@ -229,7 +424,15 @@ internal class WorkManagerPhotoTransferQueue(context: Context) : PhotoTransferQu
 
 internal enum class PhotoTransferResult {
     Success,
-    Retry,
+    Failure,
+}
+
+internal interface PhotoTransferFailureHandler {
+    fun handle(failure: AttachmentUploadFailure, remoteStore: PhotoRemoteStore)
+}
+
+internal object NoPhotoTransferFailureHandler : PhotoTransferFailureHandler {
+    override fun handle(failure: AttachmentUploadFailure, remoteStore: PhotoRemoteStore) = Unit
 }
 
 internal interface PhotoRemoteStore {
@@ -241,10 +444,15 @@ internal interface PhotoRemoteStore {
 
 internal class PhotoTransferRunner(
     private val remoteStore: PhotoRemoteStore,
+    private val failureHandler: PhotoTransferFailureHandler = NoPhotoTransferFailureHandler,
 ) {
     fun run(task: PhotoTransferTask): PhotoTransferResult {
         val result = task.execute(remoteStore)
-        return if (result.isSuccess) PhotoTransferResult.Success else PhotoTransferResult.Retry
+        if (result.isSuccess) return PhotoTransferResult.Success
+        task.uploadFailure?.let { failure ->
+            runCatching { failureHandler.handle(failure, remoteStore) }
+        }
+        return PhotoTransferResult.Failure
     }
 }
 
@@ -254,13 +462,54 @@ internal class InventoryPhotoTransferWorker(
 ) : Worker(appContext, workerParameters) {
     override fun doWork(): Result {
         val task = PhotoTransferTask.fromWorkData(inputData) ?: return Result.failure()
-        val result = PhotoTransferRunner(FirebasePhotoRemoteStore()).run(task)
+        val result = PhotoTransferRunner(
+            remoteStore = FirebasePhotoRemoteStore(),
+            failureHandler = FirebaseAttachmentUploadFailureHandler(),
+        ).run(task)
         if (result == PhotoTransferResult.Success) {
+            task.uploadFailure?.let { processAttachmentUploadFailures.complete(it.id) }
             task.cleanUpLocalSource(applicationContext)
+        } else {
+            task.uploadFailure?.let { failure ->
+                processAttachmentUploadFailures.markFailed(failure, null)
+            }
         }
         return when (result) {
             PhotoTransferResult.Success -> Result.success()
-            PhotoTransferResult.Retry -> Result.retry()
+            PhotoTransferResult.Failure -> Result.failure()
+        }
+    }
+}
+
+private class FirebaseAttachmentUploadFailureHandler(
+    private val firestore: FirebaseFirestore = FirebaseFirestore.getInstance(),
+) : PhotoTransferFailureHandler {
+    override fun handle(failure: AttachmentUploadFailure, remoteStore: PhotoRemoteStore) {
+        listOf(failure.displayStoragePath, failure.thumbnailStoragePath)
+            .forEach { path -> runCatching { remoteStore.delete(path) } }
+
+        val item = firestore.collection(FAILURE_HOUSEHOLDS)
+            .document(failure.householdId)
+            .collection(FAILURE_ITEMS)
+            .document(failure.itemId)
+        val attachment = item.collection(FAILURE_ATTACHMENTS).document(failure.attachmentId)
+        runCatching {
+            Tasks.await(
+                firestore.runTransaction { transaction ->
+                    val itemSnapshot = transaction.get(item)
+                    if (itemSnapshot.getString(FAILURE_PHOTO_ATTACHMENT_ID) == failure.attachmentId) {
+                        transaction.update(
+                            item,
+                            mapOf(
+                                FAILURE_PHOTO_ATTACHMENT_ID to null,
+                                FAILURE_PHOTO_URL to null,
+                                FAILURE_PHOTO_THUMBNAIL_URL to null,
+                            ),
+                        )
+                    }
+                    transaction.delete(attachment)
+                },
+            )
         }
     }
 }
@@ -352,6 +601,15 @@ private const val OPERATION_KEY = "operation"
 private const val STORAGE_PATH_KEY = "storage-path"
 private const val SOURCE_URI_KEY = "source-uri"
 private const val SOURCE_LOCATION_KEY = "source-location"
+private const val ADDITIONAL_STORAGE_PATHS_KEY = "additional-storage-paths"
+private const val ADDITIONAL_SOURCE_URIS_KEY = "additional-source-uris"
+private const val FAILURE_ID_KEY = "failure-id"
+private const val FAILURE_HOUSEHOLD_ID_KEY = "failure-household-id"
+private const val FAILURE_ITEM_ID_KEY = "failure-item-id"
+private const val FAILURE_ATTACHMENT_ID_KEY = "failure-attachment-id"
+private const val FAILURE_MEMBER_ID_KEY = "failure-member-id"
+private const val FAILURE_DISPLAY_PATH_KEY = "failure-display-path"
+private const val FAILURE_THUMBNAIL_PATH_KEY = "failure-thumbnail-path"
 private const val UPLOAD_OPERATION = "upload"
 private const val DELETE_OPERATION = "delete"
 private const val GENERATE_THUMBNAIL_OPERATION = "generate-thumbnail"
@@ -362,6 +620,12 @@ private const val ATTACHMENT_THUMBNAIL_QUALITY = 68
 private const val MIN_ATTACHMENT_THUMBNAIL_QUALITY = 20
 private const val ATTACHMENT_THUMBNAIL_QUALITY_STEP = 5
 private const val THUMBNAIL_SIZE_REDUCTION = 0.85f
+private const val FAILURE_HOUSEHOLDS = "households"
+private const val FAILURE_ITEMS = "items"
+private const val FAILURE_ATTACHMENTS = "attachments"
+private const val FAILURE_PHOTO_ATTACHMENT_ID = "photoAttachmentId"
+private const val FAILURE_PHOTO_URL = "photoUrl"
+private const val FAILURE_PHOTO_THUMBNAIL_URL = "photoThumbnailUrl"
 
 private fun attachmentThumbnailDimensions(width: Int, height: Int): Pair<Int, Int> {
     val longestSide = maxOf(width, height)

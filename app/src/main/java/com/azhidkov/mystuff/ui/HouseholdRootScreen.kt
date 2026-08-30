@@ -71,6 +71,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.azhidkov.mystuff.DeferredInventoryError
+import com.azhidkov.mystuff.FailedItemAttachmentDraft
 import com.azhidkov.mystuff.CarouselImage
 import com.azhidkov.mystuff.HouseholdInvitation
 import com.azhidkov.mystuff.InvitationStatus
@@ -281,6 +282,15 @@ private fun HouseholdRootContent(
                 .padding(horizontal = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            inventoryState.failedAttachmentDrafts.forEach { draft ->
+                item(key = "failed-attachment:${draft.id}") {
+                    FailedAttachmentCard(
+                        draft = draft,
+                        onRetry = { inventoryActions.retryFailedAttachment(draft.id) },
+                        onRemove = { inventoryActions.removeFailedAttachment(draft.id) },
+                    )
+                }
+            }
             if (showSearchResults) {
                 item {
                     Row(
@@ -522,6 +532,35 @@ private fun HouseholdRootContent(
                 }
             }
             item { Spacer(Modifier.height(24.dp)) }
+        }
+    }
+}
+
+@Composable
+private fun FailedAttachmentCard(
+    draft: FailedItemAttachmentDraft,
+    onRetry: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = draft.message,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = onRetry) { Text(stringResource(R.string.retry_attachment)) }
+                OutlinedButton(onClick = onRemove) {
+                    Text(stringResource(R.string.remove_attachment_draft))
+                }
+            }
         }
     }
 }

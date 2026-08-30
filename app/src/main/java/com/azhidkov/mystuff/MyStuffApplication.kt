@@ -1,6 +1,7 @@
 package com.azhidkov.mystuff
 
 import android.app.Application
+import androidx.core.net.toUri
 import com.google.firebase.Firebase
 import com.google.firebase.FirebaseApp
 import com.google.firebase.appcheck.appCheck
@@ -10,5 +11,8 @@ class MyStuffApplication : Application() {
         super.onCreate()
         FirebaseApp.initializeApp(this)
         Firebase.appCheck.installAppCheckProviderFactory(appCheckProviderFactory())
+        processAttachmentUploadFailures.sourceCleaner = { uri ->
+            runCatching { contentResolver.delete(uri.toUri(), null, null) }
+        }
     }
 }

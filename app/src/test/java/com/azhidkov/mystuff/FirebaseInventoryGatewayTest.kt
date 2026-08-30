@@ -8,6 +8,58 @@ import java.time.Instant
 
 class FirebaseInventoryGatewayTest {
     @Test
+    fun `moving an Item updates only its Parent Item and attribution`() {
+        val documents = FakeInventoryDocumentStore()
+        val gateway = FirebaseInventoryGateway(
+            documents,
+            FakeInventoryPhotoStore(),
+            FakeItemPhotoAttachmentGateway(),
+        )
+        val item = inventoryItem("item-1", "Cabinet", "garage")
+        var result: Result<Item>? = null
+
+        gateway.moveItem(
+            householdId = "household-1",
+            item = item,
+            newParentItemId = "shed",
+            updater = inventoryIdentity(),
+        ) { result = it }
+
+        assertEquals("shed", result?.getOrThrow()?.parentItemId)
+        assertEquals(
+            mapOf(
+                "parentItemId" to "shed",
+                "updatedAt" to documents.serverTimestamp,
+                "updatedById" to "member-1",
+                "updatedByDisplayName" to "Alex",
+            ),
+            documents.updatedData,
+        )
+        assertEquals(item.copy(parentItemId = "shed"), result?.getOrThrow())
+    }
+
+    @Test
+    fun `moving the root Item is rejected before persistence`() {
+        val documents = FakeInventoryDocumentStore()
+        val gateway = FirebaseInventoryGateway(
+            documents,
+            FakeInventoryPhotoStore(),
+            FakeItemPhotoAttachmentGateway(),
+        )
+        var result: Result<Item>? = null
+
+        gateway.moveItem(
+            householdId = "household-1",
+            item = inventoryItem("household-1", "Our Home", null),
+            newParentItemId = "shed",
+            updater = inventoryIdentity(),
+        ) { result = it }
+
+        assertTrue(result?.isFailure == true)
+        assertNull(documents.updatedData)
+    }
+
+    @Test
     fun `creating an Item with a photo creates and projects one Item Attachment`() {
         val documents = FakeInventoryDocumentStore()
         val photos = FakeInventoryPhotoStore()

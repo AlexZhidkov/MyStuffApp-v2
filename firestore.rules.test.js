@@ -705,6 +705,85 @@ test("Child Item update cannot change creation attribution Parent Item or root f
   ));
 });
 
+test("Household Member can move an Item while preserving its other fields", async () => {
+  await seedHousehold();
+  await seedHouseholdMember();
+  await testEnvironment.withSecurityRulesDisabled(async (context) => {
+    const database = context.firestore();
+    await setDoc(
+      doc(database, "households/household-1/items/item-1"),
+      childItemData("Cabinet", "household-1", {
+        description: "West wall",
+        tags: ["Storage"],
+      }),
+    );
+    await setDoc(
+      doc(database, "households/household-1/items/item-2"),
+      childItemData("Shed", "household-1"),
+    );
+  });
+  const database = testEnvironment.authenticatedContext("member-2").firestore();
+
+  await assertSucceeds(updateDoc(
+    doc(database, "households/household-1/items/item-1"),
+    {
+      parentItemId: "item-2",
+      updatedAt: serverTimestamp(),
+      updatedById: "member-2",
+      updatedByDisplayName: "Sam",
+    },
+  ));
+  const moved = (await getDoc(
+    doc(database, "households/household-1/items/item-1"),
+  )).data();
+  assert.equal(moved.parentItemId, "item-2");
+  assert.equal(moved.name, "Cabinet");
+  assert.equal(moved.description, "West wall");
+  assert.deepEqual(moved.tags, ["Storage"]);
+});
+
+test("Item moves reject the root, self, missing Parent Items, cross-Household Parents, and non-Members", async () => {
+  await seedHousehold();
+  await seedOtherHousehold();
+  await testEnvironment.withSecurityRulesDisabled(async (context) => {
+    const database = context.firestore();
+    await setDoc(
+      doc(database, "households/household-1/items/item-1"),
+      childItemData("Cabinet", "household-1"),
+    );
+    await setDoc(
+      doc(database, "households/household-1/items/item-2"),
+      childItemData("Shed", "household-1"),
+    );
+  });
+  const memberDatabase = testEnvironment.authenticatedContext("member-1").firestore();
+  const item = doc(memberDatabase, "households/household-1/items/item-1");
+  const moveFields = (parentItemId, memberId = "member-1", displayName = "Alex") => ({
+    parentItemId,
+    updatedAt: serverTimestamp(),
+    updatedById: memberId,
+    updatedByDisplayName: displayName,
+  });
+
+  await assertFails(updateDoc(
+    doc(memberDatabase, "households/household-1/items/household-1"),
+    moveFields("item-2"),
+  ));
+  await assertFails(updateDoc(item, moveFields("item-1")));
+  await assertFails(updateDoc(item, moveFields("missing-parent")));
+  await assertFails(updateDoc(item, moveFields("household-2")));
+  await assertFails(updateDoc(
+    doc(memberDatabase, "households/household-1/items/missing-item"),
+    moveFields("item-2"),
+  ));
+
+  const nonMemberDatabase = testEnvironment.authenticatedContext("member-4").firestore();
+  await assertFails(updateDoc(
+    doc(nonMemberDatabase, "households/household-1/items/item-1"),
+    moveFields("item-2", "member-4", "Pat"),
+  ));
+});
+
 test("only the Household Owner can create a pending invitation", async () => {
   await seedHousehold();
   await seedHouseholdMember();

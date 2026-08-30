@@ -76,6 +76,7 @@ import com.azhidkov.mystuff.CarouselImage
 import com.azhidkov.mystuff.HouseholdInvitation
 import com.azhidkov.mystuff.InvitationStatus
 import com.azhidkov.mystuff.InvitationUiState
+import com.azhidkov.mystuff.Inventory
 import com.azhidkov.mystuff.InventoryActions
 import com.azhidkov.mystuff.InventoryUiState
 import com.azhidkov.mystuff.Item
@@ -195,6 +196,23 @@ private fun HouseholdRootContent(
                 actions = inventoryActions,
             )
         }
+        return
+    }
+
+    inventoryState.itemMove?.let { moveState ->
+        BackHandler(enabled = !inventoryState.operationInProgress) {
+            inventoryActions.closeMoveItem()
+        }
+        ItemMoveScreen(
+            inventory = inventoryState.inventory,
+            item = inventoryState.inventory.item(moveState.itemId),
+            candidates = inventoryState.moveParentItems,
+            selectedParentItemId = moveState.selectedParentItemId,
+            operationInProgress = inventoryState.operationInProgress,
+            onSelect = inventoryActions::selectMoveParentItem,
+            onConfirm = inventoryActions::confirmMoveItem,
+            onClose = inventoryActions::closeMoveItem,
+        )
         return
     }
 
@@ -422,6 +440,9 @@ private fun HouseholdRootContent(
                                     contentDescription = stringResource(R.string.edit_item),
                                 )
                             }
+                            TextButton(onClick = inventoryActions::beginMoveItem) {
+                                Text(stringResource(R.string.move_item))
+                            }
                         }
                         webUrl?.let { url ->
                             IconButton(
@@ -535,6 +556,95 @@ private fun HouseholdRootContent(
         }
     }
 }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ItemMoveScreen(
+    inventory: Inventory,
+    item: Item,
+    candidates: List<Item>,
+    selectedParentItemId: String?,
+    operationInProgress: Boolean,
+    onSelect: (String) -> Unit,
+    onConfirm: () -> Unit,
+    onClose: () -> Unit,
+) {
+    Scaffold(
+        contentWindowInsets = WindowInsets.safeDrawing,
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(R.string.move_item_title)) },
+                navigationIcon = {
+                    TextButton(onClick = onClose, enabled = !operationInProgress) {
+                        Text(stringResource(R.string.cancel))
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(horizontal = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            item {
+                Text(
+                    text = stringResource(R.string.move_item_body, item.name),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+            }
+            if (candidates.isEmpty()) {
+                item { Text(stringResource(R.string.move_item_no_targets)) }
+            } else {
+                items(candidates, key = Item::id) { candidate ->
+                    val selected = candidate.id == selectedParentItemId
+                    if (selected) {
+                        Button(
+                            onClick = { onSelect(candidate.id) },
+                            enabled = !operationInProgress,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                candidatePathText(inventory, candidate),
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = { onSelect(candidate.id) },
+                            enabled = !operationInProgress,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                candidatePathText(inventory, candidate),
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
+                }
+            }
+            item {
+                Button(
+                    onClick = onConfirm,
+                    enabled = selectedParentItemId != null &&
+                        !operationInProgress,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    if (operationInProgress) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                    } else {
+                        Text(stringResource(R.string.move_item_confirm))
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun candidatePathText(inventory: Inventory, candidate: Item): String =
+    inventory.pathTo(candidate.id).joinToString(" → ", transform = Item::name)
 
 @Composable
 private fun FailedAttachmentCard(

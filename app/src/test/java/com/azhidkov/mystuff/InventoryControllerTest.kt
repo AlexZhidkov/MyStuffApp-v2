@@ -578,6 +578,61 @@ class InventoryControllerTest {
     }
 
     @Test
+    fun `Member moves an Item subtree and its paths use the new ancestry`() {
+        val household = household()
+        val garage = item("garage", "Garage", household.id)
+        val cabinet = item("cabinet", "Cabinet", garage.id)
+        val drill = item("drill", "Drill", cabinet.id)
+        val shed = item("shed", "Shed", household.id)
+        val gateway = FakeInventoryGateway(
+            Inventory.from(household, listOf(household.rootItem, garage, cabinet, drill, shed)),
+        )
+        val controller = InventoryController(household, identity(), gateway)
+
+        controller.openItem(cabinet.id)
+        controller.beginMoveItem()
+        assertEquals(
+            listOf(household.id, "shed"),
+            controller.state.moveParentItems.map(Item::id),
+        )
+
+        controller.selectMoveParentItem(shed.id)
+        controller.confirmMoveItem()
+
+        assertEquals("shed", gateway.movedParentItemId)
+        assertEquals(shed.id, controller.state.inventory.item(cabinet.id).parentItemId)
+        assertEquals(
+            listOf("Shed"),
+            controller.state.inventory.pathTo(cabinet.id).drop(1).dropLast(1).map(Item::name),
+        )
+        assertEquals(drill, controller.state.inventory.item(drill.id))
+        assertNull(controller.state.itemMove)
+    }
+
+    @Test
+    fun `root Item cannot start a move and descendants cannot be selected`() {
+        val household = household()
+        val source = item("source", "Source", household.id)
+        val child = item("child", "Child", source.id)
+        val target = item("target", "Target", household.id)
+        val controller = InventoryController(
+            household,
+            identity(),
+            FakeInventoryGateway(
+                Inventory.from(household, listOf(household.rootItem, source, child, target)),
+            ),
+        )
+
+        controller.beginMoveItem()
+        assertNull(controller.state.itemMove)
+        controller.openItem(source.id)
+        controller.beginMoveItem()
+        controller.selectMoveParentItem(child.id)
+
+        assertNull(controller.state.itemMove?.selectedParentItemId)
+    }
+
+    @Test
     fun `Item names are trimmed and contain one to one hundred Unicode characters`() {
         val gateway = FakeInventoryGateway(inventory())
         val controller = InventoryController(household(), identity(), gateway)
@@ -1522,6 +1577,8 @@ private class FakeInventoryGateway(
         private set
     var updatedAdditionalPhotos: List<ItemPhoto> = emptyList()
         private set
+    var movedParentItemId: String? = null
+        private set
     var deferCreates: Boolean = false
     private var pendingCreate: (() -> Unit)? = null
 
@@ -1628,6 +1685,19 @@ private class FakeInventoryGateway(
         updatedAdditionalPhotos = additionalPhotos
         inventory = inventory.withItem(updated)
         onResult(Result.success(updated))
+    }
+
+    override fun moveItem(
+        householdId: String,
+        item: Item,
+        newParentItemId: String,
+        updater: AuthenticatedIdentity,
+        onResult: (Result<Item>) -> Unit,
+    ) {
+        movedParentItemId = newParentItemId
+        val moved = item.copy(parentItemId = newParentItemId)
+        inventory = inventory.withItem(moved)
+        onResult(Result.success(moved))
     }
 }
 

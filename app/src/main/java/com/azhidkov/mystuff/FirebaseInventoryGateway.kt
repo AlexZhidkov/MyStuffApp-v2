@@ -323,6 +323,32 @@ class FirebaseInventoryGateway internal constructor(
         }
     }
 
+    override fun moveItem(
+        householdId: String,
+        item: Item,
+        newParentItemId: String,
+        updater: AuthenticatedIdentity,
+        onResult: (Result<Item>) -> Unit,
+    ) {
+        if (item.parentItemId == null || item.id == newParentItemId) {
+            onResult(Result.failure(InvalidItemMoveException("The Item move is invalid.")))
+            return
+        }
+        val moved = item.copy(parentItemId = newParentItemId)
+        store.updateItem(
+            householdId = householdId,
+            itemId = item.id,
+            data = mapOf(
+                PARENT_ITEM_ID to newParentItemId,
+                UPDATED_AT to store.serverTimestamp,
+                UPDATED_BY_ID to updater.id,
+                UPDATED_BY_DISPLAY_NAME to updater.attributionDisplayName(),
+            ),
+        ) { result ->
+            onResult(result.map { moved })
+        }
+    }
+
     override fun designateItemPhoto(
         householdId: String,
         item: Item,

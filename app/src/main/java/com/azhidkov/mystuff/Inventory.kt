@@ -4,6 +4,8 @@ class InvalidInventoryException : IllegalStateException(
     "Your Inventory data is incomplete. Please try again.",
 )
 
+class InvalidItemMoveException(message: String) : IllegalArgumentException(message)
+
 class Inventory private constructor(
     val householdId: String,
     val rootItemId: String,
@@ -35,6 +37,25 @@ class Inventory private constructor(
         rootItemId = rootItemId,
         items = allItems.filterNot { it.id == item.id } + item,
     )
+
+    fun moveItem(itemId: String, newParentItemId: String): Inventory {
+        val item = itemsById[itemId]
+            ?: throw InvalidItemMoveException("The Item no longer exists.")
+        itemsById[newParentItemId]
+            ?: throw InvalidItemMoveException("The selected Parent Item no longer exists.")
+        if (item.id == rootItemId) {
+            throw InvalidItemMoveException("The Household root Item cannot be moved.")
+        }
+        if (item.id == newParentItemId) {
+            throw InvalidItemMoveException("An Item cannot be its own Parent Item.")
+        }
+        if (pathTo(newParentItemId).any { it.id == item.id }) {
+            throw InvalidItemMoveException(
+                "An Item cannot be moved beneath one of its Child Items.",
+            )
+        }
+        return withItem(item.copy(parentItemId = newParentItemId))
+    }
 
     companion object {
         fun from(household: Household, items: List<Item>): Inventory = from(

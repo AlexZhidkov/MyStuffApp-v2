@@ -39,6 +39,14 @@ interface InventoryGateway {
         onResult: (Result<Item>) -> Unit,
     )
 
+    fun moveItem(
+        householdId: String,
+        item: Item,
+        newParentItemId: String,
+        updater: AuthenticatedIdentity,
+        onResult: (Result<Item>) -> Unit,
+    ) = onResult(Result.failure(UnsupportedOperationException("Item move is unavailable.")))
+
     fun designateItemPhoto(
         householdId: String,
         item: Item,
@@ -79,6 +87,10 @@ interface InventoryActions {
     fun openParentItem()
     fun beginAddItem()
     fun beginEditItem()
+    fun beginMoveItem()
+    fun selectMoveParentItem(itemId: String)
+    fun confirmMoveItem()
+    fun closeMoveItem()
     fun beginAddItemAttachments()
     fun beginChooseItemAttachments() = Unit
     fun beginReplaceItemPhoto()
@@ -117,6 +129,11 @@ data class ItemAttachmentState(
     val attachments: List<ItemAttachment> = emptyList(),
     val loading: Boolean = true,
     val errorMessage: String? = null,
+)
+
+data class ItemMoveState(
+    val itemId: String,
+    val selectedParentItemId: String? = null,
 )
 
 data class InventorySearchResult(
@@ -173,6 +190,7 @@ data class InventoryUiState(
     val selectedItemId: String,
     val search: InventorySearchState = InventorySearchState(),
     val itemDraft: ItemFormState? = null,
+    val itemMove: ItemMoveState? = null,
     val loading: Boolean = false,
     val operationInProgress: Boolean = false,
     val errorMessage: String? = null,
@@ -182,6 +200,17 @@ data class InventoryUiState(
     val itemAttachments: ItemAttachmentState? = null,
     val itemAttachmentCarousel: ItemAttachmentState? = null,
 ) {
+    val moveParentItems: List<Item>
+        get() {
+            val move = itemMove ?: return emptyList()
+            val item = inventory.item(move.itemId)
+            return inventory.allItems.filter { candidate ->
+                candidate.id != item.id &&
+                    candidate.id != item.parentItemId &&
+                    inventory.pathTo(candidate.id).none { it.id == item.id }
+            }
+        }
+
     val canGenerateDescription: Boolean
         get() {
             val draft = itemDraft ?: return false
@@ -335,6 +364,17 @@ class InventoryController internal constructor(
                 state.copy(
                     inventory = displayedInventory,
                     selectedItemId = selectedItemId,
+                    itemMove = state.itemMove?.let { move ->
+                        if (!displayedInventory.contains(move.itemId)) {
+                            null
+                        } else {
+                            move.copy(
+                                selectedParentItemId = move.selectedParentItemId?.takeIf {
+                                    displayedInventory.contains(it)
+                                },
+                            )
+                        }
+                    },
                     search = state.search.copy(
                         openedResultId = state.openedSearchResultId
                             ?.takeIf(inventory::contains),
@@ -489,6 +529,92 @@ class InventoryController internal constructor(
                 successMessage = null,
             ),
         )
+    }
+
+    override fun beginMoveItem() {
+        if (
+            state.itemDraft != null ||
+            state.itemMove != null ||
+            state.operationInProgress ||
+            state.selectedItemId == state.inventory.rootItemId
+        ) {
+            return
+        }
+        updateState(
+            state.copy(
+                itemMove = ItemMoveState(itemId = state.selectedItemId),
+                errorMessage = null,
+                successMessage = null,
+            ),
+        )
+    }
+
+    override fun selectMoveParentItem(itemId: String) {
+        val move = state.itemMove ?: return
+        if (
+            state.operationInProgress ||
+            !state.inventory.contains(itemId) ||
+            itemId == move.itemId ||
+            runCatching { state.inventory.pathTo(itemId) }.getOrNull()
+                ?.any { it.id == move.itemId } == true
+        ) {
+            return
+        }
+        updateState(state.copy(itemMove = move.copy(selectedParentItemId = itemId)))
+    }
+
+    override fun confirmMoveItem() {
+        val move = state.itemMove ?: return
+        if (state.operationInProgress) return
+        val newParentItemId = move.selectedParentItemId ?: return
+        val item = runCatching { state.inventory.item(move.itemId) }.getOrElse { failure ->
+            updateState(
+                state.copy(errorMessage = failure.message ?: "Couldn't move the Item."),
+            )
+            return
+        }
+        runCatching {
+            state.inventory.moveItem(item.id, newParentItemId).item(item.id)
+        }.getOrElse { failure ->
+            updateState(
+                state.copy(errorMessage = failure.message ?: "Couldn't move the Item."),
+            )
+            return
+        }
+        updateState(state.copy(operationInProgress = true, errorMessage = null))
+        gateway.moveItem(
+            householdId = household.id,
+            item = item,
+            newParentItemId = newParentItemId,
+            updater = identity,
+        ) { result ->
+            result.onSuccess { savedItem ->
+                observedInventory = observedInventory.withItem(savedItem)
+                updateState(
+                    state.copy(
+                        inventory = state.inventory.withItem(savedItem),
+                        selectedItemId = savedItem.id,
+                        itemMove = null,
+                        operationInProgress = false,
+                        errorMessage = null,
+                        successMessage = "Item moved.",
+                    ),
+                )
+            }.onFailure { failure ->
+                updateState(
+                    state.copy(
+                        operationInProgress = false,
+                        errorMessage = failure.message ?: "Couldn't move the Item.",
+                        successMessage = null,
+                    ),
+                )
+            }
+        }
+    }
+
+    override fun closeMoveItem() {
+        if (state.operationInProgress) return
+        updateState(state.copy(itemMove = null, errorMessage = null))
     }
 
     override fun beginAddItemAttachments() {

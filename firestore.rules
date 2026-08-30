@@ -319,11 +319,16 @@ service cloud.firestore {
       return itemId != householdId
         && resource.data.parentItemId is string
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'name', 'photoAttachmentId', 'photoUrl', 'photoThumbnailUrl', 'description', 'tags',
+          'name', 'parentItemId', 'photoAttachmentId', 'photoUrl', 'photoThumbnailUrl', 'description', 'tags',
           'webUrl',
           'updatedAt', 'updatedById', 'updatedByDisplayName'
         ])
         && validName(request.resource.data.name)
+        && request.resource.data.parentItemId is string
+        && request.resource.data.parentItemId != itemId
+        && exists(itemPath(householdId, request.resource.data.parentItemId))
+        && get(itemPath(householdId, request.resource.data.parentItemId)).data.householdId
+          == householdId
         && validItemPhotoProjection(householdId, itemId, request.resource.data)
         && validDescription(request.resource.data.description)
         && validWebUrl(request.resource.data.get('webUrl', null))

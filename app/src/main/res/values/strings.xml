@@ -21,6 +21,13 @@
     <string name="empty_household_body">This is your Household’s root Item. Child Items will appear here.</string>
     <string name="add_item">Add item</string>
     <string name="edit_item">Edit Item</string>
+    <string name="move_item">Move Item</string>
+    <string name="move_item_title">Move Item</string>
+    <string name="move_item_body">Choose a new Parent Item for %1$s.</string>
+    <string name="move_item_no_targets">There are no other valid Parent Items.</string>
+    <string name="move_item_confirm">Move here</string>
+    <string name="moving_item">Moving Item…</string>
+    <string name="item_moved">Item moved.</string>
     <string name="child_items">Child Items</string>
     <string name="no_child_items">No Child Items yet.</string>
     <string name="up_to_parent_item">Up</string>

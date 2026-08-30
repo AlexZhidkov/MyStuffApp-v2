@@ -162,4 +162,4 @@ private val rootChildItemCacheWriter = Executors.newSingleThreadExecutor { task 
 }
 
 private const val CACHE_MAGIC = 0x4D595354
-private const val CACHE_VERSION = 3
+private const val CACHE_VERSION = 4

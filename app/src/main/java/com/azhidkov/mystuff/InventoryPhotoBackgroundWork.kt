@@ -18,7 +18,6 @@ import com.google.firebase.storage.FirebaseStorage
 import com.google.firebase.storage.StorageException
 import com.google.firebase.storage.StorageMetadata
 import java.io.File
-import java.util.UUID
 import kotlin.math.roundToInt
 
 /** Metadata needed to remove a failed attachment without making the failure durable. */
@@ -250,8 +249,10 @@ internal sealed interface PhotoTransferTask {
             val storagePath = requireNotNull(data.getString(STORAGE_PATH_KEY))
             when (requireNotNull(data.getString(OPERATION_KEY))) {
                 UPLOAD_OPERATION -> {
+                    require(storagePath.contains("/attachments/"))
                     val additionalPaths = data.getStringArray(ADDITIONAL_STORAGE_PATHS_KEY)
                         ?: emptyArray()
+                    require(additionalPaths.all { it.contains("/attachments/") })
                     val additionalSources = data.getStringArray(ADDITIONAL_SOURCE_URIS_KEY)
                         ?: emptyArray()
                     require(additionalPaths.size == additionalSources.size)
@@ -281,10 +282,13 @@ internal sealed interface PhotoTransferTask {
                     )
                 }
                 DELETE_OPERATION -> Delete(storagePath)
-                GENERATE_THUMBNAIL_OPERATION -> GenerateThumbnail(
-                    storagePath,
-                    requireNotNull(data.getString(SOURCE_LOCATION_KEY)),
-                )
+                GENERATE_THUMBNAIL_OPERATION -> {
+                    require(storagePath.contains("/attachments/"))
+                    GenerateThumbnail(
+                        storagePath,
+                        requireNotNull(data.getString(SOURCE_LOCATION_KEY)),
+                    )
+                }
                 else -> error("Unknown photo transfer operation")
             }
         }.getOrNull()
@@ -301,33 +305,8 @@ internal fun photoTransferWorkName(storagePath: String): String =
 internal class BackgroundInventoryPhotoStore(
     bucketUrl: String,
     private val queue: PhotoTransferQueue,
-    private val newRevisionId: () -> UUID = UUID::randomUUID,
 ) : InventoryPhotoStore {
     private val bucketUrl = bucketUrl.trimEnd('/')
-
-    override fun newRevision(householdId: String, itemId: String): ItemPhotoRevision {
-        val revisionId = newRevisionId()
-        val fullStoragePath = photoStoragePath(
-            householdId,
-            itemId,
-            revisionId,
-            ItemPhotoVariant.Full,
-        )
-        val thumbnailStoragePath = photoStoragePath(
-            householdId,
-            itemId,
-            revisionId,
-            ItemPhotoVariant.Thumbnail,
-        )
-        return ItemPhotoRevision(
-            locations = ItemPhotoLocations(
-                full = "$bucketUrl/$fullStoragePath",
-                thumbnail = "$bucketUrl/$thumbnailStoragePath",
-            ),
-            fullStoragePath = fullStoragePath,
-            thumbnailStoragePath = thumbnailStoragePath,
-        )
-    }
 
     override fun newAttachmentRevision(
         householdId: String,
@@ -352,15 +331,10 @@ internal class BackgroundInventoryPhotoStore(
 
     override fun displayUploadWorkName(location: String): String? =
         location.removePrefix("$bucketUrl/")
-            .takeIf { it != location }
+            .takeIf { it != location && it.contains("/attachments/") }
             ?.let(::photoTransferWorkName)
 
-    override fun uploadInBackground(
-        revision: ItemPhotoRevision,
-        photo: ItemPhoto,
-    ) = uploadInBackground(revision, photo, null)
-
-    override fun uploadInBackground(
+    override fun uploadAttachmentInBackground(
         revision: ItemPhotoRevision,
         photo: ItemPhoto,
         failure: AttachmentUploadFailure?,

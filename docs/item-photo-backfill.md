@@ -26,3 +26,11 @@ rerun until the report contains no intended creations or failures.
 Members must upgrade to the attachment-backed client before it is enabled for
 the Household. This rollout uses no dual-client compatibility period and adds
 no client version enforcement.
+
+## Release checklist
+
+- [ ] The backfill dry run has no unresolved malformed entries.
+- [ ] The write run has completed successfully for every enabled Household.
+- [ ] Every Member of each enabled Household has upgraded to the
+      attachment-backed client.
+- [ ] The contracted client is enabled only after the preceding checks pass.

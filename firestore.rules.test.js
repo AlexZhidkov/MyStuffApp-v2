@@ -424,11 +424,11 @@ test("non-Member cannot access an Item Attachment and attachments cannot become 
   ));
 });
 
-test("Member can create a Child Item with an optional photo URL", async () => {
+test("new Child Items cannot write an Item Photo projection before creating an attachment", async () => {
   await seedHousehold();
   const database = testEnvironment.authenticatedContext("member-1").firestore();
 
-  await assertSucceeds(setDoc(
+  await assertFails(setDoc(
     doc(database, "households/household-1/items/item-1"),
     childItemData("Drill", "household-1", {
       photoUrl: "https://photos.example/item-1.jpg",
@@ -582,7 +582,7 @@ test("Household Member can update Child Item details with fresh attribution", as
   assert.equal(updated.updatedById, "member-2");
 });
 
-test("Household Member can save a captured replacement revision and patch its Description", async () => {
+test("Household Member can project a newly-created Item Attachment and patch its Description", async () => {
   await seedHousehold();
   await seedHouseholdMember();
   await testEnvironment.withSecurityRulesDisabled(async (context) => {
@@ -593,13 +593,18 @@ test("Household Member can save a captured replacement revision and patch its De
   });
   const database = testEnvironment.authenticatedContext("member-2").firestore();
   const reference = doc(database, "households/household-1/items/item-1");
-  const revision = "11111111-1111-1111-1111-111111111111";
+  await assertSucceeds(setDoc(
+    doc(database, "households/household-1/items/item-1/attachments/attachment-1"),
+    itemAttachmentData(),
+  ));
 
   await assertSucceeds(updateDoc(reference, {
     name: "Hammer Drill",
-    photoUrl: `gs://mystuff/households/household-1/items/item-1-${revision}.webp`,
+    photoAttachmentId: "attachment-1",
+    photoUrl:
+      "gs://mystuff/households/household-1/items/item-1/attachments/attachment-1.webp",
     photoThumbnailUrl:
-      `gs://mystuff/households/household-1/items/item-1-${revision}-thumb.webp`,
+      "gs://mystuff/households/household-1/items/item-1/attachments/attachment-1-thumb.webp",
     description: "Member facts",
     tags: ["Power Tools"],
     webUrl: "https://example.com/hammer-drill",

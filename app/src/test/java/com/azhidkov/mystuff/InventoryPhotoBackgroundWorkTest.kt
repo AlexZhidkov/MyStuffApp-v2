@@ -1,10 +1,9 @@
 package com.azhidkov.mystuff
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.util.UUID
 
 class InventoryPhotoBackgroundWorkTest {
     @Test
@@ -44,34 +43,27 @@ class InventoryPhotoBackgroundWorkTest {
             null,
             store.displayUploadWorkName("gs://another-bucket/${revision.fullStoragePath}"),
         )
+        assertEquals(
+            null,
+            store.displayUploadWorkName("gs://mystuff/households/household-1/items/item-1.webp"),
+        )
     }
 
     @Test
-    fun `new photo revisions use distinct random UUIDs`() {
-        val store = BackgroundInventoryPhotoStore(
-            bucketUrl = "gs://mystuff",
-            queue = RecordingPhotoTransferQueue(),
+    fun `persisted flat upload work is discarded`() {
+        val legacyTask = PhotoTransferTask.Upload(
+            storagePath = "households/household-1/items/item-1.webp",
+            sourceUri = "content://mystuff/legacy.webp",
         )
 
-        val first = store.newRevision("household-1", "item-1")
-        val second = store.newRevision("household-1", "item-1")
-        val firstRevisionId = first.fullStoragePath
-            .substringAfter("item-1-")
-            .substringBefore(".webp")
-        val secondRevisionId = second.fullStoragePath
-            .substringAfter("item-1-")
-            .substringBefore(".webp")
-
-        UUID.fromString(firstRevisionId)
-        UUID.fromString(secondRevisionId)
-        assertNotEquals(firstRevisionId, secondRevisionId)
+        assertNull(PhotoTransferTask.fromWorkData(legacyTask.toWorkData()))
     }
 
     @Test
     fun `failed upload is terminal and does not retry automatically`() {
-        val revision = "11111111-1111-1111-1111-111111111111"
-        val fullPath = "households/household-1/items/item-1-$revision.webp"
-        val thumbnailPath = "households/household-1/items/item-1-$revision-thumb.webp"
+        val fullPath = "households/household-1/items/item-1/attachments/attachment-1.webp"
+        val thumbnailPath =
+            "households/household-1/items/item-1/attachments/attachment-1-thumb.webp"
         val remote = FakePhotoRemoteStore(
             outcomes = mutableMapOf(
                 fullPath to mutableListOf(
@@ -209,28 +201,21 @@ class InventoryPhotoBackgroundWorkTest {
     }
 
     @Test
-    fun `each prepared photo gets one shared immutable revision for both variants`() {
-        val revisions = ArrayDeque(
-            listOf(
-                UUID.fromString("11111111-1111-1111-1111-111111111111"),
-                UUID.fromString("22222222-2222-2222-2222-222222222222"),
-            ),
-        )
+    fun `each attachment upload uses its immutable nested location for both variants`() {
         val queue = RecordingPhotoTransferQueue()
         val store = BackgroundInventoryPhotoStore(
             bucketUrl = "gs://mystuff",
             queue = queue,
-            newRevisionId = revisions::removeFirst,
         )
 
-        val oldRevision = store.newRevision("household-1", "item-1")
-        val newRevision = store.newRevision("household-1", "item-1")
+        val oldRevision = store.newAttachmentRevision("household-1", "item-1", "attachment-1")
+        val newRevision = store.newAttachmentRevision("household-1", "item-1", "attachment-2")
 
-        store.uploadInBackground(
+        store.uploadAttachmentInBackground(
             revision = oldRevision,
             photo = ItemPhoto("content://old-full.webp", "content://old-thumb.webp"),
         )
-        store.uploadInBackground(
+        store.uploadAttachmentInBackground(
             revision = newRevision,
             photo = ItemPhoto("content://new-full.webp", "content://new-thumb.webp"),
         )
@@ -238,21 +223,21 @@ class InventoryPhotoBackgroundWorkTest {
         assertEquals(
             listOf(
                 PhotoTransferTask.Upload(
-                    storagePath = "households/household-1/items/item-1-11111111-1111-1111-1111-111111111111.webp",
+                    storagePath = "households/household-1/items/item-1/attachments/attachment-1.webp",
                     sourceUri = "content://old-full.webp",
                     additionalUploads = listOf(
                         PhotoTransferTask.UploadPart(
-                            "households/household-1/items/item-1-11111111-1111-1111-1111-111111111111-thumb.webp",
+                            "households/household-1/items/item-1/attachments/attachment-1-thumb.webp",
                             "content://old-thumb.webp",
                         ),
                     ),
                 ),
                 PhotoTransferTask.Upload(
-                    storagePath = "households/household-1/items/item-1-22222222-2222-2222-2222-222222222222.webp",
+                    storagePath = "households/household-1/items/item-1/attachments/attachment-2.webp",
                     sourceUri = "content://new-full.webp",
                     additionalUploads = listOf(
                         PhotoTransferTask.UploadPart(
-                            "households/household-1/items/item-1-22222222-2222-2222-2222-222222222222-thumb.webp",
+                            "households/household-1/items/item-1/attachments/attachment-2-thumb.webp",
                             "content://new-thumb.webp",
                         ),
                     ),
@@ -281,8 +266,8 @@ class InventoryPhotoBackgroundWorkTest {
 
         store.deleteInBackground(
             StoredItemPhotoLocations(
-                full = "gs://mystuff/households/household-1/items/item-1-$REVISION.webp",
-                thumbnail = "gs://mystuff/households/household-1/items/item-1-$REVISION-thumb.webp",
+                full = "gs://mystuff/households/household-1/items/item-1/attachments/attachment-1.webp",
+                thumbnail = "gs://mystuff/households/household-1/items/item-1/attachments/attachment-1-thumb.webp",
             ),
         )
         store.deleteInBackground(
@@ -295,10 +280,10 @@ class InventoryPhotoBackgroundWorkTest {
         assertEquals(
             listOf(
                 PhotoTransferTask.Delete(
-                    "households/household-1/items/item-1-$REVISION.webp",
+                    "households/household-1/items/item-1/attachments/attachment-1.webp",
                 ),
                 PhotoTransferTask.Delete(
-                    "households/household-1/items/item-1-$REVISION-thumb.webp",
+                    "households/household-1/items/item-1/attachments/attachment-1-thumb.webp",
                 ),
                 PhotoTransferTask.Delete("households/household-1/items/item-2.webp"),
                 PhotoTransferTask.Delete("households/household-1/items/item-2-thumb.webp"),
@@ -365,5 +350,3 @@ private class RecordingPhotoTransferQueue : PhotoTransferQueue {
         tasksByStoragePath[task.storagePath] = task
     }
 }
-
-private const val REVISION = "11111111-1111-1111-1111-111111111111"

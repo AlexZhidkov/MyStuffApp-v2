@@ -36,7 +36,6 @@ import com.google.firebase.storage.StorageException
 import com.google.firebase.storage.StorageMetadata
 import java.io.DataInputStream
 import java.io.DataOutputStream
-import java.io.EOFException
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.ExecutionException
@@ -898,6 +897,11 @@ internal class DescriptionGenerationWorkStore(baseDirectory: File) {
     private fun readRequest(file: File?): DescriptionGenerationRequest? = file?.let { resolved ->
         runCatching {
             DataInputStream(resolved.inputStream().buffered()).use(DataInputStream::readRequest)
+        }.onFailure {
+            // Pending work from an older contract cannot safely be decoded. It
+            // is process-local state, so invalidating it is safer than
+            // reinterpreting legacy photo fields as attachment metadata.
+            resolved.delete()
         }.getOrNull()
     }
 
@@ -942,6 +946,7 @@ private class FileDescriptionGenerationUploadedPhotoLedger(
 }
 
 private fun DataOutputStream.writeRequest(request: DescriptionGenerationRequest) {
+    writeInt(DESCRIPTION_GENERATION_REQUEST_VERSION)
     writeUTF(request.householdId)
     writeUTF(request.item.id)
     writeUTF(request.item.name)
@@ -968,6 +973,7 @@ private fun DataOutputStream.writeRequest(request: DescriptionGenerationRequest)
 }
 
 private fun DataInputStream.readRequest(): DescriptionGenerationRequest {
+    require(readInt() == DESCRIPTION_GENERATION_REQUEST_VERSION)
     val request = DescriptionGenerationRequest(
         householdId = readUTF(),
         item = Item(
@@ -983,43 +989,27 @@ private fun DataInputStream.readRequest(): DescriptionGenerationRequest {
         requestingMember = RequestingMemberAttribution(readUTF(), readUTF()),
         deviceLanguage = readUTF(),
     )
-    val replacement = try {
-        if (readBoolean()) {
-            DescriptionGenerationReplacementPhoto(
-                revision = ItemPhotoRevision(
-                    locations = ItemPhotoLocations(
-                        full = requireNotNull(request.item.photoUrl),
-                        thumbnail = requireNotNull(request.item.photoThumbnailUrl),
-                    ),
-                    fullStoragePath = readUTF(),
-                    thumbnailStoragePath = readUTF(),
+    val replacement = if (readBoolean()) {
+        DescriptionGenerationReplacementPhoto(
+            revision = ItemPhotoRevision(
+                locations = ItemPhotoLocations(
+                    full = requireNotNull(request.item.photoUrl),
+                    thumbnail = requireNotNull(request.item.photoThumbnailUrl),
                 ),
-                source = ItemPhoto(
-                    uri = readUTF(),
-                    thumbnailUri = readUTF(),
-                ),
-            )
-        } else {
-            null
-        }
-    } catch (_: EOFException) {
+                fullStoragePath = readUTF(),
+                thumbnailStoragePath = readUTF(),
+            ),
+            source = ItemPhoto(
+                uri = readUTF(),
+                thumbnailUri = readUTF(),
+            ),
+        )
+    } else {
         null
     }
-    val saveMode = try {
-        DescriptionGenerationSaveMode.valueOf(readUTF())
-    } catch (_: EOFException) {
-        DescriptionGenerationSaveMode.Update
-    }
-    val photoAttachmentId = try {
-        readNullableString()
-    } catch (_: EOFException) {
-        null
-    }
-    val supersededPhotoAttachmentId = try {
-        readNullableString()
-    } catch (_: EOFException) {
-        null
-    }
+    val saveMode = DescriptionGenerationSaveMode.valueOf(readUTF())
+    val photoAttachmentId = readNullableString()
+    val supersededPhotoAttachmentId = readNullableString()
     return request.copy(
         item = request.item.copy(photoAttachmentId = photoAttachmentId),
         replacementPhoto = replacement,
@@ -1040,6 +1030,7 @@ private fun failureData(outcome: DescriptionGenerationOutcome): Data = Data.Buil
     .putString(WORK_FAILURE_OUTCOME, outcome.storageName)
     .build()
 
+private const val DESCRIPTION_GENERATION_REQUEST_VERSION = 2
 private const val MAX_INLINE_PHOTO_BYTES = 20L * 1024L * 1024L
 private const val HOUSEHOLDS_COLLECTION = "households"
 private const val ITEMS_COLLECTION = "items"

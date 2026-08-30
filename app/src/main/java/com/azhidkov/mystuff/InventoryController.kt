@@ -1,5 +1,7 @@
 package com.azhidkov.mystuff
 
+import java.time.Instant
+
 fun interface InventorySubscription {
     fun cancel()
 }
@@ -17,76 +19,24 @@ interface InventoryGateway {
         parentItemId: String,
         creator: AuthenticatedIdentity,
         details: ItemDetails,
-        photo: ItemPhoto?,
-        onResult: (Result<Item>) -> Unit,
-    )
-
-    fun createItem(
-        householdId: String,
-        parentItemId: String,
-        creator: AuthenticatedIdentity,
-        details: ItemDetails,
         photos: List<ItemPhoto>,
-        onResult: (Result<Item>) -> Unit,
-    ) {
-        createItem(
-            householdId = householdId,
-            parentItemId = parentItemId,
-            creator = creator,
-            details = details,
-            photo = photos.firstOrNull(),
-            onResult = onResult,
-        )
-    }
-
-    fun updateItem(
-        householdId: String,
-        item: Item,
-        updater: AuthenticatedIdentity,
-        details: ItemDetails,
-        photoUpdate: ItemPhotoUpdate,
         onResult: (Result<Item>) -> Unit,
     )
 
     /**
-     * Saves an Item and, when requested, appends new Item Attachments as part
-     * of the same gateway operation. Older gateway implementations retain the
-     * existing edit behaviour until they implement attachment persistence.
+     * Saves an Item and applies its Item Attachment changes in one gateway
+     * operation. New files are always published as Item Attachments; the
+     * projection is updated only from attachment metadata.
      */
     fun updateItemWithAttachments(
         householdId: String,
         item: Item,
         updater: AuthenticatedIdentity,
         details: ItemDetails,
-        photoUpdate: ItemPhotoUpdate,
-        additionalPhotos: List<ItemPhoto>,
-        onResult: (Result<Item>) -> Unit,
-    ) = updateItem(
-        householdId = householdId,
-        item = item,
-        updater = updater,
-        details = details,
-        photoUpdate = photoUpdate,
-        onResult = onResult,
-    )
-
-    fun updateItemWithAttachments(
-        householdId: String,
-        item: Item,
-        updater: AuthenticatedIdentity,
-        details: ItemDetails,
-        photoUpdate: ItemPhotoUpdate,
         additionalPhotos: List<ItemPhoto>,
         existingAttachments: List<ItemAttachment>,
+        attachmentToDelete: ItemAttachment? = null,
         onResult: (Result<Item>) -> Unit,
-    ) = updateItemWithAttachments(
-        householdId = householdId,
-        item = item,
-        updater = updater,
-        details = details,
-        photoUpdate = photoUpdate,
-        additionalPhotos = additionalPhotos,
-        onResult = onResult,
     )
 
     fun designateItemPhoto(
@@ -120,12 +70,6 @@ internal object ItemFormPolicy {
     const val MAX_TAG_COUNT = 20
     const val MAX_TAG_LENGTH = 40
     const val MAX_WEB_URL_LENGTH = 2_048
-}
-
-sealed interface ItemPhotoUpdate {
-    data object Unchanged : ItemPhotoUpdate
-    data object Removed : ItemPhotoUpdate
-    data class Replaced(val photo: ItemPhoto) : ItemPhotoUpdate
 }
 
 interface InventoryActions {
@@ -817,30 +761,57 @@ class InventoryController internal constructor(
             )
         } else {
             val item = state.inventory.item(editingItemId)
-            val photoUpdate = when {
+            val changesItemPhoto = draft.photoSelectionPurpose ==
+                ItemPhotoSelectionPurpose.ReplaceItemPhoto
+            val observedAttachments = state.itemAttachments
+                ?.takeIf {
+                    it.itemId == item.id &&
+                        !it.loading &&
+                        it.errorMessage == null
+                }
+                ?.attachments
+                .orEmpty()
+            val existingAttachments = buildList {
+                addAll(observedAttachments)
+                if (
+                    changesItemPhoto &&
+                    item.photoAttachmentId != null &&
+                    item.photoUrl != null &&
+                    observedAttachments.none { it.id == item.photoAttachmentId }
+                ) {
+                    // The compact Item projection is enough to remove or replace its
+                    // designated attachment even if the attachment collection has not
+                    // finished loading. Backfilled flat storage remains deletable.
+                    add(
+                        ItemAttachment(
+                            id = item.photoAttachmentId,
+                            itemId = item.id,
+                            createdAt = Instant.EPOCH,
+                            contentType = OPTIMIZED_ATTACHMENT_IMAGE_CONTENT_TYPE,
+                            displayUrl = item.photoUrl,
+                        ),
+                    )
+                }
+            }
+            val attachmentToDelete = existingAttachments.firstOrNull {
+                changesItemPhoto &&
+                    (draft.photo != null || draft.photoRemoved) &&
+                    it.id == item.photoAttachmentId
+            }
+            val additionalPhotos = when {
                 draft.photoSelectionPurpose == ItemPhotoSelectionPurpose.AddAttachments ->
-                    ItemPhotoUpdate.Unchanged
-                draft.photo != null -> ItemPhotoUpdate.Replaced(draft.photo)
-                draft.photoRemoved -> ItemPhotoUpdate.Removed
-                else -> ItemPhotoUpdate.Unchanged
+                    draft.photos
+                changesItemPhoto -> listOfNotNull(draft.photo)
+                else -> emptyList()
             }
             gateway.updateItemWithAttachments(
                 householdId = household.id,
                 item = item,
                 updater = identity,
                 details = details,
-                photoUpdate = photoUpdate,
-                additionalPhotos = draft.photos.takeIf {
-                    draft.photoSelectionPurpose == ItemPhotoSelectionPurpose.AddAttachments
-                }.orEmpty(),
-                existingAttachments = state.itemAttachments
-                    ?.takeIf {
-                        it.itemId == item.id &&
-                            !it.loading &&
-                            it.errorMessage == null
-                    }
-                    ?.attachments
-                    .orEmpty(),
+                additionalPhotos = additionalPhotos,
+                existingAttachments = existingAttachments,
+                attachmentToDelete = attachmentToDelete,
                 onResult = onResult,
             )
         }

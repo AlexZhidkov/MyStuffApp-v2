@@ -2,11 +2,12 @@ package com.azhidkov.mystuff
 
 import com.google.firebase.ai.type.QuotaExceededException
 import com.google.firebase.ai.type.ServerException
+import java.io.DataOutputStream
 import java.io.IOException
 import java.util.concurrent.ExecutionException
-import java.util.UUID
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -136,7 +137,6 @@ class InventoryDescriptionGenerationWorkTest {
             request.replacementPhoto,
         )
         assertEquals(listOf(replacement), photos.thumbnailUploads)
-        assertTrue(photos.fullUploads.isEmpty())
 
         photos.thumbnailFailure = IllegalStateException("thumbnail scheduler unavailable")
         capture.uploadThumbnailInBackground(request)
@@ -455,6 +455,21 @@ class InventoryDescriptionGenerationWorkTest {
     }
 
     @Test
+    fun `a previous request format is invalidated instead of decoding obsolete photo state`() {
+        val directory = temporaryFolder.newFolder("obsolete-description-generation")
+        val pending = directory.resolve("description-generation-work/pending/legacy-request.bin")
+        pending.parentFile?.mkdirs()
+        DataOutputStream(pending.outputStream()).use { output ->
+            output.writeInt(1)
+        }
+
+        val store = DescriptionGenerationWorkStore(directory)
+
+        assertNull(store.pendingRequest("legacy-request"))
+        assertFalse(pending.exists())
+    }
+
+    @Test
     fun `valid generated Description overwrites a newer Description`() {
         val events = mutableListOf<String>()
         val store = RecordingDescriptionGenerationItemStore(events)
@@ -599,25 +614,7 @@ private class RecordingDescriptionGenerationInventoryPhotoStore : InventoryPhoto
     var allocatedRevisions = 0
     var thumbnailAttempts = 0
     var thumbnailFailure: RuntimeException? = null
-    val fullUploads = mutableListOf<ItemPhoto>()
     val thumbnailUploads = mutableListOf<ItemPhoto>()
-
-    override fun newRevision(householdId: String, itemId: String): ItemPhotoRevision {
-        allocatedRevisions += 1
-        val revision = UUID.fromString(REPLACEMENT_REVISION)
-        val full = photoStoragePath(householdId, itemId, revision, ItemPhotoVariant.Full)
-        val thumbnail = photoStoragePath(
-            householdId,
-            itemId,
-            revision,
-            ItemPhotoVariant.Thumbnail,
-        )
-        return ItemPhotoRevision(
-            locations = ItemPhotoLocations("gs://mystuff/$full", "gs://mystuff/$thumbnail"),
-            fullStoragePath = full,
-            thumbnailStoragePath = thumbnail,
-        )
-    }
 
     override fun newAttachmentId(householdId: String, itemId: String): String = "attachment-1"
 
@@ -637,9 +634,11 @@ private class RecordingDescriptionGenerationInventoryPhotoStore : InventoryPhoto
         )
     }
 
-    override fun uploadInBackground(revision: ItemPhotoRevision, photo: ItemPhoto) {
-        fullUploads += photo
-    }
+    override fun uploadAttachmentInBackground(
+        revision: ItemPhotoRevision,
+        photo: ItemPhoto,
+        failure: AttachmentUploadFailure?,
+    ) = Unit
 
     override fun uploadThumbnailInBackground(revision: ItemPhotoRevision, photo: ItemPhoto) {
         thumbnailAttempts += 1

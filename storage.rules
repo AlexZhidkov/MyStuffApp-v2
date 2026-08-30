@@ -53,15 +53,9 @@ service firebase.storage {
 
     match /households/{householdId}/items/{fileName} {
       allow read, delete: if isMember(householdId) && isItemPhoto(fileName);
-      allow create, update: if isMember(householdId)
-        && request.resource.contentType == 'image/webp'
-        && (
-          (isFullItemPhoto(fileName) && request.resource.size <= 2 * 1024 * 1024)
-          || (
-            isItemPhotoThumbnail(fileName)
-            && request.resource.size <= 256 * 1024
-          )
-      );
+      // Flat Item Photo objects are legacy data. New clients must write the
+      // nested Item Attachment location below, but migrated references remain
+      // readable and removable.
     }
 
     match /households/{householdId}/items/{itemId}/attachments/{fileName} {

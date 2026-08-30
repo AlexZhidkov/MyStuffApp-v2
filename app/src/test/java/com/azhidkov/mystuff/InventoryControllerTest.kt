@@ -508,11 +508,11 @@ class InventoryControllerTest {
             gateway.createdPhoto,
         )
         assertEquals(
-            "gs://mystuff/households/household-1/items/item-1.webp",
+            "gs://mystuff/households/household-1/items/created-1/attachments/attachment-1.webp",
             controller.state.childItems.single().photoUrl,
         )
         assertEquals(
-            "gs://mystuff/households/household-1/items/item-1-thumb.webp",
+            "gs://mystuff/households/household-1/items/created-1/attachments/attachment-1-thumb.webp",
             controller.state.childItems.single().photoThumbnailUrl,
         )
     }
@@ -1323,6 +1323,32 @@ class InventoryControllerTest {
     }
 
     @Test
+    fun `removing a projected photo does not wait for the attachment collection`() {
+        val household = household()
+        val existing = item(
+            id = "drill",
+            name = "Drill",
+            parentItemId = household.id,
+            photoUrl = "gs://mystuff/households/household-1/items/drill.webp",
+            photoThumbnailUrl =
+                "gs://mystuff/households/household-1/items/drill-thumb.webp",
+        ).copy(photoAttachmentId = "legacy")
+        val gateway = FakeInventoryGateway(
+            Inventory.from(household, listOf(household.rootItem, existing)),
+        )
+        val controller = InventoryController(household, identity(), gateway)
+
+        controller.openItem(existing.id)
+        controller.beginEditItem()
+        controller.removeItemPhoto()
+        controller.saveItem()
+
+        assertEquals("legacy", gateway.updatedAttachmentToDelete?.id)
+        assertNull(controller.state.selectedItem.photoAttachmentId)
+        assertNull(controller.state.selectedItem.photoUrl)
+    }
+
+    @Test
     fun `Member can add several attachments from Edit without replacing the Item Photo`() {
         val household = household()
         val existing = item(
@@ -1331,7 +1357,7 @@ class InventoryControllerTest {
             parentItemId = household.id,
             photoUrl = "gs://mystuff/drill.webp",
             photoThumbnailUrl = "gs://mystuff/drill-thumb.webp",
-        )
+        ).copy(photoAttachmentId = "legacy")
         val gateway = FakeInventoryGateway(
             Inventory.from(household, listOf(household.rootItem, existing)),
         )
@@ -1358,7 +1384,6 @@ class InventoryControllerTest {
             ),
             gateway.updatedAdditionalPhotos,
         )
-        assertEquals(ItemPhotoUpdate.Unchanged, gateway.updatedPhotoUpdate)
         assertEquals("gs://mystuff/drill.webp", controller.state.selectedItem.photoUrl)
         assertNull(controller.state.itemDraft)
     }
@@ -1384,9 +1409,8 @@ class InventoryControllerTest {
             ItemPhoto("content://receipt-optimized.webp"),
             gateway.updatedAdditionalPhotos.single(),
         )
-        assertEquals(ItemPhotoUpdate.Unchanged, gateway.updatedPhotoUpdate)
         assertEquals(
-            "gs://mystuff/households/household-1/items/drill.webp",
+            "gs://mystuff/households/household-1/items/drill/attachments/attachment-1.webp",
             controller.state.selectedItem.photoUrl,
         )
     }
@@ -1494,7 +1518,7 @@ private class FakeInventoryGateway(
     var nextUpdateFailure: Throwable? = null
     var updateAttempts: Int = 0
         private set
-    var updatedPhotoUpdate: ItemPhotoUpdate? = null
+    var updatedAttachmentToDelete: ItemAttachment? = null
         private set
     var updatedAdditionalPhotos: List<ItemPhoto> = emptyList()
         private set
@@ -1517,24 +1541,6 @@ private class FakeInventoryGateway(
         parentItemId: String,
         creator: AuthenticatedIdentity,
         details: ItemDetails,
-        photo: ItemPhoto?,
-        onResult: (Result<Item>) -> Unit,
-    ) {
-        createItem(
-            householdId = householdId,
-            parentItemId = parentItemId,
-            creator = creator,
-            details = details,
-            photos = listOfNotNull(photo),
-            onResult = onResult,
-        )
-    }
-
-    override fun createItem(
-        householdId: String,
-        parentItemId: String,
-        creator: AuthenticatedIdentity,
-        details: ItemDetails,
         photos: List<ItemPhoto>,
         onResult: (Result<Item>) -> Unit,
     ) {
@@ -1543,20 +1549,21 @@ private class FakeInventoryGateway(
         createdDetails = details
         createdPhotos = photos
         createdPhoto = photos.firstOrNull()
+        val createdId = newItemId(householdId)
         val created = item(
-            id = newItemId(householdId),
+            id = createdId,
             name = details.name,
             parentItemId = parentItemId,
             photoUrl = photos.firstOrNull()?.let {
-                "gs://mystuff/households/household-1/items/item-1.webp"
+                "gs://mystuff/households/household-1/items/$createdId/attachments/attachment-1.webp"
             },
             photoThumbnailUrl = photos.firstOrNull()?.let {
-                "gs://mystuff/households/household-1/items/item-1-thumb.webp"
+                "gs://mystuff/households/household-1/items/$createdId/attachments/attachment-1-thumb.webp"
             },
             description = details.description,
             tags = details.tags,
             webUrl = details.webUrl,
-        )
+        ).copy(photoAttachmentId = photos.firstOrNull()?.let { "attachment-1" })
         val complete: () -> Unit = {
             inventory = inventory.withItem(created)
             onResult(Result.success(created))
@@ -1578,12 +1585,14 @@ private class FakeInventoryGateway(
         observer?.invoke(Result.success(inventory))
     }
 
-    override fun updateItem(
+    override fun updateItemWithAttachments(
         householdId: String,
         item: Item,
         updater: AuthenticatedIdentity,
         details: ItemDetails,
-        photoUpdate: ItemPhotoUpdate,
+        additionalPhotos: List<ItemPhoto>,
+        existingAttachments: List<ItemAttachment>,
+        attachmentToDelete: ItemAttachment?,
         onResult: (Result<Item>) -> Unit,
     ) {
         updateAttempts += 1
@@ -1597,54 +1606,28 @@ private class FakeInventoryGateway(
             description = details.description,
             tags = details.tags,
             webUrl = details.webUrl,
-            photoUrl = when (photoUpdate) {
-                ItemPhotoUpdate.Unchanged -> item.photoUrl
-                ItemPhotoUpdate.Removed -> null
-                is ItemPhotoUpdate.Replaced ->
-                    "gs://mystuff/households/household-1/items/${item.id}.webp"
+            photoAttachmentId = when {
+                attachmentToDelete != null && additionalPhotos.isEmpty() -> null
+                additionalPhotos.isNotEmpty() && item.photoAttachmentId == null -> "attachment-1"
+                else -> item.photoAttachmentId
             },
-            photoThumbnailUrl = when (photoUpdate) {
-                ItemPhotoUpdate.Unchanged -> item.photoThumbnailUrl
-                ItemPhotoUpdate.Removed -> null
-                is ItemPhotoUpdate.Replaced ->
-                    "gs://mystuff/households/household-1/items/${item.id}-thumb.webp"
+            photoUrl = when {
+                attachmentToDelete != null && additionalPhotos.isEmpty() -> null
+                additionalPhotos.isNotEmpty() && item.photoAttachmentId == null ->
+                    "gs://mystuff/households/$householdId/items/${item.id}/attachments/attachment-1.webp"
+                else -> item.photoUrl
+            },
+            photoThumbnailUrl = when {
+                attachmentToDelete != null && additionalPhotos.isEmpty() -> null
+                additionalPhotos.isNotEmpty() && item.photoAttachmentId == null ->
+                    "gs://mystuff/households/$householdId/items/${item.id}/attachments/attachment-1-thumb.webp"
+                else -> item.photoThumbnailUrl
             },
         )
+        updatedAttachmentToDelete = attachmentToDelete
+        updatedAdditionalPhotos = additionalPhotos
         inventory = inventory.withItem(updated)
         onResult(Result.success(updated))
-    }
-
-    override fun updateItemWithAttachments(
-        householdId: String,
-        item: Item,
-        updater: AuthenticatedIdentity,
-        details: ItemDetails,
-        photoUpdate: ItemPhotoUpdate,
-        additionalPhotos: List<ItemPhoto>,
-        onResult: (Result<Item>) -> Unit,
-    ) {
-        updatedPhotoUpdate = photoUpdate
-        updatedAdditionalPhotos = additionalPhotos
-        updateItem(
-            householdId = householdId,
-            item = item,
-            updater = updater,
-            details = details,
-            photoUpdate = photoUpdate,
-        ) { result ->
-            val saved = result.getOrNull()
-            if (saved != null && saved.photoUrl == null && additionalPhotos.isNotEmpty()) {
-                val projected = saved.copy(
-                    photoUrl = "gs://mystuff/households/$householdId/items/${item.id}.webp",
-                    photoThumbnailUrl =
-                        "gs://mystuff/households/$householdId/items/${item.id}-thumb.webp",
-                )
-                inventory = inventory.withItem(projected)
-                onResult(Result.success(projected))
-            } else {
-                onResult(result)
-            }
-        }
     }
 }
 

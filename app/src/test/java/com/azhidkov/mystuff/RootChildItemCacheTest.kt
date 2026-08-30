@@ -1,5 +1,6 @@
 package com.azhidkov.mystuff
 
+import java.io.DataOutputStream
 import java.nio.file.Files
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -46,6 +47,24 @@ class RootChildItemCacheTest {
             val cacheFile = directory.resolve(rootChildItemCacheFileName("household-1"))
             directory.mkdirs()
             cacheFile.writeText("truncated")
+            val cache = FileRootChildItemCache(directory) { task -> task() }
+
+            assertNull(cache.load("household-1"))
+            assertFalse(cacheFile.exists())
+        }
+
+    @Test
+    fun `a previous cache format is invalidated and treated as a miss`() =
+        withTemporaryDirectory { directory ->
+            val cacheFile = directory.resolve(rootChildItemCacheFileName("household-1"))
+            directory.mkdirs()
+            DataOutputStream(cacheFile.outputStream()).use { output ->
+                output.writeInt(0x4D595354)
+                output.writeInt(3)
+                output.writeUTF("household-1")
+                output.writeInt(0)
+            }
+
             val cache = FileRootChildItemCache(directory) { task -> task() }
 
             assertNull(cache.load("household-1"))

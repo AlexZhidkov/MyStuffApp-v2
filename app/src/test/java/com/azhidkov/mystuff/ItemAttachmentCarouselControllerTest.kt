@@ -203,16 +203,18 @@ private class CarouselInventoryGateway : InventoryGateway {
         parentItemId: String,
         creator: AuthenticatedIdentity,
         details: ItemDetails,
-        photo: ItemPhoto?,
+        photos: List<ItemPhoto>,
         onResult: (Result<Item>) -> Unit,
     ) = error("Not used")
 
-    override fun updateItem(
+    override fun updateItemWithAttachments(
         householdId: String,
         item: Item,
         updater: AuthenticatedIdentity,
         details: ItemDetails,
-        photoUpdate: ItemPhotoUpdate,
+        additionalPhotos: List<ItemPhoto>,
+        existingAttachments: List<ItemAttachment>,
+        attachmentToDelete: ItemAttachment?,
         onResult: (Result<Item>) -> Unit,
     ) = error("Not used")
 

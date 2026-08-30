@@ -48,9 +48,9 @@ test("only a Household Member can transfer a captured immutable photo revision",
       role: "owner",
     });
   });
-  const revision = "11111111-1111-1111-1111-111111111111";
-  const fullPath = `households/household-1/items/item-1-${revision}.webp`;
-  const thumbnailPath = `households/household-1/items/item-1-${revision}-thumb.webp`;
+  const attachmentId = "11111111-1111-1111-1111-111111111111";
+  const fullPath = `households/household-1/items/item-1/attachments/${attachmentId}.webp`;
+  const thumbnailPath = `households/household-1/items/item-1/attachments/${attachmentId}-thumb.webp`;
   const webPMetadata = { contentType: "image/webp" };
   const memberStorage = testEnvironment.authenticatedContext("member-1").storage();
   const nonMemberStorage = testEnvironment.authenticatedContext("member-2").storage();
@@ -87,20 +87,33 @@ test("only a Household Member can transfer a captured immutable photo revision",
   await assertSucceeds(deleteObject(ref(memberStorage, thumbnailPath)));
 });
 
-test("a Household Member can access legacy unversioned Item photo variants", async () => {
+test("a Household Member can read and delete legacy Item photo variants but cannot create them", async () => {
   const memberStorage = testEnvironment.authenticatedContext("member-1").storage();
   const webPMetadata = { contentType: "image/webp" };
 
-  await assertSucceeds(uploadBytes(
+  await testEnvironment.withSecurityRulesDisabled(async (context) => {
+    const storage = context.storage();
+    await uploadBytes(
+      ref(storage, "households/household-1/items/item-1.webp"),
+      new Uint8Array([1]),
+      webPMetadata,
+    );
+    await uploadBytes(
+      ref(storage, "households/household-1/items/item-1-thumb.webp"),
+      new Uint8Array([1]),
+      webPMetadata,
+    );
+  });
+
+  await assertSucceeds(getBytes(ref(memberStorage, "households/household-1/items/item-1.webp")));
+  await assertSucceeds(getBytes(ref(memberStorage, "households/household-1/items/item-1-thumb.webp")));
+  await assertFails(uploadBytes(
     ref(memberStorage, "households/household-1/items/item-1.webp"),
-    new Uint8Array([1]),
+    new Uint8Array([2]),
     webPMetadata,
   ));
-  await assertSucceeds(uploadBytes(
-    ref(memberStorage, "households/household-1/items/item-1-thumb.webp"),
-    new Uint8Array([1]),
-    webPMetadata,
-  ));
+  await assertSucceeds(deleteObject(ref(memberStorage, "households/household-1/items/item-1.webp")));
+  await assertSucceeds(deleteObject(ref(memberStorage, "households/household-1/items/item-1-thumb.webp")));
 });
 
 test("Item photo storage rejects legacy formats names MIME types and oversized variants", async () => {

@@ -20,7 +20,7 @@ class FirebaseInventoryGatewayTest {
             parentItemId = "garage",
             creator = inventoryIdentity(),
             details = inventoryDetails(),
-            photo = ItemPhoto("content://full.webp", "content://thumb.webp"),
+            photos = listOf(ItemPhoto("content://full.webp", "content://thumb.webp")),
         ) { result = it }
 
         val item = result?.getOrThrow()
@@ -100,7 +100,7 @@ class FirebaseInventoryGatewayTest {
         val gateway = FirebaseInventoryGateway(documents, photos, attachments)
         var result: Result<Item>? = null
 
-        gateway.updateItem(
+        gateway.updateItemWithAttachments(
             householdId = "household-1",
             item = inventoryItem(
                 "item-1",
@@ -112,7 +112,11 @@ class FirebaseInventoryGatewayTest {
             ),
             updater = inventoryIdentity(),
             details = inventoryDetails(),
-            photoUpdate = ItemPhotoUpdate.Replaced(ItemPhoto("content://new.webp")),
+            additionalPhotos = listOf(ItemPhoto("content://new.webp")),
+            existingAttachments = listOf(
+                attachment("old-attachment", "gs://mystuff/old.webp", creationOrder = 0),
+            ),
+            attachmentToDelete = attachment("old-attachment", "gs://mystuff/old.webp"),
         ) { result = it }
 
         assertEquals("attachment-1", result?.getOrThrow()?.photoAttachmentId)
@@ -142,7 +146,6 @@ class FirebaseInventoryGatewayTest {
             item = existing,
             updater = inventoryIdentity(),
             details = inventoryDetails(),
-            photoUpdate = ItemPhotoUpdate.Unchanged,
             additionalPhotos = listOf(
                 ItemPhoto("content://receipt.webp", "content://receipt-thumb.webp"),
                 ItemPhoto("content://manual.webp", "content://manual-thumb.webp"),
@@ -193,8 +196,8 @@ class FirebaseInventoryGatewayTest {
             item = inventoryItem("item-1", "Drill", "garage"),
             updater = inventoryIdentity(),
             details = inventoryDetails(),
-            photoUpdate = ItemPhotoUpdate.Unchanged,
             additionalPhotos = listOf(ItemPhoto("content://receipt.webp")),
+            existingAttachments = emptyList(),
         ) { result = it }
 
         assertEquals("attachment-1", result?.getOrThrow()?.photoAttachmentId)
@@ -214,7 +217,7 @@ class FirebaseInventoryGatewayTest {
         val gateway = FirebaseInventoryGateway(documents, photos, attachments)
         var result: Result<Item>? = null
 
-        gateway.updateItem(
+        gateway.updateItemWithAttachments(
             householdId = "household-1",
             item = inventoryItem(
                 "item-1",
@@ -226,7 +229,18 @@ class FirebaseInventoryGatewayTest {
             ),
             updater = inventoryIdentity(),
             details = inventoryDetails(),
-            photoUpdate = ItemPhotoUpdate.Removed,
+            additionalPhotos = emptyList(),
+            existingAttachments = listOf(
+                attachment(
+                    "attachment-1",
+                    "gs://mystuff/households/household-1/items/item-1/attachments/attachment-1.webp",
+                    creationOrder = 0,
+                ),
+            ),
+            attachmentToDelete = attachment(
+                "attachment-1",
+                "gs://mystuff/households/household-1/items/item-1/attachments/attachment-1.webp",
+            ),
         ) { result = it }
 
         assertNull(result?.getOrThrow()?.photoAttachmentId)
@@ -240,7 +254,7 @@ class FirebaseInventoryGatewayTest {
         val documents = FakeInventoryDocumentStore()
         var result: Result<Item>? = null
         val photos = FakeInventoryPhotoStore()
-        val gateway = FirebaseInventoryGateway(documents, photos)
+        val gateway = FirebaseInventoryGateway(documents, photos, FakeItemPhotoAttachmentGateway())
 
         gateway.createItem(
             householdId = "household-1",
@@ -251,37 +265,37 @@ class FirebaseInventoryGatewayTest {
                 description = "18V cordless",
                 tags = listOf("Power Tools"),
             ),
-            photo = ItemPhoto(
+            photos = listOf(ItemPhoto(
                 uri = "content://mystuff/cropped.webp",
                 thumbnailUri = "content://mystuff/cropped-thumb.webp",
-            ),
+            )),
         ) { result = it }
 
         val created = result?.getOrThrow()
         assertEquals(
-            "gs://mystuff/households/household-1/items/item-1-11111111-1111-1111-1111-111111111111.webp",
+            "gs://mystuff/households/household-1/items/item-1/attachments/attachment-1.webp",
             created?.photoUrl,
         )
         assertEquals(
-            "gs://mystuff/households/household-1/items/item-1-11111111-1111-1111-1111-111111111111-thumb.webp",
+            "gs://mystuff/households/household-1/items/item-1/attachments/attachment-1-thumb.webp",
             created?.photoThumbnailUrl,
         )
-        assertEquals(created?.photoUrl, documents.createdData?.get("photoUrl"))
+        assertEquals(created?.photoUrl, documents.updatedData?.get("photoUrl"))
         assertEquals(
             created?.photoThumbnailUrl,
-            documents.createdData?.get("photoThumbnailUrl"),
+            documents.updatedData?.get("photoThumbnailUrl"),
         )
         assertEquals(
             listOf(
                 QueuedPhotoUpload(
                     ItemPhotoVariant.Full,
                     "content://mystuff/cropped.webp",
-                    "households/household-1/items/item-1-11111111-1111-1111-1111-111111111111.webp",
+                    "households/household-1/items/item-1/attachments/attachment-1.webp",
                 ),
                 QueuedPhotoUpload(
                     ItemPhotoVariant.Thumbnail,
                     "content://mystuff/cropped-thumb.webp",
-                    "households/household-1/items/item-1-11111111-1111-1111-1111-111111111111-thumb.webp",
+                    "households/household-1/items/item-1/attachments/attachment-1-thumb.webp",
                 ),
             ),
             photos.uploads,
@@ -291,7 +305,11 @@ class FirebaseInventoryGatewayTest {
     @Test
     fun `background scheduling failure does not block completed Item creation`() {
         val photos = FakeInventoryPhotoStore(enqueueFailure = IllegalStateException("scheduler"))
-        val gateway = FirebaseInventoryGateway(FakeInventoryDocumentStore(), photos)
+        val gateway = FirebaseInventoryGateway(
+            FakeInventoryDocumentStore(),
+            photos,
+            FakeItemPhotoAttachmentGateway(),
+        )
         var result: Result<Item>? = null
 
         gateway.createItem(
@@ -303,12 +321,12 @@ class FirebaseInventoryGatewayTest {
                 description = "18V cordless",
                 tags = listOf("Power Tools"),
             ),
-            photo = ItemPhoto("content://full.webp", "content://thumb.webp"),
+            photos = listOf(ItemPhoto("content://full.webp", "content://thumb.webp")),
         ) { result = it }
 
         assertEquals("item-1", result?.getOrThrow()?.id)
         assertEquals(
-            "gs://mystuff/households/household-1/items/item-1-11111111-1111-1111-1111-111111111111.webp",
+            "gs://mystuff/households/household-1/items/item-1/attachments/attachment-1.webp",
             result?.getOrThrow()?.photoUrl,
         )
     }
@@ -323,7 +341,11 @@ class FirebaseInventoryGatewayTest {
                 itemDocument("cabinet", "Cabinet", "garage"),
             ),
         )
-        val gateway = FirebaseInventoryGateway(store, FakeInventoryPhotoStore())
+        val gateway = FirebaseInventoryGateway(
+            store,
+            FakeInventoryPhotoStore(),
+            FakeItemPhotoAttachmentGateway(),
+        )
         var result: Result<Inventory>? = null
 
         gateway.observe(household) { result = it }
@@ -351,7 +373,11 @@ class FirebaseInventoryGatewayTest {
                 ),
             ),
         )
-        val gateway = FirebaseInventoryGateway(store, FakeInventoryPhotoStore())
+        val gateway = FirebaseInventoryGateway(
+            store,
+            FakeInventoryPhotoStore(),
+            FakeItemPhotoAttachmentGateway(),
+        )
         var result: Result<Inventory>? = null
 
         gateway.observe(household) { result = it }
@@ -375,7 +401,11 @@ class FirebaseInventoryGatewayTest {
                 ),
             ),
         )
-        val gateway = FirebaseInventoryGateway(store, FakeInventoryPhotoStore())
+        val gateway = FirebaseInventoryGateway(
+            store,
+            FakeInventoryPhotoStore(),
+            FakeItemPhotoAttachmentGateway(),
+        )
         var result: Result<Inventory>? = null
 
         gateway.observe(household) { result = it }
@@ -391,7 +421,11 @@ class FirebaseInventoryGatewayTest {
     fun `creating an Item writes its generated identity current Parent Item and attribution`() {
         val timestamp = Any()
         val store = FakeInventoryDocumentStore(serverTimestamp = timestamp)
-        val gateway = FirebaseInventoryGateway(store, FakeInventoryPhotoStore())
+        val gateway = FirebaseInventoryGateway(
+            store,
+            FakeInventoryPhotoStore(),
+            FakeItemPhotoAttachmentGateway(),
+        )
         var result: Result<Item>? = null
 
         gateway.createItem(
@@ -404,7 +438,7 @@ class FirebaseInventoryGatewayTest {
                 tags = listOf("Power Tools"),
                 webUrl = "https://example.com/drill",
             ),
-            photo = null,
+            photos = emptyList(),
         ) { result = it }
 
         assertEquals("item-1", store.createdItemId)
@@ -445,10 +479,14 @@ class FirebaseInventoryGatewayTest {
     fun `updating an Item writes editable details and last-updating Member attribution`() {
         val timestamp = Any()
         val store = FakeInventoryDocumentStore(serverTimestamp = timestamp)
-        val gateway = FirebaseInventoryGateway(store, FakeInventoryPhotoStore())
+        val gateway = FirebaseInventoryGateway(
+            store,
+            FakeInventoryPhotoStore(),
+            FakeItemPhotoAttachmentGateway(),
+        )
         var result: Result<Item>? = null
 
-        gateway.updateItem(
+        gateway.updateItemWithAttachments(
             householdId = "household-1",
             item = inventoryItem("item-1", "Drill", "garage"),
             updater = inventoryIdentity().copy(id = "member-2", displayName = "Sam"),
@@ -458,7 +496,8 @@ class FirebaseInventoryGatewayTest {
                 tags = listOf("Power Tools"),
                 webUrl = "https://example.com/hammer-drill",
             ),
-            photoUpdate = ItemPhotoUpdate.Unchanged,
+            additionalPhotos = emptyList(),
+            existingAttachments = emptyList(),
         ) { result = it }
 
         assertEquals(
@@ -484,7 +523,11 @@ class FirebaseInventoryGatewayTest {
     @Test
     fun `persistence rejects Tags duplicated after Unicode normalization`() {
         val store = FakeInventoryDocumentStore()
-        val gateway = FirebaseInventoryGateway(store, FakeInventoryPhotoStore())
+        val gateway = FirebaseInventoryGateway(
+            store,
+            FakeInventoryPhotoStore(),
+            FakeItemPhotoAttachmentGateway(),
+        )
         var result: Result<Item>? = null
 
         gateway.createItem(
@@ -496,7 +539,7 @@ class FirebaseInventoryGatewayTest {
                 description = null,
                 tags = listOf("Power Tools", "powér tools"),
             ),
-            photo = null,
+            photos = emptyList(),
         ) { result = it }
 
         assertTrue(result?.isFailure == true)
@@ -507,10 +550,14 @@ class FirebaseInventoryGatewayTest {
     fun `replacing an Item photo publishes a new revision without deleting the old revision`() {
         val store = FakeInventoryDocumentStore()
         val photos = FakeInventoryPhotoStore()
-        val gateway = FirebaseInventoryGateway(store, photos)
+        val gateway = FirebaseInventoryGateway(
+            store,
+            photos,
+            FakeItemPhotoAttachmentGateway(),
+        )
         var result: Result<Item>? = null
 
-        gateway.updateItem(
+        gateway.updateItemWithAttachments(
             householdId = "household-1",
             item = inventoryItem(
                 "item-1",
@@ -521,13 +568,15 @@ class FirebaseInventoryGatewayTest {
             ),
             updater = inventoryIdentity(),
             details = inventoryDetails(),
-            photoUpdate = ItemPhotoUpdate.Replaced(
-                ItemPhoto("content://new.webp", "content://new-thumb.webp"),
+            additionalPhotos = listOf(ItemPhoto("content://new.webp", "content://new-thumb.webp")),
+            existingAttachments = listOf(
+                attachment("old", "gs://old/full.webp", creationOrder = 0),
             ),
+            attachmentToDelete = attachment("old", "gs://old/full.webp"),
         ) { result = it }
 
         assertEquals(
-            "gs://mystuff/households/household-1/items/item-1-11111111-1111-1111-1111-111111111111.webp",
+            "gs://mystuff/households/household-1/items/item-1/attachments/attachment-1.webp",
             result?.getOrThrow()?.photoUrl,
         )
         assertEquals(
@@ -547,21 +596,26 @@ class FirebaseInventoryGatewayTest {
     fun `removing an Item photo clears its locations and deletes both stored variants`() {
         val store = FakeInventoryDocumentStore()
         val photos = FakeInventoryPhotoStore()
-        val gateway = FirebaseInventoryGateway(store, photos)
+        val gateway = FirebaseInventoryGateway(
+            store,
+            photos,
+            FakeItemPhotoAttachmentGateway(),
+        )
         var result: Result<Item>? = null
 
-        gateway.updateItem(
+        gateway.deleteItemAttachment(
             householdId = "household-1",
             item = inventoryItem(
                 "item-1",
                 "Drill",
                 "garage",
+                photoAttachmentId = "legacy",
                 photoUrl = "gs://old/full.webp",
                 photoThumbnailUrl = "gs://old/thumb.webp",
             ),
             updater = inventoryIdentity(),
-            details = inventoryDetails(),
-            photoUpdate = ItemPhotoUpdate.Removed,
+            attachment = attachment("legacy", "gs://old/full.webp"),
+            remainingAttachments = emptyList(),
         ) { result = it }
 
         assertNull(result?.getOrThrow()?.photoUrl)
@@ -675,15 +729,6 @@ private class FakeInventoryPhotoStore(
     val deletedLocations = mutableListOf<String>()
     val generatedThumbnailSources = mutableListOf<String>()
 
-    override fun newRevision(householdId: String, itemId: String) = ItemPhotoRevision(
-        locations = ItemPhotoLocations(
-            full = "gs://mystuff/households/$householdId/items/$itemId-$REVISION.webp",
-            thumbnail = "gs://mystuff/households/$householdId/items/$itemId-$REVISION-thumb.webp",
-        ),
-        fullStoragePath = "households/$householdId/items/$itemId-$REVISION.webp",
-        thumbnailStoragePath = "households/$householdId/items/$itemId-$REVISION-thumb.webp",
-    )
-
     override fun newAttachmentRevision(
         householdId: String,
         itemId: String,
@@ -697,9 +742,10 @@ private class FakeInventoryPhotoStore(
         thumbnailStoragePath = "households/$householdId/items/$itemId/attachments/$attachmentId-thumb.webp",
     )
 
-    override fun uploadInBackground(
+    override fun uploadAttachmentInBackground(
         revision: ItemPhotoRevision,
         photo: ItemPhoto,
+        failure: AttachmentUploadFailure?,
     ) {
         enqueueFailure?.let { throw it }
         uploads += QueuedPhotoUpload(
@@ -813,8 +859,6 @@ private fun itemDocument(
         webUrl?.let { put("webUrl", it) }
     },
 )
-
-private const val REVISION = "11111111-1111-1111-1111-111111111111"
 
 private fun inventoryHousehold() = Household(
     id = "household-1",

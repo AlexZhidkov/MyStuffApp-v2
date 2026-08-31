@@ -14,7 +14,7 @@ import com.azhidkov.mystuff.R
 internal fun AppBarBrandIcon(onClick: () -> Unit) {
     IconButton(onClick = onClick) {
         Image(
-            painter = painterResource(R.drawable.ic_app_logo),
+            painter = painterResource(R.drawable.ic_app_logo_generated),
             contentDescription = stringResource(R.string.app_name),
             modifier = Modifier.size(32.dp),
         )

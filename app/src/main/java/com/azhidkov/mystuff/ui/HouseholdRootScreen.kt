@@ -1038,66 +1038,88 @@ private fun ItemFormScreen(
             }
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(
-                        onClick = photoAction,
-                        enabled = formEnabled,
-                    ) {
-                        Text(
-                            stringResource(
-                                if (editing &&
-                                    draft.photoSelectionPurpose ==
+                    val replacingPhoto =
+                        editing &&
+                            draft.photoSelectionPurpose !=
+                            ItemPhotoSelectionPurpose.AddAttachments &&
+                            (draft.photos.isNotEmpty() || storedPhotoItem?.photoUrl != null)
+                    if (replacingPhoto) {
+                        IconButton(
+                            onClick = photoAction,
+                            enabled = formEnabled,
+                        ) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_photo),
+                                contentDescription = stringResource(R.string.replace_photo),
+                            )
+                        }
+                    } else {
+                        TextButton(
+                            onClick = photoAction,
+                            enabled = formEnabled,
+                        ) {
+                            Text(
+                                stringResource(
+                                    if (editing &&
+                                        draft.photoSelectionPurpose ==
                                         ItemPhotoSelectionPurpose.AddAttachments
-                                ) {
-                                    if (draft.photos.isEmpty()) {
-                                        R.string.add_attachments
-                                    } else {
-                                        R.string.add_another_attachment
-                                    }
-                                } else if (editing) {
-                                    if (
-                                        draft.photos.isNotEmpty() ||
-                                        storedPhotoItem?.photoUrl != null
                                     ) {
-                                        R.string.replace_photo
-                                    } else {
+                                        if (draft.photos.isEmpty()) {
+                                            R.string.add_attachments
+                                        } else {
+                                            R.string.add_another_attachment
+                                        }
+                                    } else if (editing) {
                                         R.string.add_photo
-                                    }
-                                } else if (draft.photos.isEmpty()) {
-                                    R.string.add_photo
-                                } else {
-                                    R.string.add_another_photo
-                                },
-                            ),
-                        )
+                                    } else if (draft.photos.isEmpty()) {
+                                        R.string.add_photo
+                                    } else {
+                                        R.string.add_another_photo
+                                    },
+                                ),
+                            )
+                        }
                     }
                     if (
                         editing &&
                         draft.photoSelectionPurpose != ItemPhotoSelectionPurpose.AddAttachments
                     ) {
-                        TextButton(
+                        IconButton(
                             onClick = addItemAttachments,
                             enabled = formEnabled,
                         ) {
-                            Text(stringResource(R.string.add_attachments))
+                            Icon(
+                                painter = painterResource(R.drawable.ic_add),
+                                contentDescription = stringResource(R.string.add_attachments),
+                            )
                         }
                     }
                     if (!editing || draft.photoSelectionPurpose == ItemPhotoSelectionPurpose.AddAttachments) {
-                        TextButton(
-                            onClick = {
-                                if (editing) actions.beginChooseItemAttachments()
-                                photoPickerLauncher.launch(
-                                    PickVisualMediaRequest(
-                                        ActivityResultContracts.PickVisualMedia.ImageOnly,
-                                    ),
-                                )
-                            },
-                            enabled = formEnabled,
-                        ) {
-                            Text(
-                                stringResource(
-                                    if (editing) R.string.choose_attachments else R.string.choose_photos,
+                        val choosePhotos = {
+                            if (editing) actions.beginChooseItemAttachments()
+                            photoPickerLauncher.launch(
+                                PickVisualMediaRequest(
+                                    ActivityResultContracts.PickVisualMedia.ImageOnly,
                                 ),
                             )
+                        }
+                        if (editing) {
+                            IconButton(
+                                onClick = choosePhotos,
+                                enabled = formEnabled,
+                            ) {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_photo),
+                                    contentDescription = stringResource(R.string.choose_attachments),
+                                )
+                            }
+                        } else {
+                            TextButton(
+                                onClick = choosePhotos,
+                                enabled = formEnabled,
+                            ) {
+                                Text(stringResource(R.string.choose_photos))
+                            }
                         }
                     }
                     if (
@@ -1105,14 +1127,17 @@ private fun ItemFormScreen(
                         draft.photoSelectionPurpose == ItemPhotoSelectionPurpose.ReplaceItemPhoto &&
                         (draft.photos.isNotEmpty() || storedPhotoItem?.photoUrl != null)
                     ) {
-                        TextButton(
+                        IconButton(
                             onClick = {
                                 discardUnsavedPhotoSources(context, unsavedPhotos)
                                 actions.removeItemPhoto()
                             },
                             enabled = formEnabled,
                         ) {
-                            Text(stringResource(R.string.remove_photo))
+                            Icon(
+                                painter = painterResource(R.drawable.ic_delete),
+                                contentDescription = stringResource(R.string.remove_photo),
+                            )
                         }
                     }
                 }

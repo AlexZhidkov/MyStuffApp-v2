@@ -12,11 +12,14 @@ import com.azhidkov.mystuff.R
 
 @Composable
 internal fun AppBarBrandIcon(onClick: () -> Unit) {
-    IconButton(onClick = onClick) {
+    IconButton(
+        onClick = onClick,
+        modifier = Modifier.size(56.dp),
+    ) {
         Image(
             painter = painterResource(R.drawable.ic_app_logo_generated),
             contentDescription = stringResource(R.string.app_name),
-            modifier = Modifier.size(32.dp),
+            modifier = Modifier.size(48.dp),
         )
     }
 }

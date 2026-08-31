@@ -437,8 +437,11 @@ private fun HouseholdRootContent(
                                     contentDescription = stringResource(R.string.edit_item),
                                 )
                             }
-                            TextButton(onClick = inventoryActions::beginMoveItem) {
-                                Text(stringResource(R.string.move_item))
+                            IconButton(onClick = inventoryActions::beginMoveItem) {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_move),
+                                    contentDescription = stringResource(R.string.move_item),
+                                )
                             }
                         }
                         webUrl?.let { url ->

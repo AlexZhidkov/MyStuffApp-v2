@@ -34,6 +34,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -1037,19 +1038,22 @@ private fun ItemFormScreen(
                 }
             }
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                ) {
                     val replacingPhoto =
                         editing &&
                             draft.photoSelectionPurpose !=
                             ItemPhotoSelectionPurpose.AddAttachments &&
                             (draft.photos.isNotEmpty() || storedPhotoItem?.photoUrl != null)
                     if (replacingPhoto) {
-                        IconButton(
+                        FilledTonalIconButton(
                             onClick = photoAction,
                             enabled = formEnabled,
                         ) {
                             Icon(
-                                painter = painterResource(R.drawable.ic_photo),
+                                painter = painterResource(R.drawable.ic_photo_camera),
                                 contentDescription = stringResource(R.string.replace_photo),
                             )
                         }
@@ -1084,7 +1088,7 @@ private fun ItemFormScreen(
                         editing &&
                         draft.photoSelectionPurpose != ItemPhotoSelectionPurpose.AddAttachments
                     ) {
-                        IconButton(
+                        FilledTonalIconButton(
                             onClick = addItemAttachments,
                             enabled = formEnabled,
                         ) {
@@ -1104,12 +1108,12 @@ private fun ItemFormScreen(
                             )
                         }
                         if (editing) {
-                            IconButton(
+                            FilledTonalIconButton(
                                 onClick = choosePhotos,
                                 enabled = formEnabled,
                             ) {
                                 Icon(
-                                    painter = painterResource(R.drawable.ic_photo),
+                                    painter = painterResource(R.drawable.ic_photo_camera),
                                     contentDescription = stringResource(R.string.choose_attachments),
                                 )
                             }
@@ -1127,7 +1131,7 @@ private fun ItemFormScreen(
                         draft.photoSelectionPurpose == ItemPhotoSelectionPurpose.ReplaceItemPhoto &&
                         (draft.photos.isNotEmpty() || storedPhotoItem?.photoUrl != null)
                     ) {
-                        IconButton(
+                        FilledTonalIconButton(
                             onClick = {
                                 discardUnsavedPhotoSources(context, unsavedPhotos)
                                 actions.removeItemPhoto()

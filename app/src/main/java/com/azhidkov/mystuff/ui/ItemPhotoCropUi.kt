@@ -159,20 +159,6 @@ internal fun CropPhotoScreen(
                         contentScale = ContentScale.Crop,
                     )
                 }
-                if (processingPurpose == PhotoProcessingPurpose.ItemAttachment) {
-                    Text(
-                        text = stringResource(R.string.crop_aspect_ratio),
-                        style = MaterialTheme.typography.labelLarge,
-                    )
-                    Slider(
-                        value = cropAspectRatio,
-                        onValueChange = {
-                            cropAspectRatio = it
-                            offset = Offset.Zero
-                        },
-                        valueRange = MIN_CROP_ASPECT_RATIO..MAX_CROP_ASPECT_RATIO,
-                    )
-                }
                 Button(
                     onClick = {
                         cropping = true

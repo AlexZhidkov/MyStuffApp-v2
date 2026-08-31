@@ -6,6 +6,10 @@
     <string name="retry_google_sign_in">Try Google sign-in again</string>
     <string name="signing_in">Signing in…</string>
     <string name="google_only_provider">MyStuff uses your Google Account only to identify you and protect your Household.</string>
+    <string name="about">About</string>
+    <string name="about_title">About MyStuff</string>
+    <string name="app_version">Version %1$s</string>
+    <string name="close">Close</string>
     <string name="sign_out">Sign out</string>
     <string name="open_menu">Open menu</string>
     <string name="welcome_person">Welcome, %1$s</string>

@@ -11,6 +11,7 @@
     <string name="about_title">About MyStuff</string>
     <string name="app_version">Version %1$s</string>
     <string name="close">Close</string>
+    <string name="invitations">Invitations</string>
     <string name="sign_out">Sign out</string>
     <string name="open_menu">Open menu</string>
     <string name="welcome_person">Welcome, %1$s</string>
@@ -35,6 +36,9 @@
     <string name="move_item_body">Choose a new Parent Item for %1$s.</string>
     <string name="move_item_no_targets">There are no other valid Parent Items.</string>
     <string name="move_item_confirm">Move here</string>
+    <string name="current_parent_item">Current Parent Item</string>
+    <string name="expand_item">Expand %1$s</string>
+    <string name="collapse_item">Collapse %1$s</string>
     <string name="moving_item">Moving Item…</string>
     <string name="item_moved">Item moved.</string>
     <string name="child_items">Child Items</string>

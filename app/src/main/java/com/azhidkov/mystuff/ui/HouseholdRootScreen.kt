@@ -74,7 +74,6 @@ import com.azhidkov.mystuff.CarouselImage
 import com.azhidkov.mystuff.HouseholdInvitation
 import com.azhidkov.mystuff.InvitationStatus
 import com.azhidkov.mystuff.InvitationUiState
-import com.azhidkov.mystuff.Inventory
 import com.azhidkov.mystuff.InventoryActions
 import com.azhidkov.mystuff.InventoryUiState
 import com.azhidkov.mystuff.Item
@@ -167,6 +166,20 @@ private fun HouseholdRootContent(
     inventoryActions: InventoryActions,
     onSignOut: () -> Unit,
 ) {
+    var showInvitations by remember { mutableStateOf(false) }
+
+    if (showInvitations) {
+        BackHandler { showInvitations = false }
+        InvitationsScreen(
+            state = invitationState,
+            onCreateInvitation = onCreateInvitation,
+            onRevokeInvitation = onRevokeInvitation,
+            onReplaceInvitation = onReplaceInvitation,
+            onClose = { showInvitations = false },
+        )
+        return
+    }
+
     val itemDraft = inventoryState.itemDraft
     if (itemDraft != null) {
         val context = LocalContext.current
@@ -286,6 +299,11 @@ private fun HouseholdRootContent(
                 actions = {
                     AppBarOverflowMenu(
                         enabled = !signOutInProgress,
+                        onInvitations = if (invitationState.canManage) {
+                            { showInvitations = true }
+                        } else {
+                            null
+                        },
                         onSignOut = onSignOut,
                     )
                 },
@@ -534,28 +552,6 @@ private fun HouseholdRootContent(
                         )
                     }
                 }
-                if (isHome && invitationState.canManage) {
-                    item { Spacer(Modifier.height(16.dp)) }
-                    item {
-                        InvitationComposer(
-                            state = invitationState,
-                            onCreateInvitation = onCreateInvitation,
-                        )
-                    }
-                    items(
-                        items = invitationState.invitations,
-                        key = HouseholdInvitation::id,
-                    ) { invitation ->
-                        InvitationCard(
-                            invitation = invitation,
-                            operationInProgress = invitationState.operationInProgress,
-                            onRevoke = { onRevokeInvitation(invitation.id) },
-                            onReplace = {
-                                onReplaceInvitation(invitation.id, invitation.intendedEmail)
-                            },
-                        )
-                    }
-                }
             }
             item { Spacer(Modifier.height(24.dp)) }
         }
@@ -564,24 +560,21 @@ private fun HouseholdRootContent(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ItemMoveScreen(
-    inventory: Inventory,
-    item: Item,
-    candidates: List<Item>,
-    selectedParentItemId: String?,
-    operationInProgress: Boolean,
-    onSelect: (String) -> Unit,
-    onConfirm: () -> Unit,
+private fun InvitationsScreen(
+    state: InvitationUiState,
+    onCreateInvitation: (String) -> Unit,
+    onRevokeInvitation: (String) -> Unit,
+    onReplaceInvitation: (String, String) -> Unit,
     onClose: () -> Unit,
 ) {
     Scaffold(
         contentWindowInsets = WindowInsets.safeDrawing,
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.move_item_title)) },
+                title = { Text(stringResource(R.string.invitations)) },
                 navigationIcon = {
-                    TextButton(onClick = onClose, enabled = !operationInProgress) {
-                        Text(stringResource(R.string.cancel))
+                    TextButton(onClick = onClose) {
+                        Text(stringResource(R.string.close))
                     }
                 },
             )
@@ -595,61 +588,28 @@ private fun ItemMoveScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {
-                Text(
-                    text = stringResource(R.string.move_item_body, item.name),
-                    style = MaterialTheme.typography.titleMedium,
+                InvitationComposer(
+                    state = state,
+                    onCreateInvitation = onCreateInvitation,
                 )
             }
-            if (candidates.isEmpty()) {
-                item { Text(stringResource(R.string.move_item_no_targets)) }
-            } else {
-                items(candidates, key = Item::id) { candidate ->
-                    val selected = candidate.id == selectedParentItemId
-                    if (selected) {
-                        Button(
-                            onClick = { onSelect(candidate.id) },
-                            enabled = !operationInProgress,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(
-                                candidatePathText(inventory, candidate),
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        }
-                    } else {
-                        OutlinedButton(
-                            onClick = { onSelect(candidate.id) },
-                            enabled = !operationInProgress,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(
-                                candidatePathText(inventory, candidate),
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        }
-                    }
-                }
+            items(
+                items = state.invitations,
+                key = HouseholdInvitation::id,
+            ) { invitation ->
+                InvitationCard(
+                    invitation = invitation,
+                    operationInProgress = state.operationInProgress,
+                    onRevoke = { onRevokeInvitation(invitation.id) },
+                    onReplace = {
+                        onReplaceInvitation(invitation.id, invitation.intendedEmail)
+                    },
+                )
             }
-            item {
-                Button(
-                    onClick = onConfirm,
-                    enabled = selectedParentItemId != null &&
-                        !operationInProgress,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    if (operationInProgress) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp))
-                    } else {
-                        Text(stringResource(R.string.move_item_confirm))
-                    }
-                }
-            }
+            item { Spacer(Modifier.height(24.dp)) }
         }
     }
 }
-
-private fun candidatePathText(inventory: Inventory, candidate: Item): String =
-    inventory.pathTo(candidate.id).joinToString(" → ", transform = Item::name)
 
 @Composable
 private fun FailedAttachmentCard(

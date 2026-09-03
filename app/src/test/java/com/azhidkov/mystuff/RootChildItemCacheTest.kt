@@ -20,6 +20,7 @@ class RootChildItemCacheTest {
             tags = listOf("Storage", "Tools"),
             photoThumbnailUrl = "gs://mystuff/garage-thumb.webp",
             webUrl = "https://example.com/garage",
+            displayOrder = 3,
         )
         FileRootChildItemCache(directory) { task -> task() }
             .store("household-1", listOf(item))
@@ -60,7 +61,7 @@ class RootChildItemCacheTest {
             directory.mkdirs()
             DataOutputStream(cacheFile.outputStream()).use { output ->
                 output.writeInt(0x4D595354)
-                output.writeInt(3)
+                output.writeInt(4)
                 output.writeUTF("household-1")
                 output.writeInt(0)
             }

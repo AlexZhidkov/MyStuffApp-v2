@@ -86,6 +86,7 @@ internal class FileRootChildItemCache(
                             },
                             photoThumbnailUrl = input.readNullableString(),
                             webUrl = input.readNullableString(),
+                            displayOrder = input.readNullableLong(),
                         ),
                     )
                 }
@@ -120,6 +121,7 @@ internal class FileRootChildItemCache(
                     item.tags.forEach(output::writeUTF)
                     output.writeNullableString(item.photoThumbnailUrl)
                     output.writeNullableString(item.webUrl)
+                    output.writeNullableLong(item.displayOrder)
                 }
             }
             try {
@@ -150,6 +152,14 @@ private fun DataOutputStream.writeNullableString(value: String?) {
     value?.let(::writeUTF)
 }
 
+private fun DataInputStream.readNullableLong(): Long? =
+    if (readBoolean()) readLong() else null
+
+private fun DataOutputStream.writeNullableLong(value: Long?) {
+    writeBoolean(value != null)
+    value?.let(::writeLong)
+}
+
 internal fun rootChildItemCacheFileName(householdId: String): String {
     val digest = MessageDigest.getInstance("SHA-256")
         .digest(householdId.encodeToByteArray())
@@ -162,4 +172,4 @@ private val rootChildItemCacheWriter = Executors.newSingleThreadExecutor { task 
 }
 
 private const val CACHE_MAGIC = 0x4D595354
-private const val CACHE_VERSION = 4
+private const val CACHE_VERSION = 5

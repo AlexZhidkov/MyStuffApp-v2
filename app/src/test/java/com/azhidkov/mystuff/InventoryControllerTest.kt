@@ -10,6 +10,35 @@ import org.junit.Test
 
 class InventoryControllerTest {
     @Test
+    fun `drag reordering is immediate and queues the latest shared order while saving`() {
+        val household = household()
+        val garage = item("garage", "Garage", household.id, displayOrder = 0)
+        val kitchen = item("kitchen", "Kitchen", household.id, displayOrder = 1)
+        val shed = item("shed", "Shed", household.id, displayOrder = 2)
+        val gateway = FakeInventoryGateway(
+            Inventory.from(household, listOf(household.rootItem, garage, kitchen, shed)),
+        ).apply { deferReorders = true }
+        val controller = InventoryController(household, identity(), gateway)
+
+        controller.reorderItem("garage", 1)
+
+        assertEquals(listOf("kitchen", "garage", "shed"), controller.state.childItems.map(Item::id))
+        assertEquals(listOf(listOf("kitchen", "garage", "shed")), gateway.reorderRequests)
+        assertFalse(controller.state.operationInProgress)
+
+        controller.reorderItem("garage", 1)
+
+        assertEquals(listOf("kitchen", "shed", "garage"), controller.state.childItems.map(Item::id))
+        assertEquals(1, gateway.reorderRequests.size)
+
+        gateway.completeReorder()
+
+        assertEquals(2, gateway.reorderRequests.size)
+        assertEquals(listOf("kitchen", "shed", "garage"), gateway.reorderRequests.last())
+        assertEquals(listOf("kitchen", "shed", "garage"), controller.state.childItems.map(Item::id))
+    }
+
+    @Test
     fun `cached root Child Items are available before the live Inventory loads`() {
         val household = household()
         val cachedGarage = item(
@@ -1581,6 +1610,9 @@ private class FakeInventoryGateway(
         private set
     var deferCreates: Boolean = false
     private var pendingCreate: (() -> Unit)? = null
+    var deferReorders: Boolean = false
+    val reorderRequests = mutableListOf<List<String>>()
+    private var pendingReorder: (() -> Unit)? = null
 
     override fun observe(
         household: Household,
@@ -1698,6 +1730,31 @@ private class FakeInventoryGateway(
         val moved = item.copy(parentItemId = newParentItemId)
         inventory = inventory.withItem(moved)
         onResult(Result.success(moved))
+    }
+
+    override fun reorderItems(
+        householdId: String,
+        parentItemId: String,
+        orderedItems: List<Item>,
+        updater: AuthenticatedIdentity,
+        onResult: (Result<Unit>) -> Unit,
+    ) {
+        val itemIds = orderedItems.map(Item::id)
+        reorderRequests += itemIds
+        val complete: () -> Unit = {
+            inventory = inventory.withChildrenInOrder(parentItemId, itemIds)
+            observer?.invoke(Result.success(inventory))
+            onResult(Result.success(Unit))
+        }
+        if (deferReorders) {
+            pendingReorder = complete
+        } else {
+            complete()
+        }
+    }
+
+    fun completeReorder() {
+        requireNotNull(pendingReorder).also { pendingReorder = null }.invoke()
     }
 }
 
@@ -1869,6 +1926,7 @@ private fun item(
     description: String? = null,
     tags: List<String> = emptyList(),
     webUrl: String? = null,
+    displayOrder: Long? = null,
 ) = Item(
     id = id,
     name = name,
@@ -1878,4 +1936,5 @@ private fun item(
     tags = tags,
     photoThumbnailUrl = photoThumbnailUrl,
     webUrl = webUrl,
+    displayOrder = displayOrder,
 )

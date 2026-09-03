@@ -47,6 +47,14 @@ interface InventoryGateway {
         onResult: (Result<Item>) -> Unit,
     ) = onResult(Result.failure(UnsupportedOperationException("Item move is unavailable.")))
 
+    fun reorderItems(
+        householdId: String,
+        parentItemId: String,
+        orderedItems: List<Item>,
+        updater: AuthenticatedIdentity,
+        onResult: (Result<Unit>) -> Unit,
+    ) = onResult(Result.failure(UnsupportedOperationException("Item reordering is unavailable.")))
+
     fun designateItemPhoto(
         householdId: String,
         item: Item,
@@ -85,6 +93,7 @@ interface InventoryActions {
     fun openSearchResult(itemId: String)
     fun openItem(itemId: String)
     fun openParentItem()
+    fun reorderItem(itemId: String, offset: Int)
     fun beginAddItem()
     fun beginEditItem()
     fun beginMoveItem()
@@ -334,6 +343,8 @@ class InventoryController internal constructor(
     private var searchDebounceSubscription: SearchSubscription? = null
     private var searchRequestSubscription: SearchSubscription? = null
     private var itemAttachmentSubscription: InventorySubscription? = null
+    private val pendingChildOrders = linkedMapOf<String, PendingChildOrder>()
+    private var childOrderWriteInProgress = false
 
     private val attachmentUploadFailureSubscription =
         attachmentUploadFailureRegistry.observe { drafts ->
@@ -350,13 +361,18 @@ class InventoryController internal constructor(
     private val subscription = gateway.observe(household) { result ->
         result.onSuccess { inventory ->
             observedInventory = inventory
+            pendingChildOrders.entries.removeAll { (parentItemId, pending) ->
+                inventory.childrenOf(parentItemId).map(Item::id) == pending.desiredItemIds
+            }
             runCatching {
                 rootChildItemCache.store(
                     householdId = household.id,
                     items = inventory.childrenOf(inventory.rootItemId),
                 )
             }
-            val displayedInventory = inventory.withDescriptionGenerationOverlays()
+            val displayedInventory = inventory
+                .withDescriptionGenerationOverlays()
+                .withPendingChildOrders()
             val selectedItemId = state.selectedItemId.takeIf(displayedInventory::contains)
                 ?: displayedInventory.rootItemId
             updateState(
@@ -382,6 +398,7 @@ class InventoryController internal constructor(
                     errorMessage = null,
                 ),
             )
+            persistNextChildOrder()
         }.onFailure { failure ->
             updateState(
                 state.copy(
@@ -484,6 +501,36 @@ class InventoryController internal constructor(
     override fun openParentItem() {
         val parentItemId = state.selectedItem.parentItemId ?: return
         openItem(parentItemId)
+    }
+
+    override fun reorderItem(itemId: String, offset: Int) {
+        if (
+            offset == 0 ||
+            state.itemDraft != null ||
+            state.itemMove != null ||
+            state.search.query.isNotBlank()
+        ) {
+            return
+        }
+        val item = runCatching { state.inventory.item(itemId) }.getOrNull() ?: return
+        val parentItemId = item.parentItemId ?: return
+        if (parentItemId != state.selectedItemId) return
+        val reorderedInventory = state.inventory.reorderItem(itemId, offset)
+        val desiredItemIds = reorderedInventory.childrenOf(parentItemId).map(Item::id)
+        if (desiredItemIds == state.childItems.map(Item::id)) return
+
+        val pending = pendingChildOrders.getOrPut(parentItemId) {
+            PendingChildOrder(desiredItemIds)
+        }
+        pending.desiredItemIds = desiredItemIds
+        updateState(
+            state.copy(
+                inventory = reorderedInventory,
+                errorMessage = null,
+                successMessage = null,
+            ),
+        )
+        persistNextChildOrder()
     }
 
     override fun beginAddItem() {
@@ -1238,6 +1285,53 @@ class InventoryController internal constructor(
         }
     }
 
+    private fun Inventory.withPendingChildOrders(): Inventory =
+        pendingChildOrders.entries.fold(this) { inventory, (parentItemId, pending) ->
+            runCatching {
+                inventory.withChildrenInOrder(parentItemId, pending.desiredItemIds)
+            }.getOrDefault(inventory)
+        }
+
+    private fun persistNextChildOrder() {
+        if (childOrderWriteInProgress) return
+        val next = pendingChildOrders.entries.firstOrNull { (_, pending) ->
+            pending.persistedItemIds != pending.desiredItemIds
+        } ?: return
+        val parentItemId = next.key
+        val itemIds = next.value.desiredItemIds
+        val orderedItems = itemIds.mapNotNull { itemId ->
+            state.inventory.takeIf { it.contains(itemId) }?.item(itemId)
+        }
+        if (orderedItems.size != itemIds.size) return
+
+        childOrderWriteInProgress = true
+        gateway.reorderItems(
+            householdId = household.id,
+            parentItemId = parentItemId,
+            orderedItems = orderedItems,
+            updater = identity,
+        ) { result ->
+            childOrderWriteInProgress = false
+            val pending = pendingChildOrders[parentItemId]
+            result.onSuccess {
+                if (pending != null) pending.persistedItemIds = itemIds
+            }.onFailure { failure ->
+                if (pending?.desiredItemIds == itemIds) {
+                    pendingChildOrders.remove(parentItemId)
+                }
+                updateState(
+                    state.copy(
+                        inventory = observedInventory
+                            .withDescriptionGenerationOverlays()
+                            .withPendingChildOrders(),
+                        errorMessage = failure.message ?: "Couldn't save the Item order.",
+                    ),
+                )
+            }
+            persistNextChildOrder()
+        }
+    }
+
     private fun updateState(newState: InventoryUiState) {
         state = newState
         onStateChanged(newState)
@@ -1289,6 +1383,11 @@ class InventoryController internal constructor(
     }
 
 }
+
+private data class PendingChildOrder(
+    var desiredItemIds: List<String>,
+    var persistedItemIds: List<String>? = null,
+)
 
 private fun CompletedDescriptionGeneration.deferredError(): DeferredInventoryError? {
     val message = outcome.deferredErrorMessage ?: return null

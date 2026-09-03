@@ -138,6 +138,10 @@ service cloud.firestore {
         && name.matches('^[^\\s\\p{Z}](.{0,98}[^\\s\\p{Z}])?$');
     }
 
+    function validDisplayOrder(displayOrder) {
+      return displayOrder is int && displayOrder >= 0;
+    }
+
     function validPhotoLocations(data) {
       return (
         data.get('photoAttachmentId', null) == null
@@ -293,13 +297,14 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly([
           'householdId', 'name', 'parentItemId', 'photoAttachmentId', 'photoUrl',
           'photoThumbnailUrl', 'description', 'tags', 'createdAt',
-          'webUrl',
+          'webUrl', 'displayOrder',
           'updatedAt', 'createdById',
           'createdByDisplayName', 'updatedById', 'updatedByDisplayName'
         ])
         && request.resource.data.householdId == householdId
         && validName(request.resource.data.name)
         && request.resource.data.parentItemId is string
+        && validDisplayOrder(request.resource.data.displayOrder)
         && exists(itemPath(householdId, request.resource.data.parentItemId))
         && validNewItemPhotoProjection(request.resource.data)
         && validDescription(request.resource.data.description)
@@ -321,12 +326,16 @@ service cloud.firestore {
         && resource.data.parentItemId is string
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'name', 'photoAttachmentId', 'photoUrl', 'photoThumbnailUrl', 'description', 'tags',
-          'webUrl',
+          'webUrl', 'displayOrder',
           'updatedAt', 'updatedById', 'updatedByDisplayName'
         ])
         && validName(request.resource.data.name)
         && request.resource.data.parentItemId is string
         && request.resource.data.parentItemId != itemId
+        && (
+          request.resource.data.get('displayOrder', null) == null
+          || validDisplayOrder(request.resource.data.displayOrder)
+        )
         && exists(itemPath(householdId, request.resource.data.parentItemId))
         && get(itemPath(householdId, request.resource.data.parentItemId)).data.householdId
           == householdId

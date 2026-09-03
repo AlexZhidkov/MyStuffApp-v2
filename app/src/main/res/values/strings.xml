@@ -32,6 +32,7 @@
     <string name="add_item">Add item</string>
     <string name="edit_item">Edit Item</string>
     <string name="move_item">Move Item</string>
+    <string name="reorder_item">Reorder %1$s</string>
     <string name="move_item_title">Move Item</string>
     <string name="move_item_body">Choose a new Parent Item for %1$s.</string>
     <string name="move_item_no_targets">There are no other valid Parent Items.</string>

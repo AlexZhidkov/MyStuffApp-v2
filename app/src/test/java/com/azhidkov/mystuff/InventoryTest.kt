@@ -7,6 +7,25 @@ import org.junit.Test
 
 class InventoryTest {
     @Test
+    fun `reordering an Item changes the shared order of only its siblings`() {
+        val household = testHousehold()
+        val garage = testItem("garage", "Garage", household.id, displayOrder = 0)
+        val kitchen = testItem("kitchen", "Kitchen", household.id, displayOrder = 1)
+        val shed = testItem("shed", "Shed", household.id, displayOrder = 2)
+        val drill = testItem("drill", "Drill", garage.id, displayOrder = 0)
+        val inventory = Inventory.from(
+            household,
+            listOf(household.rootItem, shed, drill, garage, kitchen),
+        )
+
+        val reordered = inventory.reorderItem(garage.id, 1)
+
+        assertEquals(listOf("kitchen", "garage", "shed"), reordered.childrenOf(household.id).map(Item::id))
+        assertEquals(listOf(0L, 1L, 2L), reordered.childrenOf(household.id).map(Item::displayOrder))
+        assertSame(drill, reordered.item(drill.id))
+    }
+
+    @Test
     fun `moving an Item changes only its Parent Item and preserves its subtree`() {
         val household = testHousehold()
         val garage = testItem("garage", "Garage", household.id)
@@ -79,6 +98,7 @@ private fun testItem(
     parentItemId: String?,
     description: String? = null,
     tags: List<String> = emptyList(),
+    displayOrder: Long? = null,
 ) = Item(
     id = id,
     name = name,
@@ -86,4 +106,5 @@ private fun testItem(
     photoUrl = null,
     description = description,
     tags = tags,
+    displayOrder = displayOrder,
 )

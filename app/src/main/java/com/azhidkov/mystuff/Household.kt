@@ -11,6 +11,8 @@ data class Item(
     val webUrl: String? = null,
     /** The designated Item Photo's Item Attachment, when the photo is migrated. */
     val photoAttachmentId: String? = null,
+    /** The shared position of this Item among the Child Items of its Parent Item. */
+    val displayOrder: Long? = null,
 )
 
 data class Household(

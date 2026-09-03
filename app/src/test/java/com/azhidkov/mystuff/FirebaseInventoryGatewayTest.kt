@@ -8,6 +8,31 @@ import java.time.Instant
 
 class FirebaseInventoryGatewayTest {
     @Test
+    fun `reordering Items writes every sibling position and Member attribution atomically`() {
+        val documents = FakeInventoryDocumentStore()
+        val gateway = FirebaseInventoryGateway(
+            documents,
+            FakeInventoryPhotoStore(),
+            FakeItemPhotoAttachmentGateway(),
+        )
+        var result: Result<Unit>? = null
+
+        gateway.reorderItems(
+            householdId = "household-1",
+            parentItemId = "household-1",
+            orderedItems = listOf(
+                inventoryItem("shed", "Shed", "household-1"),
+                inventoryItem("garage", "Garage", "household-1"),
+            ),
+            updater = inventoryIdentity(),
+        ) { result = it }
+
+        assertTrue(result?.isSuccess == true)
+        assertEquals(listOf("shed", "garage"), documents.reorderedItemIds)
+        assertEquals("member-1", documents.reorderUpdater?.id)
+    }
+
+    @Test
     fun `moving an Item updates only its Parent Item and attribution`() {
         val documents = FakeInventoryDocumentStore()
         val moveService = RecordingItemMoveService()
@@ -386,7 +411,8 @@ class FirebaseInventoryGatewayTest {
         val store = FakeInventoryDocumentStore(
             documents = listOf(
                 itemDocument("household-1", "Our Home", null),
-                itemDocument("garage", "Garage", "household-1"),
+                itemDocument("shed", "Shed", "household-1", displayOrder = 1),
+                itemDocument("garage", "Garage", "household-1", displayOrder = 0),
                 itemDocument("cabinet", "Cabinet", "garage"),
             ),
         )
@@ -402,6 +428,10 @@ class FirebaseInventoryGatewayTest {
         assertEquals(
             listOf("Our Home", "Garage", "Cabinet"),
             result?.getOrThrow()?.pathTo("cabinet")?.map(Item::name),
+        )
+        assertEquals(
+            listOf("garage", "shed"),
+            result?.getOrThrow()?.childrenOf("household-1")?.map(Item::id),
         )
     }
 
@@ -502,6 +532,7 @@ class FirebaseInventoryGatewayTest {
                 "description" to "18V cordless",
                 "tags" to listOf("Power Tools"),
                 "webUrl" to "https://example.com/drill",
+                "displayOrder" to result?.getOrThrow()?.displayOrder,
                 "createdAt" to timestamp,
                 "updatedAt" to timestamp,
                 "createdById" to "member-1",
@@ -519,7 +550,7 @@ class FirebaseInventoryGatewayTest {
                 description = "18V cordless",
                 tags = listOf("Power Tools"),
                 webUrl = "https://example.com/drill",
-            ),
+            ).copy(displayOrder = result?.getOrThrow()?.displayOrder),
             result?.getOrThrow(),
         )
     }
@@ -855,6 +886,10 @@ private class FakeInventoryDocumentStore(
         private set
     var updatedData: Map<String, Any?>? = null
         private set
+    var reorderedItemIds: List<String>? = null
+        private set
+    var reorderUpdater: AuthenticatedIdentity? = null
+        private set
 
     override fun observeItems(
         householdId: String,
@@ -886,6 +921,17 @@ private class FakeInventoryDocumentStore(
         updatedData = data
         onResult(Result.success(Unit))
     }
+
+    override fun reorderItems(
+        householdId: String,
+        orderedItemIds: List<String>,
+        updater: AuthenticatedIdentity,
+        onResult: (Result<Unit>) -> Unit,
+    ) {
+        reorderedItemIds = orderedItemIds
+        reorderUpdater = updater
+        onResult(Result.success(Unit))
+    }
 }
 
 private fun itemDocument(
@@ -895,6 +941,7 @@ private fun itemDocument(
     photoUrl: String? = null,
     photoThumbnailUrl: String? = null,
     webUrl: String? = null,
+    displayOrder: Long? = null,
 ) = InventoryItemDocument(
     id = id,
     data = buildMap {
@@ -905,6 +952,7 @@ private fun itemDocument(
         put("photoThumbnailUrl", photoThumbnailUrl)
         put("description", null)
         put("tags", emptyList<String>())
+        displayOrder?.let { put("displayOrder", it) }
         webUrl?.let { put("webUrl", it) }
     },
 )

@@ -34,6 +34,7 @@ Currently implemented:
   process-local retry for Item Attachments
 - Deep Inventory browsing and hybrid literal/semantic Household Search with immediate Child Items
   and complete Item Paths
+- Optimistic drag-and-drop Child Item ordering shared by every Household Member
 - Firebase rules and emulator tests for Household, Item, invitation, and photo authorization
 - Unit-tested session state transitions
 

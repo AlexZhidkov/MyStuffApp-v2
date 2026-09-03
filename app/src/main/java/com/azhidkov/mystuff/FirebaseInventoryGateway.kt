@@ -349,6 +349,29 @@ class FirebaseInventoryGateway internal constructor(
         )
     }
 
+    override fun reorderItems(
+        householdId: String,
+        parentItemId: String,
+        orderedItems: List<Item>,
+        updater: AuthenticatedIdentity,
+        onResult: (Result<Unit>) -> Unit,
+    ) {
+        if (
+            orderedItems.isEmpty() ||
+            orderedItems.distinctBy(Item::id).size != orderedItems.size ||
+            orderedItems.any { it.parentItemId != parentItemId }
+        ) {
+            onResult(Result.failure(IllegalArgumentException("The Item order is invalid.")))
+            return
+        }
+        store.reorderItems(
+            householdId = householdId,
+            orderedItemIds = orderedItems.map(Item::id),
+            updater = updater,
+            onResult = onResult,
+        )
+    }
+
     override fun designateItemPhoto(
         householdId: String,
         item: Item,
@@ -830,6 +853,7 @@ class FirebaseInventoryGateway internal constructor(
             tags = details.tags,
             photoThumbnailUrl = photoLocations?.thumbnail,
             webUrl = details.webUrl,
+            displayOrder = Instant.now().toEpochMilli(),
         )
         val displayName = creator.attributionDisplayName()
         val data = mapOf(
@@ -842,6 +866,7 @@ class FirebaseInventoryGateway internal constructor(
             DESCRIPTION to item.description,
             TAGS to item.tags,
             WEB_URL to item.webUrl,
+            DISPLAY_ORDER to item.displayOrder,
             CREATED_AT to store.serverTimestamp,
             UPDATED_AT to store.serverTimestamp,
             CREATED_BY_ID to creator.id,
@@ -998,6 +1023,7 @@ internal data class InventoryItemDocument(
                 ?: throw InvalidInventoryException(),
             photoThumbnailUrl = data.inventoryNullableString(PHOTO_THUMBNAIL_URL),
             webUrl = data.inventoryNullableString(WEB_URL),
+            displayOrder = data.inventoryNullableLong(DISPLAY_ORDER),
         )
     }
 }
@@ -1025,6 +1051,13 @@ internal interface InventoryDocumentStore {
         data: Map<String, Any?>,
         onResult: (Result<Unit>) -> Unit,
     )
+
+    fun reorderItems(
+        householdId: String,
+        orderedItemIds: List<String>,
+        updater: AuthenticatedIdentity,
+        onResult: (Result<Unit>) -> Unit,
+    ) = onResult(Result.failure(UnsupportedOperationException("Item reordering is unavailable.")))
 }
 
 private class FirestoreInventoryDocumentStore(
@@ -1077,6 +1110,29 @@ private class FirestoreInventoryDocumentStore(
             .addOnFailureListener { failure -> onResult(Result.failure(failure)) }
     }
 
+    override fun reorderItems(
+        householdId: String,
+        orderedItemIds: List<String>,
+        updater: AuthenticatedIdentity,
+        onResult: (Result<Unit>) -> Unit,
+    ) {
+        val batch = firestore.batch()
+        orderedItemIds.forEachIndexed { index, itemId ->
+            batch.update(
+                items(householdId).document(itemId),
+                mapOf(
+                    DISPLAY_ORDER to index.toLong(),
+                    UPDATED_AT to serverTimestamp,
+                    UPDATED_BY_ID to updater.id,
+                    UPDATED_BY_DISPLAY_NAME to updater.attributionDisplayName(),
+                ),
+            )
+        }
+        batch.commit()
+            .addOnSuccessListener { onResult(Result.success(Unit)) }
+            .addOnFailureListener { failure -> onResult(Result.failure(failure)) }
+    }
+
     private fun items(householdId: String) = firestore
         .collection(HOUSEHOLDS)
         .document(householdId)
@@ -1090,6 +1146,11 @@ private fun Map<String, Any?>.inventoryNullableString(key: String): String? {
     val value = this[key]
     if (value != null && value !is String) throw InvalidInventoryException()
     return value
+}
+
+private fun Map<String, Any?>.inventoryNullableLong(key: String): Long? {
+    val value = this[key] ?: return null
+    return value as? Long ?: throw InvalidInventoryException()
 }
 
 internal fun AuthenticatedIdentity.attributionDisplayName(): String =
@@ -1108,6 +1169,7 @@ private const val PHOTO_THUMBNAIL_URL = "photoThumbnailUrl"
 private const val DESCRIPTION = "description"
 private const val TAGS = "tags"
 private const val WEB_URL = "webUrl"
+private const val DISPLAY_ORDER = "displayOrder"
 private const val CREATED_AT = "createdAt"
 private const val UPDATED_AT = "updatedAt"
 private const val CREATED_BY_ID = "createdById"

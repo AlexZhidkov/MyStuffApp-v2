@@ -8,6 +8,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.layout.Arrangement
@@ -60,6 +61,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -68,6 +72,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import com.azhidkov.mystuff.DeferredInventoryError
 import com.azhidkov.mystuff.FailedItemAttachmentDraft
 import com.azhidkov.mystuff.CarouselImage
@@ -94,6 +99,7 @@ import java.time.format.FormatStyle
 import java.util.Locale
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -245,6 +251,7 @@ private fun HouseholdRootContent(
     }
 
     val isHome = inventoryState.selectedItemId == inventoryState.inventory.rootItemId
+    val reorderStepPx = with(LocalDensity.current) { 56.dp.toPx() }
     val showSearchResults = inventoryState.searchQuery.isNotBlank() &&
         inventoryState.openedSearchResultId == null
     BackHandler(
@@ -505,9 +512,13 @@ private fun HouseholdRootContent(
                         items = inventoryState.childItems,
                         key = Item::id,
                     ) { item ->
+                        var dragOffsetY by remember(item.id) { mutableStateOf(0f) }
+                        val reorderDescription = stringResource(R.string.reorder_item, item.name)
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .zIndex(if (dragOffsetY == 0f) 0f else 1f)
+                                .graphicsLayer { translationY = dragOffsetY }
                                 .clickable { inventoryActions.openItem(item.id) },
                         ) {
                             Row(
@@ -515,6 +526,35 @@ private fun HouseholdRootContent(
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .semantics {
+                                            contentDescription = reorderDescription
+                                        }
+                                        .pointerInput(item.id) {
+                                            detectDragGestures(
+                                                onDragEnd = { dragOffsetY = 0f },
+                                                onDragCancel = { dragOffsetY = 0f },
+                                            ) { change, dragAmount ->
+                                                change.consume()
+                                                dragOffsetY += dragAmount.y
+                                                while (abs(dragOffsetY) >= reorderStepPx) {
+                                                    val offset = if (dragOffsetY > 0f) 1 else -1
+                                                    inventoryActions.reorderItem(item.id, offset)
+                                                    dragOffsetY -= offset * reorderStepPx
+                                                }
+                                            }
+                                        },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        painter = painterResource(R.drawable.ic_drag_handle),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(24.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
                                 storedPhotoLocation(
                                     item,
                                     ItemPhotoPresentation.Compact,

@@ -19,7 +19,47 @@ class Inventory private constructor(
     fun contains(itemId: String): Boolean = itemsById.containsKey(itemId)
 
     fun childrenOf(parentItemId: String): List<Item> =
-        allItems.filter { it.parentItemId == parentItemId }
+        allItems
+            .filter { it.parentItemId == parentItemId }
+            .withIndex()
+            .sortedWith(
+                compareBy<IndexedValue<Item>>(
+                    { it.value.displayOrder ?: it.index.toLong() },
+                    IndexedValue<Item>::index,
+                ),
+            )
+            .map(IndexedValue<Item>::value)
+
+    fun reorderItem(itemId: String, offset: Int): Inventory {
+        val item = item(itemId)
+        val parentItemId = item.parentItemId
+            ?: throw IllegalArgumentException("The Household root Item cannot be reordered.")
+        val children = childrenOf(parentItemId)
+        val currentIndex = children.indexOfFirst { it.id == itemId }
+        val targetIndex = (currentIndex + offset).coerceIn(0, children.lastIndex)
+        if (targetIndex == currentIndex) return this
+        val reordered = children.toMutableList().apply {
+            add(targetIndex, removeAt(currentIndex))
+        }
+        return withChildrenInOrder(parentItemId, reordered.map(Item::id))
+    }
+
+    fun withChildrenInOrder(parentItemId: String, orderedItemIds: List<String>): Inventory {
+        val children = childrenOf(parentItemId)
+        val childrenById = children.associateBy(Item::id)
+        require(orderedItemIds.size == orderedItemIds.distinct().size) {
+            "Child Item order contains duplicates."
+        }
+        require(orderedItemIds.all(childrenById::containsKey)) {
+            "Child Item order contains an unrelated Item."
+        }
+        val completeOrder = orderedItemIds + children.map(Item::id).filterNot(orderedItemIds::contains)
+        return completeOrder.foldIndexed(this) { index, inventory, childId ->
+            inventory.withItem(
+                childrenById.getValue(childId).copy(displayOrder = index.toLong()),
+            )
+        }
+    }
 
     fun pathTo(itemId: String): List<Item> {
         val path = mutableListOf<Item>()

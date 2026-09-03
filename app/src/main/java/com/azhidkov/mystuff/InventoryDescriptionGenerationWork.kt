@@ -546,6 +546,9 @@ private class FirebaseDescriptionGenerationItemStore(
                 updatedData + mapOf(
                     ITEM_HOUSEHOLD_ID_FIELD to request.householdId,
                     ITEM_PARENT_ITEM_ID_FIELD to requireNotNull(draftItem.parentItemId),
+                    ITEM_DISPLAY_ORDER_FIELD to (
+                        draftItem.displayOrder ?: System.currentTimeMillis()
+                    ),
                     ITEM_CREATED_AT_FIELD to FieldValue.serverTimestamp(),
                     ITEM_CREATED_BY_ID_FIELD to request.requestingMember.id,
                     ITEM_CREATED_BY_DISPLAY_NAME_FIELD to request.requestingMember.displayName,
@@ -1043,6 +1046,7 @@ private const val ITEM_PHOTO_THUMBNAIL_URL_FIELD = "photoThumbnailUrl"
 private const val ITEM_DESCRIPTION_FIELD = "description"
 private const val ITEM_TAGS_FIELD = "tags"
 private const val ITEM_WEB_URL_FIELD = "webUrl"
+private const val ITEM_DISPLAY_ORDER_FIELD = "displayOrder"
 private const val ITEM_CREATED_AT_FIELD = "createdAt"
 private const val ITEM_UPDATED_AT_FIELD = "updatedAt"
 private const val ITEM_CREATED_BY_ID_FIELD = "createdById"

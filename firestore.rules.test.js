@@ -214,6 +214,7 @@ function childItemData(name, parentItemId, overrides = {}) {
     householdId: "household-1",
     name,
     parentItemId,
+    displayOrder: 0,
     photoUrl: null,
     webUrl: null,
     description: null,
@@ -601,6 +602,54 @@ test("Household Member can update Child Item details with fresh attribution", as
   const updated = (await getDoc(reference)).data();
   assert.equal(updated.createdById, "member-1");
   assert.equal(updated.updatedById, "member-2");
+});
+
+test("Household Member can atomically reorder shared Child Items", async () => {
+  await seedHousehold();
+  await seedHouseholdMember();
+  await testEnvironment.withSecurityRulesDisabled(async (context) => {
+    const database = context.firestore();
+    await setDoc(
+      doc(database, "households/household-1/items/item-1"),
+      childItemData("Garage", "household-1", { displayOrder: 0 }),
+    );
+    await setDoc(
+      doc(database, "households/household-1/items/item-2"),
+      childItemData("Shed", "household-1", { displayOrder: 1 }),
+    );
+  });
+  const database = testEnvironment.authenticatedContext("member-2").firestore();
+  const batch = writeBatch(database);
+  batch.update(doc(database, "households/household-1/items/item-1"), {
+    displayOrder: 1,
+    updatedAt: serverTimestamp(),
+    updatedById: "member-2",
+    updatedByDisplayName: "Sam",
+  });
+  batch.update(doc(database, "households/household-1/items/item-2"), {
+    displayOrder: 0,
+    updatedAt: serverTimestamp(),
+    updatedById: "member-2",
+    updatedByDisplayName: "Sam",
+  });
+
+  await assertSucceeds(batch.commit());
+
+  assert.equal((await getDoc(
+    doc(database, "households/household-1/items/item-1"),
+  )).data().displayOrder, 1);
+  assert.equal((await getDoc(
+    doc(database, "households/household-1/items/item-2"),
+  )).data().displayOrder, 0);
+  await assertFails(updateDoc(
+    doc(database, "households/household-1/items/item-1"),
+    {
+      displayOrder: -1,
+      updatedAt: serverTimestamp(),
+      updatedById: "member-2",
+      updatedByDisplayName: "Sam",
+    },
+  ));
 });
 
 test("Household Member can project a newly-created Item Attachment and patch its Description", async () => {

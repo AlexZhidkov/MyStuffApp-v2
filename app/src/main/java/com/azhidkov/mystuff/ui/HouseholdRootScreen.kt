@@ -612,9 +612,12 @@ private fun InvitationsScreen(
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.invitations)) },
-                navigationIcon = {
-                    TextButton(onClick = onClose) {
-                        Text(stringResource(R.string.close))
+                actions = {
+                    IconButton(onClick = onClose) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_clear),
+                            contentDescription = stringResource(R.string.close),
+                        )
                     }
                 },
             )
@@ -1342,11 +1345,6 @@ private fun InvitationComposer(
     onCreateInvitation: (String) -> Unit,
 ) {
     var email by remember { mutableStateOf("") }
-    Text(
-        text = stringResource(R.string.household_invitations),
-        style = MaterialTheme.typography.titleLarge,
-        fontWeight = FontWeight.Bold,
-    )
     Text(
         text = stringResource(R.string.household_invitations_body),
         style = MaterialTheme.typography.bodyMedium,

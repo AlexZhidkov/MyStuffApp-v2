@@ -5,6 +5,106 @@ import org.junit.Test
 
 class SessionControllerTest {
     @Test
+    fun `opening an invitation signs in then accepts it and opens the shared Household`() {
+        val identity = AuthenticatedIdentity(
+            id = "member-2",
+            displayName = "Sam",
+            email = "sam@example.com",
+        )
+        val household = testHousehold(ownerMemberId = "member-1")
+        val acceptanceGateway = FakeInvitationAcceptanceGateway()
+        val controller = SessionController(
+            authenticationGateway = FakeAuthenticationGateway(
+                signInResult = Result.success(identity),
+            ),
+            householdGateway = FakeHouseholdGateway(existingHousehold = household),
+            invitationAcceptanceGateway = acceptanceGateway,
+            invitationId = "invitation-1",
+        )
+
+        assertEquals(AppDestination.SignIn, controller.state.destination)
+        assertEquals("invitation-1", controller.state.pendingInvitationId)
+
+        controller.signIn()
+
+        assertEquals("invitation-1", acceptanceGateway.acceptedInvitationId)
+        assertEquals(AppDestination.HouseholdRoot, controller.state.destination)
+        assertEquals(household, controller.state.household)
+        assertEquals(null, controller.state.pendingInvitationId)
+    }
+
+    @Test
+    fun `a rejected invitation shows its clear outcome after Google sign in`() {
+        val identity = AuthenticatedIdentity(
+            id = "member-2",
+            displayName = "Sam",
+            email = "wrong@example.com",
+        )
+        val controller = SessionController(
+            authenticationGateway = FakeAuthenticationGateway(
+                signInResult = Result.success(identity),
+            ),
+            householdGateway = FakeHouseholdGateway(),
+            invitationAcceptanceGateway = FakeInvitationAcceptanceGateway(
+                result = Result.failure(
+                    IllegalStateException(
+                        "This invitation was sent to a different Google Account.",
+                    ),
+                ),
+            ),
+            invitationId = "invitation-1",
+        )
+
+        controller.signIn()
+
+        assertEquals(AppDestination.HouseholdEntry, controller.state.destination)
+        assertEquals(
+            "This invitation was sent to a different Google Account.",
+            controller.state.errorMessage,
+        )
+        assertEquals("invitation-1", controller.state.pendingInvitationId)
+    }
+
+    @Test
+    fun `a Member of another Household remains in their current Household after rejection`() {
+        val identity = AuthenticatedIdentity(
+            id = "member-2",
+            displayName = "Sam",
+            email = "sam@example.com",
+        )
+        val currentHousehold = testHousehold(
+            id = "household-2",
+            ownerMemberId = "member-3",
+        )
+
+        val controller = SessionController(
+            authenticationGateway = FakeAuthenticationGateway(currentIdentity = identity),
+            householdGateway = FakeHouseholdGateway(existingHousehold = currentHousehold),
+            invitationAcceptanceGateway = FakeInvitationAcceptanceGateway(
+                result = Result.failure(
+                    IllegalStateException("You already belong to a Household."),
+                ),
+            ),
+            invitationId = "invitation-1",
+        )
+
+        assertEquals(AppDestination.HouseholdRoot, controller.state.destination)
+        assertEquals(currentHousehold, controller.state.household)
+        assertEquals("You already belong to a Household.", controller.state.errorMessage)
+    }
+
+    @Test
+    fun `only a MyStuff invitation link yields an invitation ID`() {
+        assertEquals(
+            "invitation-1",
+            invitationIdFromLink("mystuff://invitation/invitation-1"),
+        )
+        assertEquals(null, invitationIdFromLink("https://example.com/invitation-1"))
+        assertEquals(null, invitationIdFromLink("mystuff://invitation/"))
+        assertEquals(null, invitationIdFromLink("mystuff://other/invitation-1"))
+    }
+
+    @Test
     fun `Member creates a Household from a trimmed name and opens its root Item`() {
         val identity = AuthenticatedIdentity(
             id = "member-1",
@@ -200,6 +300,21 @@ class SessionControllerTest {
     }
 }
 
+private class FakeInvitationAcceptanceGateway(
+    private val result: Result<String> = Result.success("household-1"),
+) : InvitationAcceptanceGateway {
+    var acceptedInvitationId: String? = null
+        private set
+
+    override fun accept(
+        invitationId: String,
+        onResult: (Result<String>) -> Unit,
+    ) {
+        acceptedInvitationId = invitationId
+        onResult(result)
+    }
+}
+
 private class FakeHouseholdGateway(
     private val existingHousehold: Household? = null,
 ) : HouseholdGateway {
@@ -257,3 +372,19 @@ private class FakeAuthenticationGateway(
         onResult(Result.success(Unit))
     }
 }
+
+private fun testHousehold(
+    id: String = "household-1",
+    ownerMemberId: String,
+) = Household(
+    id = id,
+    ownerMemberId = ownerMemberId,
+    rootItem = Item(
+        id = id,
+        name = "Our Home",
+        parentItemId = null,
+        photoUrl = null,
+        description = null,
+        tags = emptyList(),
+    ),
+)

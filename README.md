@@ -27,6 +27,7 @@ Currently implemented:
 - Transactional Household creation with one root Item and an Owner membership
 - Automatic reopening of an existing Household after sign-in
 - Owner-only, seven-day Household invitations with revocation and link replacement
+- Single-use invitation links that resume after Google sign-in and add the intended Member
 - Child Item creation and editing with names, descriptions, web URLs, Tags, and camera-first
   optional mobile-sized WebP photos and thumbnails
 - Independent persistent background uploads with terminal failure cleanup and
@@ -36,8 +37,7 @@ Currently implemented:
 - Firebase rules and emulator tests for Household, Item, invitation, and photo authorization
 - Unit-tested session state transitions
 
-Invitation acceptance, moving, deletion, and connected
-synchronization are planned in the
+Household and Item deletion plus connected synchronization are planned in the
 [prototype specification](.scratch/household-inventory/spec.md).
 
 ## Technology

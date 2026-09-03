@@ -2,6 +2,7 @@
     <string name="app_name">MyStuff</string>
     <string name="sign_in_title">Know where everything lives.</string>
     <string name="sign_in_supporting_text">Sign in to open your shared Household Inventory and keep every Item easy to find.</string>
+    <string name="sign_in_for_invitation">Sign in with the Google Account that received this invitation. MyStuff will then continue joining the Household.</string>
     <string name="sign_in_with_google">Sign in with Google</string>
     <string name="retry_google_sign_in">Try Google sign-in again</string>
     <string name="signing_in">Signing in…</string>
@@ -19,7 +20,11 @@
     <string name="household_name">Household name</string>
     <string name="household_name_supporting_text">1–100 characters</string>
     <string name="creating_household">Creating Household…</string>
-    <string name="accept_invitation_coming_soon">Have an invitation? Invitation acceptance is coming next.</string>
+    <string name="accept_invitation_title">Join this Household</string>
+    <string name="accept_invitation_body">Try this invitation again, or create a Household of your own.</string>
+    <string name="accepting_invitation">Checking your Google Account and joining the Household…</string>
+    <string name="retry_invitation">Try invitation again</string>
+    <string name="accept_invitation_link_prompt">Have an invitation? Open its MyStuff link to join the Household.</string>
     <string name="household_root_label">Household Inventory</string>
     <string name="item_details">Item details</string>
     <string name="empty_household_body">This is your Household’s root Item. Child Items will appear here.</string>

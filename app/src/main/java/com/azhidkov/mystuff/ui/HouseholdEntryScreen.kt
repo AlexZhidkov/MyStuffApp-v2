@@ -42,7 +42,9 @@ fun HouseholdEntryScreen(
     operationInProgress: Boolean,
     householdNameError: String?,
     errorMessage: String?,
+    pendingInvitationId: String?,
     onCreateHousehold: (String) -> Unit,
+    onRetryInvitationAcceptance: () -> Unit,
     onSignOut: () -> Unit,
 ) {
     var householdName by remember { mutableStateOf("") }
@@ -88,6 +90,42 @@ fun HouseholdEntryScreen(
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(Modifier.height(8.dp))
+            if (pendingInvitationId != null) {
+                Text(
+                    text = stringResource(R.string.accept_invitation_title),
+                    style = MaterialTheme.typography.headlineLarge,
+                    fontWeight = FontWeight.Bold,
+                )
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = stringResource(
+                        if (operationInProgress) {
+                            R.string.accepting_invitation
+                        } else {
+                            R.string.accept_invitation_body
+                        },
+                    ),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (errorMessage != null) {
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text = errorMessage,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Button(
+                        onClick = onRetryInvitationAcceptance,
+                        enabled = !operationInProgress,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(stringResource(R.string.retry_invitation))
+                    }
+                }
+                Spacer(Modifier.height(32.dp))
+            }
             Text(
                 text = stringResource(R.string.create_household_title),
                 style = MaterialTheme.typography.headlineLarge,
@@ -119,7 +157,7 @@ fun HouseholdEntryScreen(
                     onDone = { onCreateHousehold(householdName) },
                 ),
             )
-            if (errorMessage != null) {
+            if (errorMessage != null && pendingInvitationId == null) {
                 Spacer(Modifier.height(12.dp))
                 Text(
                     text = errorMessage,
@@ -153,7 +191,7 @@ fun HouseholdEntryScreen(
             }
             Spacer(Modifier.height(28.dp))
             Text(
-                text = stringResource(R.string.accept_invitation_coming_soon),
+                text = stringResource(R.string.accept_invitation_link_prompt),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

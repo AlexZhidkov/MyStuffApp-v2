@@ -4,8 +4,16 @@ import { deleteApp, initializeApp } from "firebase/app";
 import {
   connectAuthEmulator,
   getAuth,
+  GoogleAuthProvider,
   signInAnonymously,
+  signInWithCredential,
 } from "firebase/auth";
+import {
+  connectFirestoreEmulator,
+  doc,
+  getDoc,
+  getFirestore as getClientFirestore,
+} from "firebase/firestore";
 import {
   connectFunctionsEmulator,
   getFunctions,
@@ -25,9 +33,13 @@ const otherItemId = "e2e-private-clock";
 const moveSourceId = "e2e-move-source";
 const moveChildId = "e2e-move-child";
 const moveTargetId = "e2e-move-target";
+const invitationHouseholdId = "e2e-invitation-household";
+const invitationId = "e2e-invitation";
+const invitedSubject = "e2e-invited-member";
 let clientApp;
 let database;
 let memberId;
+let invitedMemberId;
 
 before(async () => {
   if (!emulatorAvailable) return;
@@ -56,8 +68,92 @@ after(async () => {
   await database.doc(`households/${householdId}/items/${moveSourceId}`).delete();
   await database.doc(`households/${householdId}/items/${moveChildId}`).delete();
   await database.doc(`households/${householdId}/items/${moveTargetId}`).delete();
+  if (invitedMemberId !== undefined) {
+    await database.doc(`memberships/${invitedMemberId}`).delete();
+  }
+  await database.doc(`invitations/${invitationId}`).delete();
+  await database.doc(`households/${invitationHouseholdId}/items/${invitationHouseholdId}`).delete();
+  await database.doc(`households/${invitationHouseholdId}`).delete();
   await deleteApp(clientApp);
 });
+
+test(
+  "the intended Google Account accepts an invitation once and gains Household access",
+  { skip: !emulatorAvailable, timeout: 20_000 },
+  async () => {
+    await database.doc(`households/${invitationHouseholdId}`).set({
+      name: "Invitation Home",
+      ownerMemberId: "invitation-owner",
+      rootItemId: invitationHouseholdId,
+    });
+    await database
+      .doc(`households/${invitationHouseholdId}/items/${invitationHouseholdId}`)
+      .set({ householdId: invitationHouseholdId, parentItemId: null });
+    await database.doc(`invitations/${invitationId}`).set({
+      householdId: invitationHouseholdId,
+      intendedEmail: "sam@example.com",
+      createdAt: new Date(Date.now() - 60_000),
+      expiresAt: new Date(Date.now() + 60_000),
+      status: "pending",
+      replacesInvitationId: null,
+      replacedByInvitationId: null,
+    });
+
+    const invitedApp = initializeApp(
+      { projectId, apiKey: "demo-key", appId: "invited-app" },
+      "invitation-acceptance-e2e",
+    );
+    try {
+      const auth = getAuth(invitedApp);
+      connectAuthEmulator(auth, `http://${process.env.FIREBASE_AUTH_EMULATOR_HOST}`, {
+        disableWarnings: true,
+      });
+      const credential = await signInWithCredential(
+        auth,
+        GoogleAuthProvider.credential(unsignedGoogleIdToken()),
+      );
+      invitedMemberId = credential.user.uid;
+
+      const functions = getFunctions(invitedApp, "australia-southeast1");
+      const [functionsHost, functionsPort] =
+        (process.env.FUNCTIONS_EMULATOR_HOST ?? "127.0.0.1:5001").split(":");
+      connectFunctionsEmulator(functions, functionsHost, Number(functionsPort));
+      const accept = httpsCallable(functions, "acceptHouseholdInvitation");
+
+      const result = await accept({ invitationId });
+
+      assert.deepEqual(result.data, { householdId: invitationHouseholdId });
+      const membership = await database.doc(`memberships/${invitedMemberId}`).get();
+      const invitation = await database.doc(`invitations/${invitationId}`).get();
+      assert.deepEqual(membership.data(), {
+        householdId: invitationHouseholdId,
+        role: "member",
+      });
+      assert.equal(invitation.data()?.status, "accepted");
+      assert.equal(invitation.data()?.acceptedByMemberId, invitedMemberId);
+
+      const clientDatabase = getClientFirestore(invitedApp);
+      const [firestoreHost, firestorePort] =
+        (process.env.FIRESTORE_EMULATOR_HOST ?? "127.0.0.1:8080").split(":");
+      connectFirestoreEmulator(clientDatabase, firestoreHost, Number(firestorePort));
+      await getDoc(doc(
+        clientDatabase,
+        `households/${invitationHouseholdId}/items/${invitationHouseholdId}`,
+      ));
+
+      await assert.rejects(accept({ invitationId }), { code: "functions/already-exists" });
+
+      const unrelatedDatabase = getClientFirestore(clientApp);
+      connectFirestoreEmulator(unrelatedDatabase, firestoreHost, Number(firestorePort));
+      await assert.rejects(getDoc(doc(
+        unrelatedDatabase,
+        `households/${invitationHouseholdId}/items/${invitationHouseholdId}`,
+      )));
+    } finally {
+      await deleteApp(invitedApp);
+    }
+  },
+);
 
 test(
   "Item writes refresh the index and the authenticated callable stays Household-scoped",
@@ -183,4 +279,18 @@ async function waitFor(predicate) {
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   assert.fail("Timed out waiting for the Item Search index record.");
+}
+
+function unsignedGoogleIdToken() {
+  const encode = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  const issuedAt = Math.floor(Date.now() / 1000);
+  return `${encode({ alg: "none", typ: "JWT" })}.${encode({
+    iss: "https://accounts.google.com",
+    aud: "demo-client",
+    sub: invitedSubject,
+    email: "sam@example.com",
+    email_verified: true,
+    iat: issuedAt,
+    exp: issuedAt + 3600,
+  })}.`;
 }

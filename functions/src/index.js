@@ -12,6 +12,8 @@ import { createSearchHandlers } from "./search-handlers.js";
 import { createSearchModule } from "./search-module.js";
 import { createItemMoveHandlers } from "./item-move-handlers.js";
 import { createItemMoveModule } from "./item-move-module.js";
+import { createInvitationAcceptanceHandlers } from "./invitation-acceptance-handlers.js";
+import { createInvitationAcceptanceModule } from "./invitation-acceptance-module.js";
 
 if (getApps().length === 0) initializeApp();
 
@@ -25,6 +27,7 @@ const runtimeOptions = {
 };
 let handlers;
 let itemMoveHandlers;
+let invitationAcceptanceHandlers;
 
 function getHandlers() {
   if (handlers !== undefined) return handlers;
@@ -63,4 +66,19 @@ function getItemMoveHandlers() {
 
 export const moveInventoryItem = onCall(runtimeOptions, (request) =>
   getItemMoveHandlers().moveInventoryItem(request),
+);
+
+function getInvitationAcceptanceHandlers() {
+  if (invitationAcceptanceHandlers !== undefined) {
+    return invitationAcceptanceHandlers;
+  }
+  invitationAcceptanceHandlers = createInvitationAcceptanceHandlers({
+    acceptance: createInvitationAcceptanceModule({ database: getFirestore() }),
+    logger,
+  });
+  return invitationAcceptanceHandlers;
+}
+
+export const acceptHouseholdInvitation = onCall(runtimeOptions, (request) =>
+  getInvitationAcceptanceHandlers().acceptHouseholdInvitation(request),
 );

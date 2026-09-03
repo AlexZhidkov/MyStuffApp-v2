@@ -274,6 +274,27 @@ test("authenticated non-Member cannot access the Household or its root Item", as
   );
 });
 
+test("an accepted Member can open the shared Household while unrelated people cannot", async () => {
+  await seedHousehold();
+  const invitedDatabase = testEnvironment.authenticatedContext("member-2").firestore();
+  const unrelatedDatabase = testEnvironment.authenticatedContext("member-4").firestore();
+
+  await assertFails(setDoc(doc(invitedDatabase, "memberships/member-2"), {
+    householdId: "household-1",
+    role: "member",
+  }));
+  await seedHouseholdMember();
+
+  await assertSucceeds(getDoc(doc(invitedDatabase, "households/household-1")));
+  await assertSucceeds(
+    getDoc(doc(invitedDatabase, "households/household-1/items/household-1")),
+  );
+  await assertFails(getDoc(doc(unrelatedDatabase, "households/household-1")));
+  await assertFails(
+    getDoc(doc(unrelatedDatabase, "households/household-1/items/household-1")),
+  );
+});
+
 test("Member can atomically create one Household and its single root Item", async () => {
   const database = testEnvironment.authenticatedContext("member-1").firestore();
 

@@ -28,6 +28,8 @@ class MainActivity : ComponentActivity() {
         val sessionController = SessionController(
             authenticationGateway = FirebaseAuthenticationGateway(this),
             householdGateway = FirebaseHouseholdGateway(),
+            invitationAcceptanceGateway = FirebaseInvitationAcceptanceGateway(),
+            invitationId = invitationIdFromLink(intent?.dataString),
         )
         val invitationGateway = FirebaseInvitationGateway()
         val inventoryGateway = FirebaseInventoryGateway()
@@ -55,6 +57,7 @@ class MainActivity : ComponentActivity() {
                     onSignIn = sessionController::signIn,
                     onSignOut = sessionController::signOut,
                     onCreateHousehold = sessionController::createHousehold,
+                    onRetryInvitationAcceptance = sessionController::retryInvitationAcceptance,
                     invitationGateway = invitationGateway,
                     inventoryGateway = inventoryGateway,
                     itemAttachmentGateway = itemAttachmentGateway,
@@ -72,6 +75,7 @@ private fun MyStuffApp(
     onSignIn: () -> Unit,
     onSignOut: () -> Unit,
     onCreateHousehold: (String) -> Unit,
+    onRetryInvitationAcceptance: () -> Unit,
     invitationGateway: InvitationGateway,
     inventoryGateway: InventoryGateway,
     itemAttachmentGateway: ItemAttachmentGateway,
@@ -94,7 +98,9 @@ private fun MyStuffApp(
                 operationInProgress = state.operationInProgress,
                 householdNameError = state.householdNameError,
                 errorMessage = state.errorMessage,
+                pendingInvitationId = state.pendingInvitationId,
                 onCreateHousehold = onCreateHousehold,
+                onRetryInvitationAcceptance = onRetryInvitationAcceptance,
                 onSignOut = onSignOut,
             )
 
@@ -141,6 +147,7 @@ private fun MyStuffApp(
                     inventoryState = inventoryState,
                     invitationState = invitationState,
                     signOutInProgress = state.operationInProgress,
+                    sessionMessage = state.errorMessage,
                     onCreateInvitation = invitationController::create,
                     onRevokeInvitation = invitationController::revoke,
                     onReplaceInvitation = { invitationId, email ->

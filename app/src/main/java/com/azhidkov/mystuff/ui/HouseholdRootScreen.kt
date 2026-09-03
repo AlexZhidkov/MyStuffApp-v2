@@ -102,6 +102,7 @@ fun HouseholdRootScreen(
     inventoryState: InventoryUiState,
     invitationState: InvitationUiState,
     signOutInProgress: Boolean,
+    sessionMessage: String?,
     onCreateInvitation: (String) -> Unit,
     onRevokeInvitation: (String) -> Unit,
     onReplaceInvitation: (String, String) -> Unit,
@@ -110,6 +111,9 @@ fun HouseholdRootScreen(
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     val deferredError = inventoryState.deferredError
+    LaunchedEffect(sessionMessage) {
+        sessionMessage?.let { snackbarHostState.showSnackbar(it) }
+    }
     LaunchedEffect(deferredError?.id) {
         deferredError?.let { error ->
             presentDeferredInventoryError(

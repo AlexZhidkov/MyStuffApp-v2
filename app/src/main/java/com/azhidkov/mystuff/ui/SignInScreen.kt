@@ -62,7 +62,13 @@ fun SignInScreen(
                 )
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    text = stringResource(R.string.sign_in_supporting_text),
+                    text = stringResource(
+                        if (state.pendingInvitationId == null) {
+                            R.string.sign_in_supporting_text
+                        } else {
+                            R.string.sign_in_for_invitation
+                        },
+                    ),
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,

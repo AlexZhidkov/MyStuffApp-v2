@@ -528,7 +528,7 @@ private fun HouseholdRootContent(
                             ) {
                                 Box(
                                     modifier = Modifier
-                                        .size(48.dp)
+                                        .size(24.dp)
                                         .semantics {
                                             contentDescription = reorderDescription
                                         }

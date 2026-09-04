@@ -5,12 +5,17 @@ export function createItemDeletionModule({ database, bucket }) {
       if (!membership.exists || membership.data()?.householdId !== householdId) {
         throw new ItemDeletionMembershipError();
       }
+      validateNonRootItemId(householdId, itemId);
 
       const itemReference = database.doc(
         `households/${householdId}/items/${itemId}`,
       );
+      const cleanupReference = database.doc(
+        `households/${householdId}/itemDeletionJobs/${itemId}`,
+      );
       await database.runTransaction(async (transaction) => {
         const itemDocument = await transaction.get(itemReference);
+        if (!itemDocument.exists) return;
         const childDocuments = await transaction.get(
           database
             .collection(`households/${householdId}/items`)
@@ -28,29 +33,45 @@ export function createItemDeletionModule({ database, bucket }) {
             data: document.data(),
           })),
         });
+        transaction.set(cleanupReference, { itemId });
         transaction.delete(itemReference);
       });
+      return { itemId };
+    },
 
+    async cleanupItem({ householdId, itemId }) {
+      const itemReference = database.doc(
+        `households/${householdId}/items/${itemId}`,
+      );
       await Promise.all([
         database.recursiveDelete(itemReference),
         deleteItemPhotos(bucket, householdId, itemId),
       ]);
-      return { itemId };
+      await database
+        .doc(`households/${householdId}/itemDeletionJobs/${itemId}`)
+        .delete();
     },
   };
 }
 
 export function validateItemDeletion({ householdId, itemId, item, childItems }) {
+  validateNonRootItemId(householdId, itemId);
   if (item === undefined || item.data.householdId !== householdId) {
     throw new InvalidItemDeletionError("The Item no longer exists in this Household.");
   }
-  if (itemId === householdId || typeof item.data.parentItemId !== "string") {
+  if (typeof item.data.parentItemId !== "string") {
     throw new InvalidItemDeletionError("The Household root Item cannot be deleted.");
   }
   if (childItems.length > 0) {
     throw new InvalidItemDeletionError("An Item with Child Items cannot be deleted.");
   }
   return item.data;
+}
+
+function validateNonRootItemId(householdId, itemId) {
+  if (itemId === householdId) {
+    throw new InvalidItemDeletionError("The Household root Item cannot be deleted.");
+  }
 }
 
 async function deleteItemPhotos(bucket, householdId, itemId) {

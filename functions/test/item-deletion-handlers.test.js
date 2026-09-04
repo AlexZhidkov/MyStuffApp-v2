@@ -72,3 +72,21 @@ test("delete handler translates membership and Item validation failures", async 
     code: "failed-precondition",
   });
 });
+
+test("cleanup handler delegates the durable deletion job", async () => {
+  let cleanup;
+  const handlers = createItemDeletionHandlers({
+    itemDeletionModule: {
+      async cleanupItem(value) {
+        cleanup = value;
+      },
+    },
+    logger: { error() {} },
+  });
+
+  await handlers.cleanupDeletedInventoryItem({
+    params: { householdId: "household-1", itemId: "drill" },
+  });
+
+  assert.deepEqual(cleanup, { householdId: "household-1", itemId: "drill" });
+});

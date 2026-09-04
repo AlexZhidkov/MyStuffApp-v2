@@ -4,7 +4,7 @@ import { getFirestore } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 import { logger } from "firebase-functions";
 import { defineSecret } from "firebase-functions/params";
-import { onDocumentWritten } from "firebase-functions/v2/firestore";
+import { onDocumentCreated, onDocumentWritten } from "firebase-functions/v2/firestore";
 import { onCall } from "firebase-functions/v2/https";
 import { createDeterministicEmbedder } from "./deterministic-embedder.js";
 import { createFirestoreSearchRepository } from "./firestore-search-repository.js";
@@ -86,6 +86,15 @@ function getItemDeletionHandlers() {
 
 export const deleteInventoryItem = onCall(runtimeOptions, (request) =>
   getItemDeletionHandlers().deleteInventoryItem(request),
+);
+
+export const cleanupDeletedInventoryItem = onDocumentCreated(
+  {
+    ...runtimeOptions,
+    document: "households/{householdId}/itemDeletionJobs/{itemId}",
+    retry: true,
+  },
+  (event) => getItemDeletionHandlers().cleanupDeletedInventoryItem(event),
 );
 
 function getInvitationAcceptanceHandlers() {

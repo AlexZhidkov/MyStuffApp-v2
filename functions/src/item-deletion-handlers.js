@@ -28,5 +28,17 @@ export function createItemDeletionHandlers({ itemDeletionModule, logger }) {
         throw new HttpsError("internal", "The Item could not be deleted.");
       }
     },
+
+    async cleanupDeletedInventoryItem(event) {
+      try {
+        await itemDeletionModule.cleanupItem({
+          householdId: event.params.householdId,
+          itemId: event.params.itemId,
+        });
+      } catch (error) {
+        logger.error("Item deletion cleanup failed.", error);
+        throw error;
+      }
+    },
   };
 }

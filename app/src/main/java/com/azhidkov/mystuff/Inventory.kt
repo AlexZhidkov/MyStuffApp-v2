@@ -6,6 +6,8 @@ class InvalidInventoryException : IllegalStateException(
 
 class InvalidItemMoveException(message: String) : IllegalArgumentException(message)
 
+class InvalidItemDeleteException(message: String) : IllegalArgumentException(message)
+
 class Inventory private constructor(
     val householdId: String,
     val rootItemId: String,
@@ -81,6 +83,22 @@ class Inventory private constructor(
     fun moveItem(itemId: String, newParentItemId: String): Inventory {
         val item = validateMove(itemId, newParentItemId)
         return withItem(item.copy(parentItemId = newParentItemId))
+    }
+
+    fun deleteItem(itemId: String): Inventory {
+        val item = itemsById[itemId]
+            ?: throw InvalidItemDeleteException("The Item no longer exists.")
+        if (item.id == rootItemId) {
+            throw InvalidItemDeleteException("The Household root Item cannot be deleted.")
+        }
+        if (childrenOf(item.id).isNotEmpty()) {
+            throw InvalidItemDeleteException("An Item with Child Items cannot be deleted.")
+        }
+        return from(
+            householdId = householdId,
+            rootItemId = rootItemId,
+            items = allItems.filterNot { it.id == item.id },
+        )
     }
 
     fun isValidMoveTarget(itemId: String, newParentItemId: String): Boolean {

@@ -82,6 +82,27 @@ class FirebaseInventoryGatewayTest {
     }
 
     @Test
+    fun `deleting an Item delegates permanent cleanup to the backend`() {
+        val deletionService = RecordingItemDeletionService()
+        val gateway = FirebaseInventoryGateway(
+            FakeInventoryDocumentStore(),
+            FakeInventoryPhotoStore(),
+            FakeItemPhotoAttachmentGateway(),
+            itemDeletionService = deletionService,
+        )
+        val item = inventoryItem("item-1", "Drill", "garage")
+        var result: Result<Unit>? = null
+
+        gateway.deleteItem(
+            householdId = "household-1",
+            item = item,
+        ) { result = it }
+
+        assertTrue(result?.isSuccess == true)
+        assertEquals("household-1" to "item-1", deletionService.deletion)
+    }
+
+    @Test
     fun `creating an Item with a photo creates and projects one Item Attachment`() {
         val documents = FakeInventoryDocumentStore()
         val photos = FakeInventoryPhotoStore()
@@ -1075,6 +1096,19 @@ private class RecordingItemMoveService : ItemMoveService {
         onResult: (Result<Unit>) -> Unit,
     ) {
         move = Triple(householdId, itemId, newParentItemId)
+        onResult(Result.success(Unit))
+    }
+}
+
+private class RecordingItemDeletionService : ItemDeletionService {
+    var deletion: Pair<String, String>? = null
+
+    override fun delete(
+        householdId: String,
+        itemId: String,
+        onResult: (Result<Unit>) -> Unit,
+    ) {
+        deletion = householdId to itemId
         onResult(Result.success(Unit))
     }
 }

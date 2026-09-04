@@ -173,6 +173,7 @@ private fun HouseholdRootContent(
     onSignOut: () -> Unit,
 ) {
     var showInvitations by remember { mutableStateOf(false) }
+    var deleteCandidate by remember { mutableStateOf<Item?>(null) }
 
     if (showInvitations) {
         BackHandler { showInvitations = false }
@@ -473,6 +474,16 @@ private fun HouseholdRootContent(
                                     contentDescription = stringResource(R.string.move_item),
                                 )
                             }
+                            IconButton(
+                                onClick = { deleteCandidate = inventoryState.selectedItem },
+                                enabled = inventoryState.childItems.isEmpty() &&
+                                    !inventoryState.operationInProgress,
+                            ) {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_delete),
+                                    contentDescription = stringResource(R.string.delete_item),
+                                )
+                            }
                         }
                         webUrl?.let { url ->
                             IconButton(
@@ -595,6 +606,28 @@ private fun HouseholdRootContent(
             }
             item { Spacer(Modifier.height(24.dp)) }
         }
+    }
+    deleteCandidate?.let { item ->
+        AlertDialog(
+            onDismissRequest = { deleteCandidate = null },
+            title = { Text(stringResource(R.string.delete_item_title, item.name)) },
+            text = { Text(stringResource(R.string.delete_item_confirmation)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        deleteCandidate = null
+                        inventoryActions.deleteItem()
+                    },
+                ) {
+                    Text(stringResource(R.string.delete_item))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteCandidate = null }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
     }
 }
 

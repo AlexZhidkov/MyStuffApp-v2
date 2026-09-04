@@ -37,6 +37,9 @@
     <string name="move_item_body">Choose a new Parent Item for %1$s.</string>
     <string name="move_item_no_targets">There are no other valid Parent Items.</string>
     <string name="move_item_confirm">Move here</string>
+    <string name="delete_item">Delete Item</string>
+    <string name="delete_item_title">Delete %1$s?</string>
+    <string name="delete_item_confirmation">This Item and all its stored photos will be permanently deleted.</string>
     <string name="current_parent_item">Current Parent Item</string>
     <string name="expand_item">Expand %1$s</string>
     <string name="collapse_item">Collapse %1$s</string>

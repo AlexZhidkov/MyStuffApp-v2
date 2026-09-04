@@ -84,6 +84,40 @@ class InventoryTest {
             inventory.moveItem(source.id, "missing")
         }
     }
+
+    @Test
+    fun `deleting a childless Item removes it from the Inventory`() {
+        val household = testHousehold()
+        val garage = testItem("garage", "Garage", household.id)
+        val drill = testItem("drill", "Drill", garage.id)
+        val inventory = Inventory.from(household, listOf(household.rootItem, garage, drill))
+
+        val deleted = inventory.deleteItem(drill.id)
+
+        assertEquals(listOf(household.rootItem, garage), deleted.allItems)
+    }
+
+    @Test
+    fun `deleting an Item with Child Items is rejected`() {
+        val household = testHousehold()
+        val garage = testItem("garage", "Garage", household.id)
+        val drill = testItem("drill", "Drill", garage.id)
+        val inventory = Inventory.from(household, listOf(household.rootItem, garage, drill))
+
+        assertThrows(InvalidItemDeleteException::class.java) {
+            inventory.deleteItem(garage.id)
+        }
+    }
+
+    @Test
+    fun `deleting the Household root Item is rejected`() {
+        val household = testHousehold()
+        val inventory = Inventory.from(household, listOf(household.rootItem))
+
+        assertThrows(InvalidItemDeleteException::class.java) {
+            inventory.deleteItem(household.id)
+        }
+    }
 }
 
 private fun testHousehold() = Household(

@@ -15,6 +15,7 @@ class FirebaseInventoryGateway internal constructor(
     private val uploadFailureRegistry: AttachmentUploadFailureRegistry =
         processAttachmentUploadFailures,
     private val itemMoveService: ItemMoveService? = null,
+    private val itemDeletionService: ItemDeletionService? = null,
 ) : InventoryGateway {
     constructor() : this(
         store = FirestoreInventoryDocumentStore(),
@@ -346,6 +347,18 @@ class FirebaseInventoryGateway internal constructor(
             onResult = { result ->
                 onResult(result.map { moved })
             },
+        )
+    }
+
+    override fun deleteItem(
+        householdId: String,
+        item: Item,
+        onResult: (Result<Unit>) -> Unit,
+    ) {
+        (itemDeletionService ?: FirebaseItemDeletionService()).delete(
+            householdId = householdId,
+            itemId = item.id,
+            onResult = onResult,
         )
     }
 
@@ -896,6 +909,41 @@ internal fun interface ItemMoveService {
     )
 }
 
+internal fun interface ItemDeletionService {
+    fun delete(
+        householdId: String,
+        itemId: String,
+        onResult: (Result<Unit>) -> Unit,
+    )
+}
+
+private class FirebaseItemDeletionService(
+    private val functions: FirebaseFunctions =
+        FirebaseFunctions.getInstance(ITEM_DELETION_FUNCTION_REGION),
+) : ItemDeletionService {
+    override fun delete(
+        householdId: String,
+        itemId: String,
+        onResult: (Result<Unit>) -> Unit,
+    ) {
+        functions
+            .getHttpsCallable(ITEM_DELETION_FUNCTION_NAME)
+            .call(mapOf("householdId" to householdId, "itemId" to itemId))
+            .addOnCompleteListener { task ->
+                val result = if (task.isSuccessful) {
+                    runCatching {
+                        val response = task.result?.data as? Map<*, *>
+                            ?: error("Deletion returned an invalid response.")
+                        check(response["itemId"] == itemId)
+                    }
+                } else {
+                    Result.failure(task.exception ?: IllegalStateException("Deletion failed."))
+                }
+                onResult(result.map { Unit })
+            }
+    }
+}
+
 private class FirebaseItemMoveService(
     private val functions: FirebaseFunctions =
         FirebaseFunctions.getInstance(ITEM_MOVE_FUNCTION_REGION),
@@ -1178,3 +1226,5 @@ private const val UPDATED_BY_ID = "updatedById"
 private const val UPDATED_BY_DISPLAY_NAME = "updatedByDisplayName"
 private const val ITEM_MOVE_FUNCTION_REGION = "australia-southeast1"
 private const val ITEM_MOVE_FUNCTION_NAME = "moveInventoryItem"
+private const val ITEM_DELETION_FUNCTION_REGION = "australia-southeast1"
+private const val ITEM_DELETION_FUNCTION_NAME = "deleteInventoryItem"

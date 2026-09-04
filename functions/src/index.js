@@ -1,6 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { getApps, initializeApp } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
+import { getStorage } from "firebase-admin/storage";
 import { logger } from "firebase-functions";
 import { defineSecret } from "firebase-functions/params";
 import { onDocumentWritten } from "firebase-functions/v2/firestore";
@@ -14,6 +15,8 @@ import { createItemMoveHandlers } from "./item-move-handlers.js";
 import { createItemMoveModule } from "./item-move-module.js";
 import { createInvitationAcceptanceHandlers } from "./invitation-acceptance-handlers.js";
 import { createInvitationAcceptanceModule } from "./invitation-acceptance-module.js";
+import { createItemDeletionHandlers } from "./item-deletion-handlers.js";
+import { createItemDeletionModule } from "./item-deletion-module.js";
 
 if (getApps().length === 0) initializeApp();
 
@@ -28,6 +31,7 @@ const runtimeOptions = {
 let handlers;
 let itemMoveHandlers;
 let invitationAcceptanceHandlers;
+let itemDeletionHandlers;
 
 function getHandlers() {
   if (handlers !== undefined) return handlers;
@@ -66,6 +70,22 @@ function getItemMoveHandlers() {
 
 export const moveInventoryItem = onCall(runtimeOptions, (request) =>
   getItemMoveHandlers().moveInventoryItem(request),
+);
+
+function getItemDeletionHandlers() {
+  if (itemDeletionHandlers !== undefined) return itemDeletionHandlers;
+  itemDeletionHandlers = createItemDeletionHandlers({
+    itemDeletionModule: createItemDeletionModule({
+      database: getFirestore(),
+      bucket: getStorage().bucket(),
+    }),
+    logger,
+  });
+  return itemDeletionHandlers;
+}
+
+export const deleteInventoryItem = onCall(runtimeOptions, (request) =>
+  getItemDeletionHandlers().deleteInventoryItem(request),
 );
 
 function getInvitationAcceptanceHandlers() {

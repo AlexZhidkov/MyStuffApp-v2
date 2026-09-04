@@ -10,6 +10,61 @@ import org.junit.Test
 
 class InventoryControllerTest {
     @Test
+    fun `Member deletes a childless Item and returns to its Parent Item`() {
+        val household = household()
+        val garage = item("garage", "Garage", household.id)
+        val drill = item("drill", "Drill", garage.id)
+        val gateway = FakeInventoryGateway(
+            Inventory.from(household, listOf(household.rootItem, garage, drill)),
+        )
+        val controller = InventoryController(household, identity(), gateway)
+        controller.openItem(drill.id)
+
+        controller.deleteItem()
+
+        assertEquals(listOf("drill"), gateway.deletedItemIds)
+        assertEquals(garage.id, controller.state.selectedItemId)
+        assertFalse(controller.state.inventory.contains(drill.id))
+        assertEquals("Item deleted.", controller.state.successMessage)
+    }
+
+    @Test
+    fun `deleted Item no longer appears in Household search`() {
+        val household = household()
+        val drill = item("drill", "Drill", household.id)
+        val gateway = FakeInventoryGateway(
+            Inventory.from(household, listOf(household.rootItem, drill)),
+        )
+        val controller = InventoryController(household, identity(), gateway)
+        controller.changeSearchQuery("drill")
+        controller.openSearchResult(drill.id)
+
+        controller.deleteItem()
+        controller.changeSearchQuery("drill")
+
+        assertTrue(controller.state.searchResults.isEmpty())
+    }
+
+    @Test
+    fun `Item actions cannot delete the Household root or an Item with Child Items`() {
+        val household = household()
+        val garage = item("garage", "Garage", household.id)
+        val drill = item("drill", "Drill", garage.id)
+        val gateway = FakeInventoryGateway(
+            Inventory.from(household, listOf(household.rootItem, garage, drill)),
+        )
+        val controller = InventoryController(household, identity(), gateway)
+
+        controller.deleteItem()
+        controller.openItem(garage.id)
+        controller.deleteItem()
+
+        assertTrue(gateway.deletedItemIds.isEmpty())
+        assertTrue(controller.state.inventory.contains(household.id))
+        assertTrue(controller.state.inventory.contains(garage.id))
+    }
+
+    @Test
     fun `drag reordering is immediate and queues the latest shared order while saving`() {
         val household = household()
         val garage = item("garage", "Garage", household.id, displayOrder = 0)
@@ -1608,6 +1663,7 @@ private class FakeInventoryGateway(
         private set
     var movedParentItemId: String? = null
         private set
+    val deletedItemIds = mutableListOf<String>()
     var deferCreates: Boolean = false
     private var pendingCreate: (() -> Unit)? = null
     var deferReorders: Boolean = false
@@ -1717,6 +1773,17 @@ private class FakeInventoryGateway(
         updatedAdditionalPhotos = additionalPhotos
         inventory = inventory.withItem(updated)
         onResult(Result.success(updated))
+    }
+
+    override fun deleteItem(
+        householdId: String,
+        item: Item,
+        onResult: (Result<Unit>) -> Unit,
+    ) {
+        deletedItemIds += item.id
+        inventory = inventory.deleteItem(item.id)
+        onResult(Result.success(Unit))
+        observer?.invoke(Result.success(inventory))
     }
 
     override fun moveItem(

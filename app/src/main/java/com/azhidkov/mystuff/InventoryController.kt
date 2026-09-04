@@ -47,6 +47,12 @@ interface InventoryGateway {
         onResult: (Result<Item>) -> Unit,
     ) = onResult(Result.failure(UnsupportedOperationException("Item move is unavailable.")))
 
+    fun deleteItem(
+        householdId: String,
+        item: Item,
+        onResult: (Result<Unit>) -> Unit,
+    ) = onResult(Result.failure(UnsupportedOperationException("Item deletion is unavailable.")))
+
     fun reorderItems(
         householdId: String,
         parentItemId: String,
@@ -100,6 +106,7 @@ interface InventoryActions {
     fun selectMoveParentItem(itemId: String)
     fun confirmMoveItem()
     fun closeMoveItem()
+    fun deleteItem()
     fun beginAddItemAttachments()
     fun beginChooseItemAttachments() = Unit
     fun beginReplaceItemPhoto()
@@ -593,6 +600,51 @@ class InventoryController internal constructor(
                 successMessage = null,
             ),
         )
+    }
+
+    override fun deleteItem() {
+        if (
+            state.itemDraft != null ||
+            state.itemMove != null ||
+            state.operationInProgress ||
+            state.selectedItemId == state.inventory.rootItemId ||
+            state.childItems.isNotEmpty()
+        ) {
+            return
+        }
+        val item = state.selectedItem
+        val parentItemId = requireNotNull(item.parentItemId)
+        updateState(state.copy(operationInProgress = true, errorMessage = null))
+        gateway.deleteItem(
+            householdId = household.id,
+            item = item,
+        ) { result ->
+            result.onSuccess {
+                itemAttachmentSubscription?.cancel()
+                itemAttachmentSubscription = null
+                observedInventory = observedInventory.withoutItemIfPresent(item.id)
+                updateState(
+                    state.copy(
+                        inventory = state.inventory.withoutItemIfPresent(item.id),
+                        selectedItemId = parentItemId,
+                        search = InventorySearchState(),
+                        operationInProgress = false,
+                        errorMessage = null,
+                        successMessage = "Item deleted.",
+                        itemAttachments = null,
+                        itemAttachmentCarousel = null,
+                    ),
+                )
+            }.onFailure { failure ->
+                updateState(
+                    state.copy(
+                        operationInProgress = false,
+                        errorMessage = failure.message ?: "Couldn't delete the Item.",
+                        successMessage = null,
+                    ),
+                )
+            }
+        }
     }
 
     override fun selectMoveParentItem(itemId: String) {
@@ -1284,6 +1336,9 @@ class InventoryController internal constructor(
             }
         }
     }
+
+    private fun Inventory.withoutItemIfPresent(itemId: String): Inventory =
+        if (contains(itemId)) deleteItem(itemId) else this
 
     private fun Inventory.withPendingChildOrders(): Inventory =
         pendingChildOrders.entries.fold(this) { inventory, (parentItemId, pending) ->

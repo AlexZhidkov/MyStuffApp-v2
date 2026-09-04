@@ -35,10 +35,11 @@ Currently implemented:
 - Deep Inventory browsing and hybrid literal/semantic Household Search with immediate Child Items
   and complete Item Paths
 - Optimistic drag-and-drop Child Item ordering shared by every Household Member
+- Confirmed permanent deletion of childless Items and their stored photos
 - Firebase rules and emulator tests for Household, Item, invitation, and photo authorization
 - Unit-tested session state transitions
 
-Household and Item deletion plus connected synchronization are planned in the
+Household deletion and connected synchronization are planned in the
 [prototype specification](.scratch/household-inventory/spec.md).
 
 ## Technology

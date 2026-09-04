@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.lazy.LazyColumn
@@ -32,7 +33,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -352,7 +353,7 @@ private fun HouseholdRootContent(
                             fontWeight = FontWeight.Bold,
                         )
                         if (inventoryState.search.isConceptualSearchLoading) {
-                            CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                            LinearProgressIndicator()
                         }
                     }
                 }
@@ -898,13 +899,8 @@ private fun ItemAttachmentCarouselScreen(
                 )
             }
             if (state.loading) {
-                CircularProgressIndicator(
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = 40.dp)
-                        .size(20.dp),
+                LinearProgressIndicator(
                     color = Color.White,
-                    strokeWidth = 2.dp,
                 )
             }
             state.errorMessage?.let { error ->
@@ -995,7 +991,7 @@ private fun AttachmentDisplayPhoto(
     val photoState = state
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         when (photoState) {
-            PhotoLoadState.Loading -> CircularProgressIndicator(color = Color.White)
+            PhotoLoadState.Loading -> LinearProgressIndicator(color = Color.White)
             PhotoLoadState.Unavailable -> Text(
                 text = stringResource(R.string.attachment_unavailable),
                 color = Color.White,
@@ -1389,10 +1385,7 @@ private fun ItemFormScreen(
                             },
                     ) {
                         if (state.operationInProgress) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                strokeWidth = 2.dp,
-                            )
+                            LinearProgressIndicator()
                         } else {
                             Icon(
                                 painter = painterResource(R.drawable.ic_save),

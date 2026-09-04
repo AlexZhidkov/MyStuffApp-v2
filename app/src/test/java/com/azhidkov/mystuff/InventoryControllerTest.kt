@@ -939,7 +939,6 @@ class InventoryControllerTest {
         assertEquals("New description", controller.state.selectedItem.description)
         assertEquals(listOf("Power Tools"), controller.state.selectedItem.tags)
         assertEquals("https://example.com/hammer-drill", controller.state.selectedItem.webUrl)
-        assertEquals("Item saved.", controller.state.successMessage)
         assertEquals(2, gateway.updateAttempts)
     }
 
@@ -960,7 +959,6 @@ class InventoryControllerTest {
 
         assertFalse(controller.state.operationInProgress)
         assertNull(controller.state.itemDraft)
-        assertEquals("Item saved.", controller.state.successMessage)
     }
 
     @Test

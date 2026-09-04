@@ -957,7 +957,7 @@ class InventoryController internal constructor(
                         itemDraft = null,
                         operationInProgress = false,
                         errorMessage = null,
-                        successMessage = "Item saved.",
+                        successMessage = null,
                     ),
                 )
             }.onFailure { failure ->

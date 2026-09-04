@@ -10,11 +10,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -173,10 +174,7 @@ fun HouseholdEntryScreen(
             ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (operationInProgress) {
-                        CircularProgressIndicator(
-                            strokeWidth = 2.dp,
-                            modifier = Modifier.height(18.dp),
-                        )
+                        LinearProgressIndicator()
                     }
                     Text(
                         stringResource(

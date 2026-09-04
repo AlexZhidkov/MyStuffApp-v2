@@ -16,7 +16,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -154,7 +154,7 @@ internal fun ItemMoveScreen(
                         .fillMaxWidth(),
                 ) {
                     if (operationInProgress) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                        LinearProgressIndicator()
                     } else {
                         Text(stringResource(R.string.move_item_confirm))
                     }

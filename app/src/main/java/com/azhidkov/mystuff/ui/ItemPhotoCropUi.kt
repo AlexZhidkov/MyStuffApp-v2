@@ -21,6 +21,8 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
@@ -45,6 +47,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -92,15 +95,18 @@ internal fun CropPhotoScreen(
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.crop_photo)) },
-                navigationIcon = {
-                    TextButton(
+                actions = {
+                    IconButton(
                         onClick = {
                             discardUnsavedPhotoSources(context, unsavedPhotos + photo)
                             actions.closeItemForm()
                         },
                         enabled = !cropping,
                     ) {
-                        Text(stringResource(R.string.cancel))
+                        Icon(
+                            painter = painterResource(R.drawable.ic_clear),
+                            contentDescription = stringResource(R.string.close),
+                        )
                     }
                 },
             )

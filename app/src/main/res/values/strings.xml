@@ -30,14 +30,14 @@
     <string name="item_details">Item details</string>
     <string name="empty_household_body">This is your Household’s root Item. Child Items will appear here.</string>
     <string name="add_item">Add item</string>
-    <string name="edit_item">Edit Item</string>
-    <string name="move_item">Move Item</string>
+    <string name="edit_item">Edit</string>
+    <string name="move_item">Move</string>
     <string name="reorder_item">Reorder %1$s</string>
     <string name="move_item_title">Move Item</string>
     <string name="move_item_body">Choose a new Parent Item for %1$s.</string>
     <string name="move_item_no_targets">There are no other valid Parent Items.</string>
     <string name="move_item_confirm">Move here</string>
-    <string name="delete_item">Delete Item</string>
+    <string name="delete_item">Delete</string>
     <string name="delete_item_title">Delete %1$s?</string>
     <string name="delete_item_confirmation">This Item and all its stored photos will be permanently deleted.</string>
     <string name="current_parent_item">Current Parent Item</string>

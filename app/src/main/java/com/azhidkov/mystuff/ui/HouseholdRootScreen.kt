@@ -33,6 +33,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
@@ -461,30 +463,6 @@ private fun HouseholdRootContent(
                             style = MaterialTheme.typography.headlineLarge,
                             fontWeight = FontWeight.Bold,
                         )
-                        if (!isHome) {
-                            IconButton(onClick = inventoryActions::beginEditItem) {
-                                Icon(
-                                    painter = painterResource(R.drawable.ic_edit),
-                                    contentDescription = stringResource(R.string.edit_item),
-                                )
-                            }
-                            IconButton(onClick = inventoryActions::beginMoveItem) {
-                                Icon(
-                                    painter = painterResource(R.drawable.ic_move),
-                                    contentDescription = stringResource(R.string.move_item),
-                                )
-                            }
-                            IconButton(
-                                onClick = { deleteCandidate = inventoryState.selectedItem },
-                                enabled = inventoryState.childItems.isEmpty() &&
-                                    !inventoryState.operationInProgress,
-                            ) {
-                                Icon(
-                                    painter = painterResource(R.drawable.ic_delete),
-                                    contentDescription = stringResource(R.string.delete_item),
-                                )
-                            }
-                        }
                         webUrl?.let { url ->
                             IconButton(
                                 onClick = {
@@ -498,6 +476,17 @@ private fun HouseholdRootContent(
                                     contentDescription = stringResource(R.string.open_item_web_url),
                                 )
                             }
+                        }
+                        if (!isHome) {
+                            ItemActionsOverflowMenu(
+                                canDelete = inventoryState.childItems.isEmpty() &&
+                                    !inventoryState.operationInProgress,
+                                onEdit = inventoryActions::beginEditItem,
+                                onMove = inventoryActions::beginMoveItem,
+                                onDelete = {
+                                    deleteCandidate = inventoryState.selectedItem
+                                },
+                            )
                         }
                     }
                 }
@@ -628,6 +617,70 @@ private fun HouseholdRootContent(
                 }
             },
         )
+    }
+}
+
+@Composable
+private fun ItemActionsOverflowMenu(
+    canDelete: Boolean,
+    onEdit: () -> Unit,
+    onMove: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Box {
+        IconButton(onClick = { expanded = true }) {
+            Icon(
+                painter = painterResource(R.drawable.ic_more_vert),
+                contentDescription = stringResource(R.string.open_menu),
+            )
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.edit_item)) },
+                onClick = {
+                    expanded = false
+                    onEdit()
+                },
+                leadingIcon = {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_edit),
+                        contentDescription = null,
+                    )
+                },
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.move_item)) },
+                onClick = {
+                    expanded = false
+                    onMove()
+                },
+                leadingIcon = {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_move),
+                        contentDescription = null,
+                    )
+                },
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.delete_item)) },
+                onClick = {
+                    expanded = false
+                    onDelete()
+                },
+                leadingIcon = {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_delete),
+                        contentDescription = null,
+                    )
+                },
+                enabled = canDelete,
+            )
+        }
     }
 }
 

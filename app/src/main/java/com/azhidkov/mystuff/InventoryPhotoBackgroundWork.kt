@@ -305,8 +305,13 @@ internal fun photoTransferWorkName(storagePath: String): String =
 internal class BackgroundInventoryPhotoStore(
     bucketUrl: String,
     private val queue: PhotoTransferQueue,
+    private val prepareThumbnail: (location: String, sourceUri: String) -> Unit = { _, _ -> },
 ) : InventoryPhotoStore {
     private val bucketUrl = bucketUrl.trimEnd('/')
+
+    override fun prepareLocalThumbnail(revision: ItemPhotoRevision, photo: ItemPhoto) {
+        prepareThumbnail(revision.locations.thumbnail, photo.thumbnailUri)
+    }
 
     override fun newAttachmentRevision(
         householdId: String,

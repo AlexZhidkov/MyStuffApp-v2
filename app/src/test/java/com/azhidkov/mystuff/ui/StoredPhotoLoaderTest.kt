@@ -1,7 +1,11 @@
 package com.azhidkov.mystuff.ui
 
 import java.nio.file.Files
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -9,6 +13,63 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class StoredPhotoLoaderTest {
+    @Test
+    fun `pending local thumbnail serves concurrent readers even if the first reader leaves`() =
+        runBlocking {
+            withTemporaryDirectory { directory ->
+                withTimeout(5_000) {
+                    val source = CompletableDeferred<ByteArray>()
+                    val cache = ThumbnailCache(
+                        directory = directory,
+                        memory = SizedLruMemoryCache(maxSizeBytes = 1_024, sizeOf = String::length),
+                        download = { error("Must wait for local thumbnail instead of Firebase") },
+                        decode = ByteArray::decodeToString,
+                    )
+                    cache.prepare(VERSIONED_THUMBNAIL_LOCATION) { source.await() }
+                    val firstReader = async(start = CoroutineStart.UNDISPATCHED) {
+                        cache.load(VERSIONED_THUMBNAIL_LOCATION)
+                    }
+                    val previewReader = async(start = CoroutineStart.UNDISPATCHED) {
+                        cache.cachedValue(VERSIONED_THUMBNAIL_LOCATION)
+                    }
+                    assertFalse(firstReader.isCompleted)
+                    assertFalse(previewReader.isCompleted)
+                    firstReader.cancel()
+                    source.complete("local-thumbnail".encodeToByteArray())
+
+                    assertEquals("local-thumbnail", previewReader.await())
+                    assertEquals("local-thumbnail", cache.load(VERSIONED_THUMBNAIL_LOCATION))
+                }
+            }
+        }
+
+    @Test
+    fun `unreadable or corrupt local thumbnail falls back to Firebase`() = runBlocking {
+        for (unreadable in listOf(true, false)) {
+            withTemporaryDirectory { directory ->
+                var downloads = 0
+                val cache = ThumbnailCache(
+                    directory = directory,
+                    memory = SizedLruMemoryCache(maxSizeBytes = 1_024, sizeOf = String::length),
+                    download = {
+                        downloads += 1
+                        "valid-thumbnail".encodeToByteArray()
+                    },
+                    decode = { bytes ->
+                        bytes.decodeToString().also { check(it == "valid-thumbnail") }
+                    },
+                )
+                cache.prepare(VERSIONED_THUMBNAIL_LOCATION) {
+                    if (unreadable) error("Local source was removed")
+                    "corrupt-thumbnail".encodeToByteArray()
+                }
+
+                assertEquals("valid-thumbnail", cache.load(VERSIONED_THUMBNAIL_LOCATION))
+                assertEquals(1, downloads)
+            }
+        }
+    }
+
     @Test
     fun `compact thumbnail memory hit avoids disk decode and Firebase`() = runBlocking {
         withTemporaryDirectory { cacheDirectory ->

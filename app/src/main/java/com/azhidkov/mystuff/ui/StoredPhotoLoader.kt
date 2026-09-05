@@ -5,8 +5,14 @@ import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 
 internal interface ThumbnailMemoryCache<T> {
@@ -55,10 +61,31 @@ internal class ThumbnailCache<T>(
     private val decode: suspend (ByteArray) -> T,
     private val writeTemporaryFile: (File, ByteArray) -> Unit = File::writeBytes,
 ) {
+    private val preparationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val preparations = ConcurrentHashMap<String, Deferred<T?>>()
+
+    /** Register before publishing the photo location so readers wait for local bytes, not Firebase. */
+    fun prepare(location: String, source: suspend () -> ByteArray) {
+        val preparation = preparationScope.async(start = CoroutineStart.LAZY) {
+            try {
+                cacheBytes(location, source())
+            } catch (failure: Exception) {
+                if (failure is CancellationException) throw failure
+                null // A missing local source must not prevent the normal remote load.
+            }
+        }
+        if (preparations.putIfAbsent(location, preparation) != null) {
+            preparation.cancel()
+            return
+        }
+        preparation.invokeOnCompletion { preparations.remove(location, preparation) }
+        preparation.start()
+    }
+
     fun memoryValue(location: String): T? = memory.get(location)
 
     suspend fun cachedValue(location: String): T? =
-        memory.get(location) ?: withContext(Dispatchers.IO) {
+        memory.get(location) ?: preparations[location]?.await() ?: withContext(Dispatchers.IO) {
             memory.get(location) ?: run {
                 val cacheFile = directory.resolve(thumbnailCacheFileName(location))
                 if (!cacheFile.isFile) return@run null
@@ -75,17 +102,17 @@ internal class ThumbnailCache<T>(
         }
 
     suspend fun load(location: String): T = cachedValue(location) ?: withContext(Dispatchers.IO) {
-        memory.get(location) ?: run {
-            val cacheFile = directory.resolve(thumbnailCacheFileName(location))
-            val bytes = download(location)
-            val decoded = decode(bytes)
-            try {
-                writeAtomically(cacheFile, bytes)
-            } catch (_: Exception) {
-                // Disk caching is best effort; the decoded thumbnail remains useful in memory.
-            }
-            decoded.also { memory.put(location, it) }
+        memory.get(location) ?: cacheBytes(location, download(location))
+    }
+
+    private suspend fun cacheBytes(location: String, bytes: ByteArray): T {
+        val decoded = decode(bytes)
+        try {
+            writeAtomically(directory.resolve(thumbnailCacheFileName(location)), bytes)
+        } catch (_: Exception) {
+            // Disk caching is best effort; the decoded thumbnail remains useful in memory.
         }
+        return decoded.also { memory.put(location, it) }
     }
 
     private fun writeAtomically(cacheFile: File, bytes: ByteArray) {
@@ -118,6 +145,9 @@ internal class StoredPhotoLoader<T>(
     private val download: suspend (location: String, maxBytes: Long) -> ByteArray,
     private val decode: suspend (ByteArray) -> T,
 ) {
+    fun prepareThumbnail(location: String, source: suspend () -> ByteArray) =
+        thumbnails.prepare(location, source)
+
     fun thumbnailMemoryValue(location: String): T? = thumbnails.memoryValue(location)
 
     suspend fun cachedThumbnailValue(location: String): T? = thumbnails.cachedValue(location)

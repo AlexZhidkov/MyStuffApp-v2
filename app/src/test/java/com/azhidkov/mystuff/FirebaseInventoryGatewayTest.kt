@@ -5,8 +5,68 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
+import java.nio.file.Files
+import com.azhidkov.mystuff.ui.ItemPhotoPresentation
+import com.azhidkov.mystuff.ui.SizedLruMemoryCache
+import com.azhidkov.mystuff.ui.StoredPhotoLoader
+import com.azhidkov.mystuff.ui.ThumbnailCache
+import kotlinx.coroutines.runBlocking
 
 class FirebaseInventoryGatewayTest {
+    @Test
+    fun `new Item thumbnail is available locally before any upload runs`() = runBlocking {
+        val directory = Files.createTempDirectory("new-item-thumbnail").toFile()
+        try {
+            val localThumbnail = "local-thumbnail".encodeToByteArray()
+            val thumbnails = ThumbnailCache(
+                directory = directory,
+                memory = SizedLruMemoryCache(maxSizeBytes = 1_024, sizeOf = String::length),
+                download = { error("Thumbnail has not been uploaded yet") },
+                decode = ByteArray::decodeToString,
+            )
+            val photoStore = BackgroundInventoryPhotoStore(
+                bucketUrl = "gs://mystuff",
+                queue = object : PhotoTransferQueue {
+                    override fun replace(task: PhotoTransferTask) = Unit
+                },
+                prepareThumbnail = { location, sourceUri ->
+                    assertEquals("content://thumb.webp", sourceUri)
+                    thumbnails.prepare(location) { localThumbnail }
+                },
+            )
+            val gateway = FirebaseInventoryGateway(
+                FakeInventoryDocumentStore(), photoStore, FakeItemPhotoAttachmentGateway(),
+            )
+            var created: Item? = null
+            gateway.createItem(
+                householdId = "household-1",
+                parentItemId = "garage",
+                creator = inventoryIdentity(),
+                details = inventoryDetails(),
+                photos = listOf(ItemPhoto("content://full.webp", "content://thumb.webp")),
+            ) { created = it.getOrThrow() }
+
+            val loader = StoredPhotoLoader(
+                thumbnails = thumbnails,
+                download = { _, _ -> error("Full photo has not been uploaded yet") },
+                decode = ByteArray::decodeToString,
+            )
+            val location = requireNotNull(created?.photoThumbnailUrl)
+            assertEquals("local-thumbnail", loader.load(location, ItemPhotoPresentation.Compact))
+            assertEquals("local-thumbnail", loader.cachedThumbnailValue(location))
+
+            val restartedCache = ThumbnailCache(
+                directory = directory,
+                memory = SizedLruMemoryCache(maxSizeBytes = 1_024, sizeOf = String::length),
+                download = { error("Still offline after restart") },
+                decode = ByteArray::decodeToString,
+            )
+            assertEquals("local-thumbnail", restartedCache.load(location))
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
     @Test
     fun `reordering Items writes every sibling position and Member attribution atomically`() {
         val documents = FakeInventoryDocumentStore()

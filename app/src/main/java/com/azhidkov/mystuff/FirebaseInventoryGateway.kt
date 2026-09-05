@@ -73,7 +73,7 @@ class FirebaseInventoryGateway internal constructor(
         val photoPlans = photos.map { photo ->
             AttachmentPhotoPlan(
                 photo = photo,
-                photoPlan = newPhotoPlan(householdId, itemId),
+                photoPlan = newPhotoPlan(householdId, itemId, photo),
             )
         }
         val firstPhotoPlan = photoPlans.firstOrNull()
@@ -201,7 +201,7 @@ class FirebaseInventoryGateway internal constructor(
         val additionalPlans = additionalPhotos.map { photo ->
             AttachmentPhotoPlan(
                 photo = photo,
-                photoPlan = newPhotoPlan(householdId, item.id),
+                photoPlan = newPhotoPlan(householdId, item.id, photo),
             )
         }
         val firstNewPhotoPlan = additionalPlans.firstOrNull()
@@ -564,9 +564,14 @@ class FirebaseInventoryGateway internal constructor(
         createNext(0, emptyList())
     }
 
-    private fun newPhotoPlan(householdId: String, itemId: String): ItemPhotoUpdatePlan {
+    private fun newPhotoPlan(
+        householdId: String,
+        itemId: String,
+        photo: ItemPhoto,
+    ): ItemPhotoUpdatePlan {
         val attachmentId = attachmentGateway.newAttachmentId(householdId, itemId)
         val revision = photoStore.newAttachmentRevision(householdId, itemId, attachmentId)
+        photoStore.prepareLocalThumbnail(revision, photo)
         return ItemPhotoUpdatePlan(
             attachmentId = attachmentId,
             full = revision.locations.full,
@@ -986,6 +991,8 @@ private data class AttachmentPhotoPlan(
 )
 
 internal interface InventoryPhotoStore {
+    fun prepareLocalThumbnail(revision: ItemPhotoRevision, photo: ItemPhoto) = Unit
+
     /** Returns the unique display-upload work for a stored location, when this store can track it. */
     fun displayUploadWorkName(location: String): String? = null
 
@@ -1029,9 +1036,13 @@ internal interface InventoryPhotoStore {
 
 internal fun firebaseInventoryPhotoStore(): InventoryPhotoStore {
     val storage = FirebaseStorage.getInstance()
+    val context = FirebaseApp.getInstance().applicationContext
     return BackgroundInventoryPhotoStore(
         bucketUrl = storage.reference.toString(),
-        queue = WorkManagerPhotoTransferQueue(FirebaseApp.getInstance().applicationContext),
+        queue = WorkManagerPhotoTransferQueue(context),
+        prepareThumbnail = { location, sourceUri ->
+            com.azhidkov.mystuff.ui.prepareStoredPhotoThumbnail(context, location, sourceUri)
+        },
     )
 }
 

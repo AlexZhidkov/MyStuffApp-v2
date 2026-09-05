@@ -101,8 +101,8 @@ internal suspend fun <T> loadPhotoWithRetry(
     onState: (PhotoLoadState<T>) -> Unit,
 ) {
     var retryDelayMillis = INITIAL_PHOTO_RETRY_DELAY_MILLIS
+    onState(PhotoLoadState.Loading)
     while (true) {
-        onState(PhotoLoadState.Loading)
         try {
             onState(PhotoLoadState.Available(load()))
             return
@@ -320,6 +320,14 @@ private suspend fun decodeStoredPhotoBitmap(bytes: ByteArray): Bitmap =
     withContext(Dispatchers.IO) {
         decodePhoto(ImageDecoder.createSource(ByteBuffer.wrap(bytes)))
     }
+
+internal fun prepareStoredPhotoThumbnail(context: Context, location: String, sourceUri: String) {
+    storedPhotoBitmapLoader(context).prepareThumbnail(location) {
+        requireNotNull(context.contentResolver.openInputStream(sourceUri.toUri())).use {
+            it.readBytes()
+        }
+    }
+}
 
 private fun storedPhotoBitmapLoader(context: Context): StoredPhotoLoader<Bitmap> =
     StoredPhotoBitmapLoaderHolder.loader ?: synchronized(StoredPhotoBitmapLoaderHolder) {

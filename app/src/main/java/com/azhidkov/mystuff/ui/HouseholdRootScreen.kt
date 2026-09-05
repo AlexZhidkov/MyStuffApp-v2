@@ -1391,12 +1391,15 @@ private fun ItemFormScreen(
                             },
                     ) {
                         if (state.operationInProgress) {
-                            LinearProgressIndicator()
-                        } else {
-                            Icon(
-                                painter = painterResource(R.drawable.ic_save),
-                                contentDescription = null,
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp,
                             )
+                        } else {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_save),
+                            contentDescription = null,
+                        )
                         }
                         Spacer(Modifier.size(ButtonDefaults.IconSpacing))
                         Text(saveDescription)

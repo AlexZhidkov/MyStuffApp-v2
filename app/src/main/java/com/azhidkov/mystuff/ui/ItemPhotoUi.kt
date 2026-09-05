@@ -9,9 +9,10 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
@@ -23,7 +24,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import com.azhidkov.mystuff.Item
@@ -64,8 +67,8 @@ internal enum class PhotoResolution {
     Full,
 }
 
-internal fun photoUnavailableText(state: PhotoLoadState<*>): Int? =
-    if (state is PhotoLoadState.Unavailable) R.string.item_photo_unavailable else null
+internal fun showsPhotoPlaceholder(state: PhotoLoadState<*>): Boolean =
+    state is PhotoLoadState.Unavailable
 
 internal fun <T> detailStateWithPreview(
     current: PhotoLoadState<T>,
@@ -163,6 +166,7 @@ internal fun LocalItemPhoto(
     PhotoBitmap(
         state = bitmap?.let { PhotoLoadState.Available(it) } ?: PhotoLoadState.Unavailable,
         modifier = modifier,
+        placeholderSize = 64.dp,
     )
 }
 
@@ -177,13 +181,21 @@ internal fun StoredItemPhoto(
         presentation == ItemPhotoPresentation.Detail
     }
     val state by rememberStoredPhotoBitmap(location, previewLocation, presentation)
-    PhotoBitmap(state, modifier)
+    PhotoBitmap(
+        state = state,
+        modifier = modifier,
+        placeholderSize = when (presentation) {
+            ItemPhotoPresentation.Detail -> 64.dp
+            ItemPhotoPresentation.Compact -> 32.dp
+        },
+    )
 }
 
 @Composable
 private fun PhotoBitmap(
     state: PhotoLoadState<Bitmap>,
     modifier: Modifier,
+    placeholderSize: Dp,
 ) {
     Box(
         modifier = modifier
@@ -207,14 +219,13 @@ private fun PhotoBitmap(
                     contentScale = ContentScale.Crop,
                 )
             }
-        } else {
-            photoUnavailableText(state)?.let { message ->
-                Text(
-                    text = stringResource(message),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+        } else if (showsPhotoPlaceholder(state)) {
+            Icon(
+                painter = painterResource(R.drawable.ic_photo),
+                contentDescription = stringResource(R.string.item_photo_unavailable),
+                modifier = Modifier.size(placeholderSize),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

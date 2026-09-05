@@ -880,10 +880,13 @@ private fun ItemAttachmentCarouselScreen(
                     }
                 }
             } else {
-                Text(
-                    text = stringResource(R.string.item_photo_unavailable),
-                    modifier = Modifier.align(Alignment.Center),
-                    color = Color.White,
+                Icon(
+                    painter = painterResource(R.drawable.ic_photo),
+                    contentDescription = stringResource(R.string.item_photo_unavailable),
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .size(64.dp),
+                    tint = Color.White,
                 )
             }
             IconButton(
@@ -1073,15 +1076,18 @@ private fun ItemFormScreen(
                         stringResource(if (editing) R.string.edit_item else R.string.add_item),
                     )
                 },
-                navigationIcon = {
-                    TextButton(
+                actions = {
+                    IconButton(
                         onClick = {
                             discardUnsavedPhotoSources(context, unsavedPhotos)
                             actions.closeItemForm()
                         },
                         enabled = !state.operationInProgress,
                     ) {
-                        Text(stringResource(R.string.cancel))
+                        Icon(
+                            painter = painterResource(R.drawable.ic_clear),
+                            contentDescription = stringResource(R.string.cancel),
+                        )
                     }
                 },
             )

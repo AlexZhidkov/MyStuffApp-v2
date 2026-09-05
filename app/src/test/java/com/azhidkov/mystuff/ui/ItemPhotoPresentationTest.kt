@@ -1,9 +1,9 @@
 package com.azhidkov.mystuff.ui
 
 import com.azhidkov.mystuff.Item
-import com.azhidkov.mystuff.R
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ItemPhotoPresentationTest {
@@ -30,15 +30,10 @@ class ItemPhotoPresentationTest {
     }
 
     @Test
-    fun `loading is neutral while a confirmed failure reports unavailable`() {
-        assertNull(
-            photoUnavailableText(PhotoLoadState.Loading),
-        )
-        assertEquals(
-            R.string.item_photo_unavailable,
-            photoUnavailableText(PhotoLoadState.Unavailable),
-        )
-        assertNull(photoUnavailableText(PhotoLoadState.Available("decoded-photo")))
+    fun `placeholder is reserved for confirmed photo failures`() {
+        assertFalse(showsPhotoPlaceholder(PhotoLoadState.Loading))
+        assertTrue(showsPhotoPlaceholder(PhotoLoadState.Unavailable))
+        assertFalse(showsPhotoPlaceholder(PhotoLoadState.Available("decoded-photo")))
     }
 
     @Test

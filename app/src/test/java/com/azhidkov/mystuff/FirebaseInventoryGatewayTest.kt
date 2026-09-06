@@ -6,9 +6,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
 import java.nio.file.Files
-import com.azhidkov.mystuff.ui.ItemPhotoPresentation
 import com.azhidkov.mystuff.ui.SizedLruMemoryCache
-import com.azhidkov.mystuff.ui.StoredPhotoLoader
 import com.azhidkov.mystuff.ui.ThumbnailCache
 import kotlinx.coroutines.runBlocking
 
@@ -46,14 +44,9 @@ class FirebaseInventoryGatewayTest {
                 photos = listOf(ItemPhoto("content://full.webp", "content://thumb.webp")),
             ) { created = it.getOrThrow() }
 
-            val loader = StoredPhotoLoader(
-                thumbnails = thumbnails,
-                download = { _, _ -> error("Full photo has not been uploaded yet") },
-                decode = ByteArray::decodeToString,
-            )
             val location = requireNotNull(created?.photoThumbnailUrl)
-            assertEquals("local-thumbnail", loader.load(location, ItemPhotoPresentation.Compact))
-            assertEquals("local-thumbnail", loader.cachedThumbnailValue(location))
+            assertEquals("local-thumbnail", thumbnails.load(location))
+            assertEquals("local-thumbnail", thumbnails.cachedValue(location))
 
             val restartedCache = ThumbnailCache(
                 directory = directory,

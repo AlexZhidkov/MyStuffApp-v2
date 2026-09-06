@@ -1,5 +1,6 @@
 package com.azhidkov.mystuff
 
+import android.graphics.Bitmap
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -16,21 +17,31 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.azhidkov.mystuff.ui.HouseholdEntryScreen
 import com.azhidkov.mystuff.ui.HouseholdRootScreen
+import com.azhidkov.mystuff.ui.ItemPhotoLoader
 import com.azhidkov.mystuff.ui.SignInScreen
+import com.azhidkov.mystuff.ui.itemPhotoBitmapLoader
 import com.azhidkov.mystuff.ui.theme.MyStuffTheme
 import java.io.File
 
 class MainActivity : ComponentActivity() {
+    private var stopObservingAuthentication: () -> Unit = {}
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        val authenticationGateway = FirebaseAuthenticationGateway(this)
         val sessionController = SessionController(
-            authenticationGateway = FirebaseAuthenticationGateway(this),
+            authenticationGateway = authenticationGateway,
             householdGateway = FirebaseHouseholdGateway(),
             invitationAcceptanceGateway = FirebaseInvitationAcceptanceGateway(),
             invitationId = invitationIdFromLink(intent?.dataString),
         )
+        val itemPhotoLoader = itemPhotoBitmapLoader(applicationContext)
+        itemPhotoLoader.onSessionChanged(sessionController.state.identity?.id)
+        stopObservingAuthentication = authenticationGateway.observeIdentity { identity ->
+            itemPhotoLoader.onSessionChanged(identity?.id)
+        }
         val invitationGateway = FirebaseInvitationGateway()
         val inventoryGateway = FirebaseInventoryGateway()
         val itemAttachmentGateway = FirebaseItemAttachmentGateway()
@@ -44,7 +55,10 @@ class MainActivity : ComponentActivity() {
         setContent {
             var sessionState by remember { mutableStateOf(sessionController.state) }
             DisposableEffect(sessionController) {
-                sessionController.onStateChanged = { sessionState = it }
+                sessionController.onStateChanged = {
+                    itemPhotoLoader.onSessionChanged(it.identity?.id)
+                    sessionState = it
+                }
                 sessionState = sessionController.state
                 onDispose {
                     sessionController.onStateChanged = {}
@@ -64,9 +78,15 @@ class MainActivity : ComponentActivity() {
                     searchGateway = searchGateway,
                     rootChildItemCache = rootChildItemCache,
                     descriptionGenerationWork = descriptionGenerationWork,
+                    itemPhotoLoader = itemPhotoLoader,
                 )
             }
         }
+    }
+
+    override fun onDestroy() {
+        stopObservingAuthentication()
+        super.onDestroy()
     }
 }
 @Composable
@@ -82,6 +102,7 @@ private fun MyStuffApp(
     searchGateway: SearchGateway,
     rootChildItemCache: RootChildItemCache,
     descriptionGenerationWork: InventoryDescriptionGenerationWork,
+    itemPhotoLoader: ItemPhotoLoader<Bitmap>,
 ) {
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -138,8 +159,14 @@ private fun MyStuffApp(
                     onDispose { invitationController.onStateChanged = {} }
                 }
                 DisposableEffect(inventoryController) {
-                    inventoryController.onStateChanged = { inventoryState = it }
-                    inventoryState = inventoryController.state
+                    fun receiveInventoryState(state: InventoryUiState) {
+                        itemPhotoLoader.onItemPhotosChanged(
+                            state.inventory.allItems.mapNotNull(Item::photoThumbnailUrl).toSet(),
+                        )
+                        inventoryState = state
+                    }
+                    inventoryController.onStateChanged = ::receiveInventoryState
+                    receiveInventoryState(inventoryController.state)
                     onDispose { inventoryController.close() }
                 }
 

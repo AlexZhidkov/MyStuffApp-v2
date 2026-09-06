@@ -15,9 +15,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -32,95 +33,11 @@ import androidx.core.net.toUri
 import com.azhidkov.mystuff.Item
 import com.azhidkov.mystuff.ItemPhoto
 import com.azhidkov.mystuff.R
-import com.google.firebase.storage.FirebaseStorage
-import java.io.File
-import java.nio.ByteBuffer
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
-import kotlin.coroutines.suspendCoroutine
-import kotlin.math.max
-import kotlin.math.roundToInt
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-
-internal enum class ItemPhotoPresentation {
-    Detail,
-    Compact,
-}
-
-internal sealed interface PhotoLoadState<out T> {
-    data object Loading : PhotoLoadState<Nothing>
-
-    data object Unavailable : PhotoLoadState<Nothing>
-
-    data class Available<T>(
-        val value: T,
-        val resolution: PhotoResolution = PhotoResolution.Full,
-    ) : PhotoLoadState<T>
-}
-
-internal enum class PhotoResolution {
-    Preview,
-    Full,
-}
 
 internal fun showsPhotoPlaceholder(state: PhotoLoadState<*>): Boolean =
     state is PhotoLoadState.Unavailable
-
-internal fun <T> detailStateWithPreview(
-    current: PhotoLoadState<T>,
-    preview: T,
-): PhotoLoadState<T> =
-    if (
-        current is PhotoLoadState.Available &&
-        current.resolution == PhotoResolution.Full
-    ) {
-        current
-    } else {
-        PhotoLoadState.Available(preview, PhotoResolution.Preview)
-    }
-
-internal fun <T> detailStateWithFullLoad(
-    current: PhotoLoadState<T>,
-    fullLoad: PhotoLoadState<T>,
-): PhotoLoadState<T> =
-    when {
-        fullLoad is PhotoLoadState.Available ->
-            PhotoLoadState.Available(fullLoad.value, PhotoResolution.Full)
-        current is PhotoLoadState.Available &&
-            current.resolution == PhotoResolution.Preview -> current
-        else -> fullLoad
-    }
-
-internal suspend fun <T> loadPhotoWithRetry(
-    load: suspend () -> T,
-    wait: suspend (Long) -> Unit,
-    onState: (PhotoLoadState<T>) -> Unit,
-) {
-    var retryDelayMillis = INITIAL_PHOTO_RETRY_DELAY_MILLIS
-    onState(PhotoLoadState.Loading)
-    while (true) {
-        try {
-            onState(PhotoLoadState.Available(load()))
-            return
-        } catch (failure: Exception) {
-            if (failure is CancellationException) throw failure
-            onState(PhotoLoadState.Unavailable)
-            wait(retryDelayMillis)
-            retryDelayMillis =
-                (retryDelayMillis * 2).coerceAtMost(MAX_PHOTO_RETRY_DELAY_MILLIS)
-        }
-    }
-}
-
-internal fun storedPhotoLocation(item: Item, presentation: ItemPhotoPresentation): String? =
-    when (presentation) {
-        ItemPhotoPresentation.Detail -> item.photoUrl
-        ItemPhotoPresentation.Compact -> item.photoThumbnailUrl
-    }
 
 @Composable
 internal fun rememberAttachmentDisplayPhoto(
@@ -128,33 +45,12 @@ internal fun rememberAttachmentDisplayPhoto(
     previewLocation: String? = null,
 ): State<PhotoLoadState<Bitmap>> {
     val context = LocalContext.current.applicationContext
-    val loader = attachmentDisplayPhotoLoader(context)
-    val previewLoader = storedPhotoBitmapLoader(context)
-    return produceState<PhotoLoadState<Bitmap>>(
-        initialValue = previewLocation
-            ?.let(previewLoader::thumbnailMemoryValue)
-            ?.let { PhotoLoadState.Available(it, PhotoResolution.Preview) }
-            ?: PhotoLoadState.Loading,
-        key1 = location,
-        key2 = previewLocation,
-    ) {
-        if (previewLocation != null && value !is PhotoLoadState.Available) {
-            launch {
-                previewLoader.cachedThumbnailValue(previewLocation)?.let { preview ->
-                    value = detailStateWithPreview(value, preview)
-                }
-            }
-        }
-        try {
-            value = detailStateWithFullLoad(
-                value,
-                PhotoLoadState.Available(loader.load(location)),
-            )
-        } catch (failure: Exception) {
-            if (failure is CancellationException) throw failure
-            value = detailStateWithFullLoad(value, PhotoLoadState.Unavailable)
-        }
+    val loader = itemPhotoBitmapLoader(context)
+    val request = remember(location, previewLocation) {
+        ItemPhotoRequest.AttachmentDisplay(location, previewLocation)
     }
+    val states = remember(loader, request) { loader.states(request) }
+    return states.collectAsState(initial = loader.initialState(request))
 }
 
 @Composable
@@ -248,49 +144,12 @@ private fun rememberStoredPhotoBitmap(
     presentation: ItemPhotoPresentation,
 ): State<PhotoLoadState<Bitmap>> {
     val context = LocalContext.current.applicationContext
-    val loader = storedPhotoBitmapLoader(context)
-    return key(location, previewLocation, presentation) {
-        val initialValue = when (presentation) {
-            ItemPhotoPresentation.Detail -> previewLocation
-                ?.let(loader::thumbnailMemoryValue)
-                ?.let { PhotoLoadState.Available(it, PhotoResolution.Preview) }
-                ?: PhotoLoadState.Loading
-            ItemPhotoPresentation.Compact -> loader.memoryValue(location, presentation)
-                ?.let { PhotoLoadState.Available(it) }
-                ?: PhotoLoadState.Loading
-        }
-        produceState(
-            initialValue = initialValue,
-            key1 = location,
-            key2 = presentation,
-        ) {
-            if (presentation == ItemPhotoPresentation.Detail) {
-                if (
-                    previewLocation != null &&
-                    value !is PhotoLoadState.Available
-                ) {
-                    launch {
-                        loader.cachedThumbnailValue(previewLocation)?.let { preview ->
-                            value = detailStateWithPreview(value, preview)
-                        }
-                    }
-                }
-                loadPhotoWithRetry(
-                    load = { loader.load(location, presentation) },
-                    wait = { delay(it) },
-                    onState = { fullLoad ->
-                        value = detailStateWithFullLoad(value, fullLoad)
-                    },
-                )
-            } else if (value !is PhotoLoadState.Available) {
-                loadPhotoWithRetry(
-                    load = { loader.load(location, presentation) },
-                    wait = { delay(it) },
-                    onState = { value = it },
-                )
-            }
-        }
+    val loader = itemPhotoBitmapLoader(context)
+    val request = remember(location, previewLocation, presentation) {
+        ItemPhotoRequest.Stored(location, presentation, previewLocation)
     }
+    val states = remember(loader, request) { loader.states(request) }
+    return states.collectAsState(initial = loader.initialState(request))
 }
 
 private suspend fun loadLocalPhotoBitmap(context: Context, photo: ItemPhoto): Bitmap =
@@ -298,93 +157,4 @@ private suspend fun loadLocalPhotoBitmap(context: Context, photo: ItemPhoto): Bi
         decodePhoto(ImageDecoder.createSource(context.contentResolver, photo.uri.toUri()))
     }
 
-private suspend fun downloadStoredPhotoBytes(location: String, maxBytes: Long): ByteArray =
-    suspendCoroutine { continuation ->
-        FirebaseStorage.getInstance()
-            .getReferenceFromUrl(location)
-            .getBytes(maxBytes)
-            .addOnSuccessListener(continuation::resume)
-            .addOnFailureListener(continuation::resumeWithException)
-    }
-
-private suspend fun downloadAttachmentDisplayPhotoBytes(location: String): ByteArray =
-    suspendCoroutine { continuation ->
-        FirebaseStorage.getInstance()
-            .getReferenceFromUrl(location)
-            .getBytes(Long.MAX_VALUE)
-            .addOnSuccessListener(continuation::resume)
-            .addOnFailureListener(continuation::resumeWithException)
-    }
-
-private suspend fun decodeStoredPhotoBitmap(bytes: ByteArray): Bitmap =
-    withContext(Dispatchers.IO) {
-        decodePhoto(ImageDecoder.createSource(ByteBuffer.wrap(bytes)))
-    }
-
-internal fun prepareStoredPhotoThumbnail(context: Context, location: String, sourceUri: String) {
-    storedPhotoBitmapLoader(context).prepareThumbnail(location) {
-        requireNotNull(context.contentResolver.openInputStream(sourceUri.toUri())).use {
-            it.readBytes()
-        }
-    }
-}
-
-private fun storedPhotoBitmapLoader(context: Context): StoredPhotoLoader<Bitmap> =
-    StoredPhotoBitmapLoaderHolder.loader ?: synchronized(StoredPhotoBitmapLoaderHolder) {
-        StoredPhotoBitmapLoaderHolder.loader ?: StoredPhotoLoader(
-            thumbnails = ThumbnailCache(
-                directory = File(context.cacheDir, THUMBNAIL_CACHE_DIRECTORY),
-                memory = SizedLruMemoryCache(
-                    maxSizeBytes = thumbnailMemoryCacheMaxBytes(Runtime.getRuntime().maxMemory()),
-                    sizeOf = Bitmap::getAllocationByteCount,
-                ),
-                download = { location ->
-                    downloadStoredPhotoBytes(location, MAX_THUMBNAIL_DOWNLOAD_BYTES)
-                },
-                decode = ::decodeStoredPhotoBitmap,
-            ),
-            download = ::downloadStoredPhotoBytes,
-            decode = ::decodeStoredPhotoBitmap,
-        ).also { StoredPhotoBitmapLoaderHolder.loader = it }
-    }
-
-private object StoredPhotoBitmapLoaderHolder {
-    @Volatile
-    var loader: StoredPhotoLoader<Bitmap>? = null
-}
-
-private object AttachmentDisplayPhotoLoaderHolder {
-    @Volatile
-    var loader: AttachmentDisplayPhotoCache<Bitmap>? = null
-}
-
-internal fun attachmentDisplayPhotoLoader(context: Context): AttachmentDisplayPhotoCache<Bitmap> =
-    AttachmentDisplayPhotoLoaderHolder.loader
-        ?: synchronized(AttachmentDisplayPhotoLoaderHolder) {
-            AttachmentDisplayPhotoLoaderHolder.loader
-                ?: AttachmentDisplayPhotoCache(
-                    directory = File(context.cacheDir, ATTACHMENT_DISPLAY_CACHE_DIRECTORY),
-                    download = ::downloadAttachmentDisplayPhotoBytes,
-                    decode = ::decodeStoredPhotoBitmap,
-                ).also { AttachmentDisplayPhotoLoaderHolder.loader = it }
-        }
-
-private fun decodePhoto(source: ImageDecoder.Source): Bitmap =
-    ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
-        decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-        val longestSide = max(info.size.width, info.size.height)
-        if (longestSide > MAX_DECODED_PHOTO_SIDE) {
-            val scale = MAX_DECODED_PHOTO_SIDE.toFloat() / longestSide
-            decoder.setTargetSize(
-                (info.size.width * scale).roundToInt(),
-                (info.size.height * scale).roundToInt(),
-            )
-        }
-    }
-
-private const val MAX_DECODED_PHOTO_SIDE = 2_048
 private const val FULL_PHOTO_CROSSFADE_MILLIS = 200
-private const val THUMBNAIL_CACHE_DIRECTORY = "item-thumbnails"
-private const val ATTACHMENT_DISPLAY_CACHE_DIRECTORY = "item-attachment-displays"
-private const val INITIAL_PHOTO_RETRY_DELAY_MILLIS = 2_000L
-private const val MAX_PHOTO_RETRY_DELAY_MILLIS = 30_000L

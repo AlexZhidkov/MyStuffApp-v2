@@ -36,40 +36,4 @@ class ItemPhotoPresentationTest {
         assertFalse(showsPhotoPlaceholder(PhotoLoadState.Available("decoded-photo")))
     }
 
-    @Test
-    fun `cached preview remains visible through full photo loading and failures`() {
-        val preview = PhotoLoadState.Available("thumbnail", PhotoResolution.Preview)
-
-        assertEquals(
-            preview,
-            detailStateWithFullLoad(preview, PhotoLoadState.Loading),
-        )
-        assertEquals(
-            preview,
-            detailStateWithFullLoad(preview, PhotoLoadState.Unavailable),
-        )
-    }
-
-    @Test
-    fun `full photo replaces preview and cannot be overwritten by a late cache result`() {
-        val preview = PhotoLoadState.Available("thumbnail", PhotoResolution.Preview)
-        val full = detailStateWithFullLoad(
-            preview,
-            PhotoLoadState.Available("full-photo"),
-        )
-
-        assertEquals(
-            PhotoLoadState.Available("full-photo", PhotoResolution.Full),
-            full,
-        )
-        assertEquals(full, detailStateWithPreview(full, "late-thumbnail"))
-    }
-
-    @Test
-    fun `confirmed full photo failure is visible when no preview exists`() {
-        assertEquals(
-            PhotoLoadState.Unavailable,
-            detailStateWithFullLoad(PhotoLoadState.Loading, PhotoLoadState.Unavailable),
-        )
-    }
 }

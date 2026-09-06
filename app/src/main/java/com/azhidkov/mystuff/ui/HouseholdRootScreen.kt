@@ -820,7 +820,7 @@ private fun ItemAttachmentCarouselScreen(
 ) {
     val images = item.carouselImages(state.attachments)
     val pagerState = rememberPagerState(pageCount = { images.size.coerceAtLeast(1) })
-    val loader = attachmentDisplayPhotoLoader(LocalContext.current.applicationContext)
+    val loader = itemPhotoBitmapLoader(LocalContext.current.applicationContext)
     var deleteCandidate by remember { mutableStateOf<ItemAttachment?>(null) }
     var currentPageZoomed by remember { mutableStateOf(false) }
     val currentAttachment = when (val image = images.getOrNull(pagerState.currentPage)) {
@@ -831,17 +831,15 @@ private fun ItemAttachmentCarouselScreen(
         null -> null
     }
     LaunchedEffect(state.itemId, state.attachments) {
-        buildList {
-            item.photoUrl?.let(::add)
-            state.attachments
-                .asSequence()
-                .filterNot { it.id == item.photoAttachmentId }
-                .mapTo(this) { it.displayUrl }
-        }
-            .asSequence()
-            .forEach { location ->
-                launch { runCatching { loader.load(location) } }
-            }
+        loader.prepareAttachmentDisplays(
+            buildList {
+                item.photoUrl?.let(::add)
+                state.attachments
+                    .asSequence()
+                    .filterNot { it.id == item.photoAttachmentId }
+                    .mapTo(this) { it.displayUrl }
+            },
+        )
     }
     LaunchedEffect(pagerState.currentPage) { currentPageZoomed = false }
 
@@ -966,7 +964,7 @@ private fun ItemAttachmentCarouselScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        loader.remove(attachment.displayUrl)
+                        loader.evictAttachmentDisplay(attachment.displayUrl)
                         onDeleteAttachment(attachment)
                         deleteCandidate = null
                     },

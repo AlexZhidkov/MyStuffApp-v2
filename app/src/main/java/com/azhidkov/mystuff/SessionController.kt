@@ -9,6 +9,11 @@ data class AuthenticatedIdentity(
 interface AuthenticationGateway {
     val currentIdentity: AuthenticatedIdentity?
 
+    fun observeIdentity(onChanged: (AuthenticatedIdentity?) -> Unit): () -> Unit {
+        onChanged(currentIdentity)
+        return {}
+    }
+
     fun signIn(onResult: (Result<AuthenticatedIdentity>) -> Unit)
 
     fun signOut(onResult: (Result<Unit>) -> Unit)

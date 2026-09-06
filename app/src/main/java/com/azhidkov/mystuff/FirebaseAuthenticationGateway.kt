@@ -33,6 +33,12 @@ class FirebaseAuthenticationGateway(
             return firebaseUser.toAuthenticatedIdentity()
         }
 
+    override fun observeIdentity(onChanged: (AuthenticatedIdentity?) -> Unit): () -> Unit {
+        val listener = FirebaseAuth.AuthStateListener { onChanged(currentIdentity) }
+        firebaseAuth.addAuthStateListener(listener)
+        return { firebaseAuth.removeAuthStateListener(listener) }
+    }
+
     override fun signIn(onResult: (Result<AuthenticatedIdentity>) -> Unit) {
         activity.lifecycleScope.launch {
             val credential = try {

@@ -323,6 +323,7 @@ class InventoryController internal constructor(
     private val itemAttachmentGateway: ItemAttachmentGateway = NoItemAttachmentGateway,
     private val attachmentUploadFailureRegistry: AttachmentUploadFailureRegistry =
         processAttachmentUploadFailures,
+    private val onInventoryChanged: (Inventory) -> Unit = {},
 ) : InventoryActions, AutoCloseable {
     constructor(
         household: Household,
@@ -352,6 +353,7 @@ class InventoryController internal constructor(
     private var itemAttachmentSubscription: InventorySubscription? = null
     private val pendingChildOrders = linkedMapOf<String, PendingChildOrder>()
     private var childOrderWriteInProgress = false
+    private var inventoryChangeNotificationsStarted = false
 
     private val attachmentUploadFailureSubscription =
         attachmentUploadFailureRegistry.observe { drafts ->
@@ -434,6 +436,11 @@ class InventoryController internal constructor(
                     .firstOrNull(),
             ),
         )
+    }
+
+    init {
+        inventoryChangeNotificationsStarted = true
+        onInventoryChanged(state.inventory)
     }
 
     override fun changeSearchQuery(query: String) {
@@ -1388,7 +1395,11 @@ class InventoryController internal constructor(
     }
 
     private fun updateState(newState: InventoryUiState) {
+        val inventoryChanged = state.inventory != newState.inventory
         state = newState
+        if (inventoryChangeNotificationsStarted && inventoryChanged) {
+            onInventoryChanged(newState.inventory)
+        }
         onStateChanged(newState)
     }
 

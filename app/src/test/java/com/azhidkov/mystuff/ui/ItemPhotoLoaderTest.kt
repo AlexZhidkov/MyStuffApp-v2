@@ -1,5 +1,9 @@
 package com.azhidkov.mystuff.ui
 
+import com.azhidkov.mystuff.Household
+import com.azhidkov.mystuff.Inventory
+import com.azhidkov.mystuff.Item
+import java.io.File
 import java.nio.file.Files
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
@@ -22,27 +26,16 @@ class ItemPhotoLoaderTest {
         try {
             val lateDownload = CompletableDeferred<kotlin.coroutines.Continuation<ByteArray>>()
             var downloads = 0
-            val loader = ItemPhotoLoader(
-                thumbnails = ThumbnailCache(
-                    directory = root.resolve("thumbnails"),
-                    memory = SizedLruMemoryCache(1_024, String::length),
-                    download = { location ->
-                        downloads += 1
-                        if (downloads == 1) {
-                            suspendCoroutine { lateDownload.complete(it) }
-                        } else {
-                            "new-member-thumbnail".encodeToByteArray()
-                        }
-                    },
-                    decode = ByteArray::decodeToString,
-                ),
-                attachmentDisplays = AttachmentDisplayPhotoCache(
-                    directory = root.resolve("displays"),
-                    download = { error("Attachment display should not be loaded") },
-                    decode = ByteArray::decodeToString,
-                ),
-                downloadStoredPhoto = { _, _ -> error("Detail photo should not be loaded") },
-                decode = ByteArray::decodeToString,
+            val loader = testLoader(
+                root = root,
+                thumbnailDownload = {
+                    downloads += 1
+                    if (downloads == 1) {
+                        suspendCoroutine { lateDownload.complete(it) }
+                    } else {
+                        "new-member-thumbnail".encodeToByteArray()
+                    }
+                },
             )
             val request = ItemPhotoRequest.Stored(
                 location = TEST_THUMBNAIL_LOCATION,
@@ -78,24 +71,16 @@ class ItemPhotoLoaderTest {
                 .writeText("preview")
             val previewDecodeStarted = CompletableDeferred<Unit>()
             val releasePreview = CompletableDeferred<Unit>()
-            val loader = ItemPhotoLoader(
-                thumbnails = ThumbnailCache(
-                    directory = thumbnailDirectory,
-                    memory = SizedLruMemoryCache(1_024, String::length),
-                    download = { error("The cached preview should be used") },
-                    decode = { bytes ->
-                        previewDecodeStarted.complete(Unit)
-                        releasePreview.await()
-                        bytes.decodeToString()
-                    },
-                ),
-                attachmentDisplays = AttachmentDisplayPhotoCache(
-                    directory = root.resolve("displays"),
-                    download = { "full-photo".encodeToByteArray() },
-                    decode = ByteArray::decodeToString,
-                ),
-                downloadStoredPhoto = { _, _ -> error("Stored photo should not be loaded") },
-                decode = ByteArray::decodeToString,
+            val loader = testLoader(
+                root = root,
+                thumbnailDirectory = thumbnailDirectory,
+                thumbnailDownload = { error("The cached preview should be used") },
+                thumbnailDecode = { bytes ->
+                    previewDecodeStarted.complete(Unit)
+                    releasePreview.await()
+                    bytes.decodeToString()
+                },
+                attachmentDownload = { "full-photo".encodeToByteArray() },
             )
             val fullAvailable = CompletableDeferred<Unit>()
             val states = async {
@@ -131,33 +116,60 @@ class ItemPhotoLoaderTest {
     }
 
     @Test
+    fun `a late display request cannot repopulate an evicted attachment`() = runBlocking {
+        val root = Files.createTempDirectory("item-photo-loader").toFile()
+        try {
+            val lateDownload = CompletableDeferred<kotlin.coroutines.Continuation<ByteArray>>()
+            var downloads = 0
+            val loader = testLoader(
+                root = root,
+                attachmentDownload = {
+                    downloads += 1
+                    if (downloads == 1) {
+                        suspendCoroutine { lateDownload.complete(it) }
+                    } else {
+                        "current-display".encodeToByteArray()
+                    }
+                },
+            )
+            val request = ItemPhotoRequest.AttachmentDisplay(TEST_DISPLAY_LOCATION)
+            val oldRequest = launch { loader.states(request).collect() }
+            val continuation = lateDownload.await()
+
+            loader.evictAttachmentDisplay(TEST_DISPLAY_LOCATION)
+            continuation.resume("obsolete-display".encodeToByteArray())
+            oldRequest.join()
+
+            assertEquals(
+                "current-display",
+                loader.states(request)
+                    .filterIsInstance<PhotoLoadState.Available<String>>()
+                    .first()
+                    .value,
+            )
+            assertEquals(2, downloads)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `observing a replacement evicts the obsolete thumbnail revision`() = runBlocking {
         val root = Files.createTempDirectory("item-photo-loader").toFile()
         try {
             var downloads = 0
-            val loader = ItemPhotoLoader(
-                thumbnails = ThumbnailCache(
-                    directory = root.resolve("thumbnails"),
-                    memory = SizedLruMemoryCache(1_024, String::length),
-                    download = {
-                        downloads += 1
-                        "download-$downloads".encodeToByteArray()
-                    },
-                    decode = ByteArray::decodeToString,
-                ),
-                attachmentDisplays = AttachmentDisplayPhotoCache(
-                    directory = root.resolve("displays"),
-                    download = { error("Attachment display should not be loaded") },
-                    decode = ByteArray::decodeToString,
-                ),
-                downloadStoredPhoto = { _, _ -> error("Detail photo should not be loaded") },
-                decode = ByteArray::decodeToString,
+            val loader = testLoader(
+                root = root,
+                thumbnailDownload = {
+                    downloads += 1
+                    "download-$downloads".encodeToByteArray()
+                },
             )
             val oldRequest = ItemPhotoRequest.Stored(
                 location = TEST_THUMBNAIL_LOCATION,
                 presentation = ItemPhotoPresentation.Compact,
             )
-            loader.onItemPhotosChanged(setOf(TEST_THUMBNAIL_LOCATION))
+            loader.onInventoryChanged(inventoryWithThumbnail(TEST_THUMBNAIL_LOCATION))
             assertEquals(
                 "download-1",
                 loader.states(oldRequest)
@@ -166,7 +178,7 @@ class ItemPhotoLoaderTest {
                     .value,
             )
 
-            loader.onItemPhotosChanged(setOf("$TEST_THUMBNAIL_LOCATION-new"))
+            loader.onInventoryChanged(inventoryWithThumbnail("$TEST_THUMBNAIL_LOCATION-new"))
 
             assertEquals(
                 "download-2",
@@ -186,32 +198,21 @@ class ItemPhotoLoaderTest {
         val root = Files.createTempDirectory("item-photo-loader").toFile()
         try {
             var downloads = 0
-            val loader = ItemPhotoLoader(
-                thumbnails = ThumbnailCache(
-                    directory = root.resolve("thumbnails"),
-                    memory = SizedLruMemoryCache(1_024, String::length),
-                    download = {
-                        downloads += 1
-                        "legacy-download-$downloads".encodeToByteArray()
-                    },
-                    decode = ByteArray::decodeToString,
-                ),
-                attachmentDisplays = AttachmentDisplayPhotoCache(
-                    directory = root.resolve("displays"),
-                    download = { error("Attachment display should not be loaded") },
-                    decode = ByteArray::decodeToString,
-                ),
-                downloadStoredPhoto = { _, _ -> error("Detail photo should not be loaded") },
-                decode = ByteArray::decodeToString,
+            val loader = testLoader(
+                root = root,
+                thumbnailDownload = {
+                    downloads += 1
+                    "legacy-download-$downloads".encodeToByteArray()
+                },
             )
             val request = ItemPhotoRequest.Stored(
                 location = LEGACY_THUMBNAIL_LOCATION,
                 presentation = ItemPhotoPresentation.Compact,
             )
-            loader.onItemPhotosChanged(setOf(LEGACY_THUMBNAIL_LOCATION))
+            loader.onInventoryChanged(inventoryWithThumbnail(LEGACY_THUMBNAIL_LOCATION))
             loader.states(request).filterIsInstance<PhotoLoadState.Available<String>>().first()
 
-            loader.onItemPhotosChanged(emptySet())
+            loader.onInventoryChanged(inventoryWithThumbnail(null))
 
             assertEquals(
                 "legacy-download-2",
@@ -231,23 +232,12 @@ class ItemPhotoLoaderTest {
         val root = Files.createTempDirectory("item-photo-loader").toFile()
         try {
             var downloads = 0
-            val loader = ItemPhotoLoader(
-                thumbnails = ThumbnailCache(
-                    directory = root.resolve("thumbnails"),
-                    memory = SizedLruMemoryCache(1_024, String::length),
-                    download = { error("Thumbnail should not be loaded") },
-                    decode = ByteArray::decodeToString,
-                ),
-                attachmentDisplays = AttachmentDisplayPhotoCache(
-                    directory = root.resolve("displays"),
-                    download = {
-                        downloads += 1
-                        "display-$downloads".encodeToByteArray()
-                    },
-                    decode = ByteArray::decodeToString,
-                ),
-                downloadStoredPhoto = { _, _ -> error("Stored photo should not be loaded") },
-                decode = ByteArray::decodeToString,
+            val loader = testLoader(
+                root = root,
+                attachmentDownload = {
+                    downloads += 1
+                    "display-$downloads".encodeToByteArray()
+                },
             )
             val request = ItemPhotoRequest.AttachmentDisplay(TEST_DISPLAY_LOCATION)
             loader.onSessionChanged("member-a")
@@ -275,23 +265,12 @@ class ItemPhotoLoaderTest {
             val root = Files.createTempDirectory("item-photo-loader").toFile()
             try {
                 var downloads = 0
-                fun loader() = ItemPhotoLoader(
-                    thumbnails = ThumbnailCache(
-                        directory = root.resolve("thumbnails"),
-                        memory = SizedLruMemoryCache(1_024, String::length),
-                        download = {
-                            downloads += 1
-                            "member-thumbnail-$downloads".encodeToByteArray()
-                        },
-                        decode = ByteArray::decodeToString,
-                    ),
-                    attachmentDisplays = AttachmentDisplayPhotoCache(
-                        directory = root.resolve("displays"),
-                        download = { error("Attachment display should not be loaded") },
-                        decode = ByteArray::decodeToString,
-                    ),
-                    downloadStoredPhoto = { _, _ -> error("Detail photo should not be loaded") },
-                    decode = ByteArray::decodeToString,
+                fun loader() = testLoader(
+                    root = root,
+                    thumbnailDownload = {
+                        downloads += 1
+                        "member-thumbnail-$downloads".encodeToByteArray()
+                    },
                     sessionIdentityFile = root.resolve("session-identity"),
                 )
                 val request = ItemPhotoRequest.Stored(
@@ -326,24 +305,13 @@ class ItemPhotoLoaderTest {
         try {
             var attempts = 0
             val delays = mutableListOf<Long>()
-            val loader = ItemPhotoLoader(
-                thumbnails = ThumbnailCache(
-                    directory = root.resolve("thumbnails"),
-                    memory = SizedLruMemoryCache(1_024, String::length),
-                    download = {
-                        attempts += 1
-                        if (attempts <= 6) error("Firebase unavailable")
-                        "decoded-photo".encodeToByteArray()
-                    },
-                    decode = ByteArray::decodeToString,
-                ),
-                attachmentDisplays = AttachmentDisplayPhotoCache(
-                    directory = root.resolve("displays"),
-                    download = { error("Attachment display should not be loaded") },
-                    decode = ByteArray::decodeToString,
-                ),
-                downloadStoredPhoto = { _, _ -> error("Detail photo should not be loaded") },
-                decode = ByteArray::decodeToString,
+            val loader = testLoader(
+                root = root,
+                thumbnailDownload = {
+                    attempts += 1
+                    if (attempts <= 6) error("Firebase unavailable")
+                    "decoded-photo".encodeToByteArray()
+                },
                 waitForRetry = delays::add,
             )
 
@@ -374,27 +342,17 @@ class ItemPhotoLoaderTest {
         try {
             var thumbnailDownloads = 0
             var detailDownloads = 0
-            val loader = ItemPhotoLoader(
-                thumbnails = ThumbnailCache(
-                    directory = root.resolve("thumbnails"),
-                    memory = SizedLruMemoryCache(1_024, String::length),
-                    download = {
-                        thumbnailDownloads += 1
-                        "thumbnail".encodeToByteArray()
-                    },
-                    decode = ByteArray::decodeToString,
-                ),
-                attachmentDisplays = AttachmentDisplayPhotoCache(
-                    directory = root.resolve("displays"),
-                    download = { error("Attachment display should not be loaded") },
-                    decode = ByteArray::decodeToString,
-                ),
-                downloadStoredPhoto = { _, maxBytes ->
+            val loader = testLoader(
+                root = root,
+                thumbnailDownload = {
+                    thumbnailDownloads += 1
+                    "thumbnail".encodeToByteArray()
+                },
+                storedPhotoDownload = { _, maxBytes ->
                     assertEquals(MAX_FULL_PHOTO_DOWNLOAD_BYTES, maxBytes)
                     detailDownloads += 1
                     "full-photo-$detailDownloads".encodeToByteArray()
                 },
-                decode = ByteArray::decodeToString,
             )
             val request = ItemPhotoRequest.Stored(
                 TEST_DISPLAY_LOCATION,
@@ -423,23 +381,12 @@ class ItemPhotoLoaderTest {
         val root = Files.createTempDirectory("item-photo-loader").toFile()
         try {
             val downloaded = mutableSetOf<String>()
-            val loader = ItemPhotoLoader(
-                thumbnails = ThumbnailCache(
-                    directory = root.resolve("thumbnails"),
-                    memory = SizedLruMemoryCache(1_024, String::length),
-                    download = { error("Thumbnail should not be loaded") },
-                    decode = ByteArray::decodeToString,
-                ),
-                attachmentDisplays = AttachmentDisplayPhotoCache(
-                    directory = root.resolve("displays"),
-                    download = { location ->
-                        synchronized(downloaded) { downloaded += location }
-                        location.encodeToByteArray()
-                    },
-                    decode = ByteArray::decodeToString,
-                ),
-                downloadStoredPhoto = { _, _ -> error("Stored photo should not be loaded") },
-                decode = ByteArray::decodeToString,
+            val loader = testLoader(
+                root = root,
+                attachmentDownload = { location ->
+                    synchronized(downloaded) { downloaded += location }
+                    location.encodeToByteArray()
+                },
             )
             val locations = listOf("display-1", "display-2", "display-3")
 
@@ -450,6 +397,64 @@ class ItemPhotoLoaderTest {
             root.deleteRecursively()
         }
     }
+}
+
+private fun testLoader(
+    root: File,
+    thumbnailDirectory: File = root.resolve("thumbnails"),
+    thumbnailDownload: suspend (String) -> ByteArray = {
+        error("Thumbnail should not be loaded")
+    },
+    thumbnailDecode: suspend (ByteArray) -> String = ByteArray::decodeToString,
+    attachmentDownload: suspend (String) -> ByteArray = {
+        error("Attachment display should not be loaded")
+    },
+    storedPhotoDownload: suspend (String, Long) -> ByteArray = { _, _ ->
+        error("Stored photo should not be loaded")
+    },
+    waitForRetry: suspend (Long) -> Unit = { kotlinx.coroutines.delay(it) },
+    sessionIdentityFile: File? = null,
+): ItemPhotoLoader<String> = ItemPhotoLoader(
+    thumbnails = ThumbnailCache(
+        directory = thumbnailDirectory,
+        memory = SizedLruMemoryCache(1_024, String::length),
+        download = thumbnailDownload,
+        decode = thumbnailDecode,
+    ),
+    attachmentDisplays = AttachmentDisplayPhotoCache(
+        directory = root.resolve("displays"),
+        download = attachmentDownload,
+        decode = ByteArray::decodeToString,
+    ),
+    downloadStoredPhoto = storedPhotoDownload,
+    decode = ByteArray::decodeToString,
+    waitForRetry = waitForRetry,
+    sessionIdentityFile = sessionIdentityFile,
+)
+
+private fun inventoryWithThumbnail(location: String?): Inventory {
+    val household = Household(
+        id = "household-1",
+        ownerMemberId = "member-1",
+        rootItem = Item(
+            id = "household-1",
+            name = "Our Home",
+            parentItemId = null,
+            photoUrl = null,
+            description = null,
+            tags = emptyList(),
+        ),
+    )
+    val item = Item(
+        id = "item-1",
+        name = "Drill",
+        parentItemId = household.id,
+        photoUrl = location?.removeSuffix("-thumb.webp")?.plus(".webp"),
+        description = null,
+        tags = emptyList(),
+        photoThumbnailUrl = location,
+    )
+    return Inventory.from(household, listOf(household.rootItem, item))
 }
 
 private const val TEST_THUMBNAIL_LOCATION =

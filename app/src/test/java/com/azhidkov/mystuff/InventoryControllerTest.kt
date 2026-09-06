@@ -1418,6 +1418,7 @@ class InventoryControllerTest {
             description = "Old description",
         )
         val work = RecordingDescriptionGenerationWork()
+        val observedThumbnailLocations = mutableListOf<Set<String>>()
         val controller = InventoryController(
             household = household,
             identity = identity(),
@@ -1427,6 +1428,11 @@ class InventoryControllerTest {
             rootChildItemCache = NoRootChildItemCache,
             descriptionGenerationWork = work,
             deviceLanguage = { "en-AU" },
+            onInventoryChanged = { inventory ->
+                observedThumbnailLocations += inventory.allItems
+                    .mapNotNull(Item::photoThumbnailUrl)
+                    .toSet()
+            },
         )
         controller.openItem(existing.id)
         controller.beginEditItem()
@@ -1457,6 +1463,63 @@ class InventoryControllerTest {
             work.replacementPhotos.single(),
         )
         assertEquals(controller.state.selectedItem, work.requests.single().item)
+        assertTrue(
+            observedThumbnailLocations.any {
+                "gs://mystuff/households/household-1/items/drill-old-thumb.webp" in it
+            },
+        )
+        assertTrue(
+            observedThumbnailLocations.any {
+                "gs://mystuff/households/household-1/items/drill-$DESCRIPTION_REVISION-thumb.webp" in it
+            },
+        )
+    }
+
+    @Test
+    fun `remotely observed Item Photo removal reaches Inventory observers`() {
+        val household = household()
+        val existing = item(
+            id = "drill",
+            name = "Drill",
+            parentItemId = household.id,
+            photoUrl = "gs://mystuff/households/household-1/items/drill.webp",
+            photoThumbnailUrl =
+                "gs://mystuff/households/household-1/items/drill-thumb.webp",
+        )
+        val gateway = FakeInventoryGateway(
+            Inventory.from(household, listOf(household.rootItem, existing)),
+        )
+        val observedThumbnailLocations = mutableListOf<Set<String>>()
+        val controller = InventoryController(
+            household = household,
+            identity = identity(),
+            gateway = gateway,
+            rootChildItemCache = NoRootChildItemCache,
+            onInventoryChanged = { inventory ->
+                observedThumbnailLocations += inventory.allItems
+                    .mapNotNull(Item::photoThumbnailUrl)
+                    .toSet()
+            },
+        )
+
+        gateway.emit(
+            Inventory.from(
+                household,
+                listOf(
+                    household.rootItem,
+                    existing.copy(photoUrl = null, photoThumbnailUrl = null),
+                ),
+            ),
+        )
+
+        assertEquals(
+            listOf(
+                setOf(requireNotNull(existing.photoThumbnailUrl)),
+                emptySet(),
+            ),
+            observedThumbnailLocations,
+        )
+        controller.close()
     }
 
     @Test

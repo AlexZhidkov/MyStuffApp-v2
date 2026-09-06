@@ -1,6 +1,7 @@
 package com.azhidkov.mystuff.ui
 
 import com.azhidkov.mystuff.Item
+import com.azhidkov.mystuff.Inventory
 import java.io.File
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
@@ -17,9 +18,10 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -213,13 +215,13 @@ internal class ThumbnailCache<T>(
     fun clear() {
         val pending = preparations.values.toList()
         preparations.clear()
+        pending.forEach(Deferred<*>::cancel)
         synchronized(commitLock) {
             sessionGeneration += 1
             locationGenerations.clear()
             memory.clear()
             directory.listFiles().orEmpty().forEach(File::delete)
         }
-        pending.forEach(Deferred<*>::cancel)
     }
 
     private suspend fun cacheBytes(
@@ -257,7 +259,7 @@ internal class ThumbnailCache<T>(
     ) {
         synchronized(commitLock) {
             if (requestGeneration != generationFor(location)) {
-                throw CancellationException("The Item Photo cache session changed")
+                throw CancellationException("The Item Photo cache ownership changed")
             }
             block()
         }
@@ -296,7 +298,10 @@ internal class ItemPhotoLoader<T>(
     private var memberId: String? = null
     private var observedThumbnailLocations = emptySet<String>()
 
-    fun states(request: ItemPhotoRequest): Flow<PhotoLoadState<T>> = callbackFlow {
+    fun states(request: ItemPhotoRequest): Flow<PhotoLoadState<T>> =
+        if (canLoadPhotos()) requestStates(request) else flowOf(PhotoLoadState.Unavailable)
+
+    private fun requestStates(request: ItemPhotoRequest): Flow<PhotoLoadState<T>> = callbackFlow {
         val requestJob = launch {
             var current = initialState(request)
             val stateLock = Mutex()
@@ -416,7 +421,11 @@ internal class ItemPhotoLoader<T>(
             }
     }
 
-    fun onItemPhotosChanged(thumbnailLocations: Set<String>) {
+    fun onInventoryChanged(inventory: Inventory) {
+        onItemPhotosChanged(inventory.allItems.mapNotNull(Item::photoThumbnailUrl).toSet())
+    }
+
+    private fun onItemPhotosChanged(thumbnailLocations: Set<String>) {
         val obsoleteLocations = synchronized(requestLock) {
             (observedThumbnailLocations - thumbnailLocations).also {
                 observedThumbnailLocations = thumbnailLocations
@@ -426,10 +435,12 @@ internal class ItemPhotoLoader<T>(
     }
 
     fun prepareThumbnail(location: String, source: suspend () -> ByteArray) {
+        if (!canLoadPhotos()) return
         thumbnails.prepare(location, source)
     }
 
     suspend fun prepareAttachmentDisplays(locations: List<String>) = coroutineScope {
+        if (!canLoadPhotos()) return@coroutineScope
         val jobs = locations.distinct().map { location ->
             launch { runCatching { attachmentDisplays.load(location) } }
         }
@@ -443,6 +454,10 @@ internal class ItemPhotoLoader<T>(
 
     fun evictAttachmentDisplay(location: String) {
         attachmentDisplays.remove(location)
+    }
+
+    private fun canLoadPhotos(): Boolean = synchronized(requestLock) {
+        !sessionInitialized || memberId != null
     }
 
     fun onSessionChanged(memberId: String?) {
@@ -492,35 +507,37 @@ internal class AttachmentDisplayPhotoCache<T>(
     private val writeTemporaryFile: (File, ByteArray) -> Unit = File::writeBytes,
 ) {
     private val commitLock = Any()
-
-    @Volatile
-    private var generation = 0L
+    private var sessionGeneration = 0L
+    private val locationGenerations = mutableMapOf<String, Long>()
 
     fun clear() {
         synchronized(commitLock) {
-            generation += 1
+            sessionGeneration += 1
+            locationGenerations.clear()
             directory.listFiles().orEmpty().forEach(File::delete)
         }
     }
 
     fun remove(location: String) {
         synchronized(commitLock) {
+            locationGenerations[location] = locationGenerations.getOrDefault(location, 0L) + 1
             directory.resolve(attachmentDisplayCacheFileName(location)).delete()
         }
     }
 
     suspend fun load(location: String): T = withContext(Dispatchers.IO) {
-        val requestGeneration = generation
+        val requestGeneration = generationFor(location)
         val cacheFile = directory.resolve(attachmentDisplayCacheFileName(location))
         val cached = readCached(cacheFile)
-        if (cached != null) return@withContext cached
+        if (cached != null) {
+            ensureCurrent(location, requestGeneration)
+            return@withContext cached
+        }
 
         val bytes = download(location)
         val decoded = decode(bytes)
         synchronized(commitLock) {
-            if (requestGeneration != generation) {
-                throw CancellationException("The Item Photo cache session changed")
-            }
+            ensureCurrent(location, requestGeneration)
             runCatching { writeAtomically(cacheFile, bytes) }
         }
         decoded
@@ -540,6 +557,24 @@ internal class AttachmentDisplayPhotoCache<T>(
     private fun writeAtomically(cacheFile: File, bytes: ByteArray) {
         writeCacheFileAtomically(cacheFile, bytes, writeTemporaryFile)
     }
+
+    private fun generationFor(location: String): CacheGeneration = synchronized(commitLock) {
+        CacheGeneration(
+            session = sessionGeneration,
+            location = locationGenerations.getOrDefault(location, 0L),
+        )
+    }
+
+    private fun ensureCurrent(location: String, requestGeneration: CacheGeneration) {
+        if (requestGeneration != generationFor(location)) {
+            throw CancellationException("The Item Photo cache ownership changed")
+        }
+    }
+
+    private data class CacheGeneration(
+        val session: Long,
+        val location: Long,
+    )
 }
 
 private fun writeCacheFileAtomically(

@@ -290,13 +290,52 @@ class SessionControllerTest {
             email = "alex@example.com",
         )
         val gateway = FakeAuthenticationGateway(currentIdentity = identity)
-        val controller = SessionController(gateway)
+        val observedIdentityIds = mutableListOf<String?>()
+        val controller = SessionController(
+            authenticationGateway = gateway,
+            onIdentityChanged = observedIdentityIds::add,
+        )
 
         controller.signOut()
 
         assertEquals(AppDestination.SignIn, controller.state.destination)
         assertEquals(null, controller.state.identity)
         assertEquals(1, gateway.signOutCalls)
+        assertEquals(listOf("person-1", null), observedIdentityIds)
+    }
+
+    @Test
+    fun `authentication loss leaves the Household and reaches session cleanup`() {
+        val identity = AuthenticatedIdentity("person-1", "Alex", "alex@example.com")
+        val gateway = FakeAuthenticationGateway(currentIdentity = identity)
+        val observedIdentityIds = mutableListOf<String?>()
+        val controller = SessionController(
+            authenticationGateway = gateway,
+            onIdentityChanged = observedIdentityIds::add,
+        )
+
+        gateway.emitIdentity(null)
+
+        assertEquals(AppDestination.SignIn, controller.state.destination)
+        assertEquals(null, controller.state.identity)
+        assertEquals(listOf("person-1", null), observedIdentityIds)
+    }
+
+    @Test
+    fun `authentication identity replacement reaches session cleanup before reopening`() {
+        val first = AuthenticatedIdentity("person-1", "Alex", "alex@example.com")
+        val second = AuthenticatedIdentity("person-2", "Sam", "sam@example.com")
+        val gateway = FakeAuthenticationGateway(currentIdentity = first)
+        val observedIdentityIds = mutableListOf<String?>()
+        val controller = SessionController(
+            authenticationGateway = gateway,
+            onIdentityChanged = observedIdentityIds::add,
+        )
+
+        gateway.emitIdentity(second)
+
+        assertEquals(second, controller.state.identity)
+        assertEquals(listOf("person-1", "person-2"), observedIdentityIds)
     }
 }
 
@@ -358,8 +397,9 @@ private class FakeHouseholdGateway(
 
 private class FakeAuthenticationGateway(
     var signInResult: Result<AuthenticatedIdentity>? = null,
-    override val currentIdentity: AuthenticatedIdentity? = null,
+    override var currentIdentity: AuthenticatedIdentity? = null,
 ) : AuthenticationGateway {
+    private var identityObserver: ((AuthenticatedIdentity?) -> Unit)? = null
     var signOutCalls = 0
         private set
 
@@ -370,6 +410,17 @@ private class FakeAuthenticationGateway(
     override fun signOut(onResult: (Result<Unit>) -> Unit) {
         signOutCalls += 1
         onResult(Result.success(Unit))
+    }
+
+    override fun observeIdentity(onChanged: (AuthenticatedIdentity?) -> Unit): () -> Unit {
+        identityObserver = onChanged
+        onChanged(currentIdentity)
+        return { identityObserver = null }
+    }
+
+    fun emitIdentity(identity: AuthenticatedIdentity?) {
+        currentIdentity = identity
+        identityObserver?.invoke(identity)
     }
 }
 

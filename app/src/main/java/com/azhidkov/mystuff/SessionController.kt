@@ -41,14 +41,20 @@ class SessionController(
     private val invitationAcceptanceGateway: InvitationAcceptanceGateway =
         NoInvitationAcceptanceGateway,
     invitationId: String? = null,
+    private val onIdentityChanged: (String?) -> Unit = {},
 ) {
     var state: SessionUiState = stateFor(authenticationGateway.currentIdentity, invitationId)
         private set
 
     var onStateChanged: (SessionUiState) -> Unit = {}
 
+    private var stopObservingIdentity: () -> Unit = {}
+    private var activeIdentityId = state.identity?.id
+
     init {
+        onIdentityChanged(state.identity?.id)
         state.identity?.let(::resumeFor)
+        stopObservingIdentity = authenticationGateway.observeIdentity(::authenticationChanged)
     }
 
     fun signIn() {
@@ -62,7 +68,7 @@ class SessionController(
         )
         authenticationGateway.signIn { result ->
             result.onSuccess { identity ->
-                resumeFor(identity)
+                authenticationChanged(identity)
             }.onFailure { failure ->
                 val pendingInvitationId = state.pendingInvitationId
                 authenticationGateway.signOut {
@@ -76,6 +82,11 @@ class SessionController(
                 }
             }
         }
+    }
+
+    fun close() {
+        stopObservingIdentity()
+        stopObservingIdentity = {}
     }
 
     private fun resumeFor(identity: AuthenticatedIdentity) {
@@ -167,6 +178,7 @@ class SessionController(
     fun signOut() {
         if (state.operationInProgress) return
 
+        publishIdentity(null)
         updateState(
             SessionUiState(
                 destination = AppDestination.SignIn,
@@ -229,6 +241,27 @@ class SessionController(
     private fun updateState(newState: SessionUiState) {
         state = newState
         onStateChanged(newState)
+    }
+
+    private fun authenticationChanged(identity: AuthenticatedIdentity?) {
+        if (!publishIdentity(identity?.id)) return
+        if (identity == null) {
+            updateState(
+                SessionUiState(
+                    destination = AppDestination.SignIn,
+                    pendingInvitationId = state.pendingInvitationId,
+                ),
+            )
+        } else {
+            resumeFor(identity)
+        }
+    }
+
+    private fun publishIdentity(identityId: String?): Boolean {
+        if (activeIdentityId == identityId) return false
+        activeIdentityId = identityId
+        onIdentityChanged(identityId)
+        return true
     }
 
     private companion object {

@@ -24,24 +24,22 @@ import com.azhidkov.mystuff.ui.theme.MyStuffTheme
 import java.io.File
 
 class MainActivity : ComponentActivity() {
-    private var stopObservingAuthentication: () -> Unit = {}
+    private var closeSession: () -> Unit = {}
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
         val authenticationGateway = FirebaseAuthenticationGateway(this)
+        val itemPhotoLoader = itemPhotoBitmapLoader(applicationContext)
         val sessionController = SessionController(
             authenticationGateway = authenticationGateway,
             householdGateway = FirebaseHouseholdGateway(),
             invitationAcceptanceGateway = FirebaseInvitationAcceptanceGateway(),
             invitationId = invitationIdFromLink(intent?.dataString),
+            onIdentityChanged = itemPhotoLoader::onSessionChanged,
         )
-        val itemPhotoLoader = itemPhotoBitmapLoader(applicationContext)
-        itemPhotoLoader.onSessionChanged(sessionController.state.identity?.id)
-        stopObservingAuthentication = authenticationGateway.observeIdentity { identity ->
-            itemPhotoLoader.onSessionChanged(identity?.id)
-        }
+        closeSession = sessionController::close
         val invitationGateway = FirebaseInvitationGateway()
         val inventoryGateway = FirebaseInventoryGateway()
         val itemAttachmentGateway = FirebaseItemAttachmentGateway()
@@ -56,7 +54,6 @@ class MainActivity : ComponentActivity() {
             var sessionState by remember { mutableStateOf(sessionController.state) }
             DisposableEffect(sessionController) {
                 sessionController.onStateChanged = {
-                    itemPhotoLoader.onSessionChanged(it.identity?.id)
                     sessionState = it
                 }
                 sessionState = sessionController.state
@@ -85,7 +82,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        stopObservingAuthentication()
+        closeSession()
         super.onDestroy()
     }
 }
@@ -145,6 +142,7 @@ private fun MyStuffApp(
                         searchGateway = searchGateway,
                         searchDebouncer = MainThreadSearchDebouncer(),
                         itemAttachmentGateway = itemAttachmentGateway,
+                        onInventoryChanged = itemPhotoLoader::onInventoryChanged,
                     )
                 }
                 var inventoryState by remember(inventoryController) {
@@ -159,14 +157,8 @@ private fun MyStuffApp(
                     onDispose { invitationController.onStateChanged = {} }
                 }
                 DisposableEffect(inventoryController) {
-                    fun receiveInventoryState(state: InventoryUiState) {
-                        itemPhotoLoader.onItemPhotosChanged(
-                            state.inventory.allItems.mapNotNull(Item::photoThumbnailUrl).toSet(),
-                        )
-                        inventoryState = state
-                    }
-                    inventoryController.onStateChanged = ::receiveInventoryState
-                    receiveInventoryState(inventoryController.state)
+                    inventoryController.onStateChanged = { inventoryState = it }
+                    inventoryState = inventoryController.state
                     onDispose { inventoryController.close() }
                 }
 

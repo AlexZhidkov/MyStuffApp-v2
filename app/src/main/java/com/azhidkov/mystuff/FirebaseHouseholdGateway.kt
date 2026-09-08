@@ -62,6 +62,7 @@ internal data class HouseholdDocuments(
         return Household(
             id = householdId,
             ownerMemberId = ownerMemberId,
+            useTags = household.booleanOrDefault(USE_TAGS),
             rootItem = Item(
                 id = rootItemId,
                 name = rootItemName,
@@ -211,6 +212,7 @@ private fun newHouseholdDocuments(
             NAME to name,
             OWNER_MEMBER_ID to owner.id,
             ROOT_ITEM_ID to householdId,
+            USE_TAGS to false,
             CREATED_AT to serverTimestamp,
         ),
         rootItem = mapOf(
@@ -240,6 +242,11 @@ private fun Map<String, Any?>.nullableString(key: String): String? {
     return value
 }
 
+private fun Map<String, Any?>.booleanOrDefault(key: String, default: Boolean = false): Boolean {
+    val value = this[key] ?: return default
+    return value as? Boolean ?: throw HouseholdDataException()
+}
+
 private const val MEMBERSHIPS = "memberships"
 private const val HOUSEHOLDS = "households"
 private const val ITEMS = "items"
@@ -249,6 +256,7 @@ private const val OWNER = "owner"
 private const val NAME = "name"
 private const val OWNER_MEMBER_ID = "ownerMemberId"
 private const val ROOT_ITEM_ID = "rootItemId"
+private const val USE_TAGS = "useTags"
 private const val PARENT_ITEM_ID = "parentItemId"
 private const val PHOTO_URL = "photoUrl"
 private const val DESCRIPTION = "description"

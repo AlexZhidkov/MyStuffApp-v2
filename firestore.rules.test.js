@@ -173,7 +173,12 @@ async function replaceInvitation(database, oldInvitationId, newInvitationId) {
   await batch.commit();
 }
 
-function householdCreationBatch(database, name, rootOverrides = {}) {
+function householdCreationBatch(
+  database,
+  name,
+  rootOverrides = {},
+  householdOverrides = {},
+) {
   const batch = writeBatch(database);
   batch.set(doc(database, "memberships/member-1"), {
     householdId: "household-1",
@@ -183,7 +188,9 @@ function householdCreationBatch(database, name, rootOverrides = {}) {
     name,
     ownerMemberId: "member-1",
     rootItemId: "household-1",
+    useTags: false,
     createdAt: serverTimestamp(),
+    ...householdOverrides,
   });
   batch.set(doc(database, "households/household-1/items/household-1"),
     rootItemData("household-1", name, rootOverrides));
@@ -300,6 +307,14 @@ test("Member can atomically create one Household and its single root Item", asyn
   const database = testEnvironment.authenticatedContext("member-1").firestore();
 
   await assertSucceeds(householdCreationBatch(database, "Our Home").commit());
+});
+
+test("Household useTags feature toggle must be Boolean", async () => {
+  const database = testEnvironment.authenticatedContext("member-1").firestore();
+
+  await assertFails(
+    householdCreationBatch(database, "Our Home", {}, { useTags: "false" }).commit(),
+  );
 });
 
 test("Household root Item cannot carry an Item Photo projection", async () => {

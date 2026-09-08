@@ -28,6 +28,7 @@ class FirebaseHouseholdGatewayTest {
                 "name" to "Our Home",
                 "ownerMemberId" to "member-1",
                 "rootItemId" to "household-1",
+                "useTags" to false,
                 "createdAt" to timestamp,
             ),
             store.createdDocuments?.household,
@@ -51,6 +52,7 @@ class FirebaseHouseholdGatewayTest {
             store.createdDocuments?.rootItem,
         )
         assertEquals("Our Home", result?.getOrThrow()?.rootItem?.name)
+        assertEquals(false, result?.getOrThrow()?.useTags)
     }
 
     @Test
@@ -80,6 +82,25 @@ class FirebaseHouseholdGatewayTest {
             ),
             result?.getOrThrow(),
         )
+        assertEquals(false, result?.getOrThrow()?.useTags)
+    }
+
+    @Test
+    fun `persisted useTags enables Tags for the Household`() {
+        val documents = householdDocuments().let { existing ->
+            existing.copy(household = existing.household + ("useTags" to true))
+        }
+        val gateway = FirebaseHouseholdGateway(
+            FakeHouseholdDocumentStore(
+                householdIdForMember = "household-1",
+                loadedDocuments = documents,
+            ),
+        )
+        var result: Result<Household?>? = null
+
+        gateway.findForMember("member-1") { result = it }
+
+        assertEquals(true, result?.getOrThrow()?.useTags)
     }
 
     @Test

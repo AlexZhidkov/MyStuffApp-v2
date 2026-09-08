@@ -204,6 +204,7 @@ data class ItemFormState(
 data class InventoryUiState(
     val inventory: Inventory,
     val selectedItemId: String,
+    val useTags: Boolean = false,
     val search: InventorySearchState = InventorySearchState(),
     val itemDraft: ItemFormState? = null,
     val itemMove: ItemMoveState? = null,
@@ -340,6 +341,7 @@ class InventoryController internal constructor(
     var state = InventoryUiState(
         inventory = cachedInventory ?: Inventory.from(household, listOf(household.rootItem)),
         selectedItemId = household.rootItem.id,
+        useTags = household.useTags,
         loading = true,
     )
         private set

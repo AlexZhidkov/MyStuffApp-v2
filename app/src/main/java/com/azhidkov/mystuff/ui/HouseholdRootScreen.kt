@@ -500,7 +500,7 @@ private fun HouseholdRootContent(
                         )
                     }
                 }
-                if (inventoryState.selectedItem.tags.isNotEmpty()) {
+                if (inventoryState.useTags && inventoryState.selectedItem.tags.isNotEmpty()) {
                     item {
                         Text(
                             text = inventoryState.selectedItem.tags.joinToString(" · "),
@@ -1293,69 +1293,71 @@ private fun ItemFormScreen(
                     isError = draft.webUrlError != null,
                 )
             }
-            item {
-                Text(
-                    text = stringResource(R.string.item_tags),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
-            items(draft.tags, key = { "selected-tag:$it" }) { tag ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(tag, style = MaterialTheme.typography.bodyLarge)
-                    TextButton(
-                        onClick = { actions.removeTag(tag) },
-                        enabled = formEnabled,
-                    ) {
-                        Text(stringResource(R.string.remove_tag))
-                    }
-                }
-            }
-            item {
-                OutlinedTextField(
-                    value = draft.tagInput,
-                    onValueChange = actions::changeTagInput,
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = formEnabled,
-                    singleLine = true,
-                    label = { Text(stringResource(R.string.item_tag)) },
-                    supportingText = {
-                        Text(
-                            draft.tagError ?: stringResource(
-                                R.string.item_tag_supporting_text,
-                                ItemFormPolicy.MAX_TAG_LENGTH,
-                                ItemFormPolicy.MAX_TAG_COUNT,
-                            ),
-                        )
-                    },
-                    isError = draft.tagError != null,
-                )
-            }
-            item {
-                Button(
-                    onClick = actions::addTag,
-                    enabled = formEnabled && draft.tags.size < ItemFormPolicy.MAX_TAG_COUNT,
-                ) {
-                    Text(stringResource(R.string.add_tag))
-                }
-            }
-            if (state.tagSuggestions.isNotEmpty()) {
+            if (state.useTags) {
                 item {
                     Text(
-                        text = stringResource(R.string.existing_household_tags),
-                        style = MaterialTheme.typography.labelLarge,
+                        text = stringResource(R.string.item_tags),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
                     )
                 }
-                items(state.tagSuggestions, key = { "suggested-tag:$it" }) { suggestion ->
-                    TextButton(
-                        onClick = { actions.addSuggestedTag(suggestion) },
-                        enabled = formEnabled,
+                items(draft.tags, key = { "selected-tag:$it" }) { tag ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(suggestion)
+                        Text(tag, style = MaterialTheme.typography.bodyLarge)
+                        TextButton(
+                            onClick = { actions.removeTag(tag) },
+                            enabled = formEnabled,
+                        ) {
+                            Text(stringResource(R.string.remove_tag))
+                        }
+                    }
+                }
+                item {
+                    OutlinedTextField(
+                        value = draft.tagInput,
+                        onValueChange = actions::changeTagInput,
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = formEnabled,
+                        singleLine = true,
+                        label = { Text(stringResource(R.string.item_tag)) },
+                        supportingText = {
+                            Text(
+                                draft.tagError ?: stringResource(
+                                    R.string.item_tag_supporting_text,
+                                    ItemFormPolicy.MAX_TAG_LENGTH,
+                                    ItemFormPolicy.MAX_TAG_COUNT,
+                                ),
+                            )
+                        },
+                        isError = draft.tagError != null,
+                    )
+                }
+                item {
+                    Button(
+                        onClick = actions::addTag,
+                        enabled = formEnabled && draft.tags.size < ItemFormPolicy.MAX_TAG_COUNT,
+                    ) {
+                        Text(stringResource(R.string.add_tag))
+                    }
+                }
+                if (state.tagSuggestions.isNotEmpty()) {
+                    item {
+                        Text(
+                            text = stringResource(R.string.existing_household_tags),
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                    }
+                    items(state.tagSuggestions, key = { "suggested-tag:$it" }) { suggestion ->
+                        TextButton(
+                            onClick = { actions.addSuggestedTag(suggestion) },
+                            enabled = formEnabled,
+                        ) {
+                            Text(suggestion)
+                        }
                     }
                 }
             }

@@ -252,11 +252,12 @@ service cloud.firestore {
 
     function validHouseholdCreate(householdId) {
       return request.resource.data.keys().hasOnly([
-          'name', 'ownerMemberId', 'rootItemId', 'createdAt'
+          'name', 'ownerMemberId', 'rootItemId', 'useTags', 'createdAt'
         ])
         && validName(request.resource.data.name)
         && request.resource.data.ownerMemberId == request.auth.uid
         && request.resource.data.rootItemId == householdId
+        && request.resource.data.useTags is bool
         && request.resource.data.createdAt == request.time
         && isMemberAfter(householdId)
         && existsAfter(rootItemPath(householdId));

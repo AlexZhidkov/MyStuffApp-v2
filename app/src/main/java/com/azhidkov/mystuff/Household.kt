@@ -19,6 +19,7 @@ data class Household(
     val id: String,
     val ownerMemberId: String,
     val rootItem: Item,
+    val useTags: Boolean = false,
 )
 
 interface HouseholdGateway {

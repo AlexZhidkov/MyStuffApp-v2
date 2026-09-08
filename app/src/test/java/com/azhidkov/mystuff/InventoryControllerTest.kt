@@ -10,6 +10,19 @@ import org.junit.Test
 
 class InventoryControllerTest {
     @Test
+    fun `Household useTags feature toggle is exposed to the UI`() {
+        val household = household().copy(useTags = true)
+
+        val controller = InventoryController(
+            household,
+            identity(),
+            FakeInventoryGateway(Inventory.from(household, listOf(household.rootItem))),
+        )
+
+        assertTrue(controller.state.useTags)
+    }
+
+    @Test
     fun `Member deletes a childless Item and returns to its Parent Item`() {
         val household = household()
         val garage = item("garage", "Garage", household.id)

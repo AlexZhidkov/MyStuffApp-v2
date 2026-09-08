@@ -28,6 +28,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.azhidkov.mystuff.R
+import com.azhidkov.mystuff.SessionOperation
 import com.azhidkov.mystuff.SessionUiState
 
 @Composable
@@ -91,20 +92,31 @@ fun SignInScreen(
                 Spacer(Modifier.height(32.dp))
                 Button(
                     onClick = onSignIn,
-                    enabled = !state.operationInProgress,
+                    enabled = state.operation == null,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(56.dp),
                     shape = RoundedCornerShape(16.dp),
                 ) {
-                    if (state.operationInProgress) {
+                    if (
+                        state.operation == SessionOperation.SigningIn ||
+                        state.operation == SessionOperation.SigningOut
+                    ) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(20.dp),
                             color = MaterialTheme.colorScheme.onPrimary,
                             strokeWidth = 2.dp,
                         )
                         Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-                        Text(stringResource(R.string.signing_in))
+                        Text(
+                            stringResource(
+                                if (state.operation == SessionOperation.SigningIn) {
+                                    R.string.signing_in
+                                } else {
+                                    R.string.signing_out
+                                },
+                            ),
+                        )
                     } else {
                         GoogleMark()
                         Spacer(Modifier.size(ButtonDefaults.IconSpacing))

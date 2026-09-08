@@ -6,6 +6,7 @@
     <string name="sign_in_with_google">Sign in with Google</string>
     <string name="retry_google_sign_in">Try Google sign-in again</string>
     <string name="signing_in">Signing in…</string>
+    <string name="signing_out">Signing out…</string>
     <string name="google_only_provider">MyStuff uses your Google Account only to identify you and protect your Household.</string>
     <string name="about">About</string>
     <string name="about_title">About MyStuff</string>
@@ -21,6 +22,9 @@
     <string name="household_name">Household name</string>
     <string name="household_name_supporting_text">1–100 characters</string>
     <string name="creating_household">Creating Household…</string>
+    <string name="opening_household">Opening your Household…</string>
+    <string name="open_household_failed">Couldn’t open your Household</string>
+    <string name="retry">Retry</string>
     <string name="accept_invitation_title">Join this Household</string>
     <string name="accept_invitation_body">Try this invitation again, or create a Household of your own.</string>
     <string name="accepting_invitation">Checking your Google Account and joining the Household…</string>

@@ -15,31 +15,32 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.ViewModelProvider
 import com.azhidkov.mystuff.ui.HouseholdEntryScreen
 import com.azhidkov.mystuff.ui.HouseholdRootScreen
 import com.azhidkov.mystuff.ui.ItemPhotoLoader
+import com.azhidkov.mystuff.ui.OpeningHouseholdScreen
 import com.azhidkov.mystuff.ui.SignInScreen
-import com.azhidkov.mystuff.ui.itemPhotoBitmapLoader
 import com.azhidkov.mystuff.ui.theme.MyStuffTheme
 import java.io.File
 
 class MainActivity : ComponentActivity() {
-    private var closeSession: () -> Unit = {}
+    private lateinit var sessionViewModel: SessionViewModel
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        val authenticationGateway = FirebaseAuthenticationGateway(this)
-        val itemPhotoLoader = itemPhotoBitmapLoader(applicationContext)
-        val sessionController = SessionController(
-            authenticationGateway = authenticationGateway,
-            householdGateway = FirebaseHouseholdGateway(),
-            invitationAcceptanceGateway = FirebaseInvitationAcceptanceGateway(),
-            invitationId = invitationIdFromLink(intent?.dataString),
-            onIdentityChanged = itemPhotoLoader::onSessionChanged,
-        )
-        closeSession = sessionController::close
+        sessionViewModel = ViewModelProvider(
+            this,
+            SessionViewModel.Factory(
+                applicationContext = applicationContext,
+                invitationId = invitationIdFromLink(intent?.dataString),
+            ),
+        )[SessionViewModel::class.java]
+        sessionViewModel.attach(this)
+        val sessionController = sessionViewModel.controller
+        val itemPhotoLoader = sessionViewModel.itemPhotoLoader
         val invitationGateway = FirebaseInvitationGateway()
         val inventoryGateway = FirebaseInventoryGateway()
         val itemAttachmentGateway = FirebaseItemAttachmentGateway()
@@ -68,6 +69,7 @@ class MainActivity : ComponentActivity() {
                     onSignIn = sessionController::signIn,
                     onSignOut = sessionController::signOut,
                     onCreateHousehold = sessionController::createHousehold,
+                    onRetryOpeningHousehold = sessionController::retryOpeningHousehold,
                     onRetryInvitationAcceptance = sessionController::retryInvitationAcceptance,
                     invitationGateway = invitationGateway,
                     inventoryGateway = inventoryGateway,
@@ -82,7 +84,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        closeSession()
+        sessionViewModel.detach(this)
         super.onDestroy()
     }
 }
@@ -92,6 +94,7 @@ private fun MyStuffApp(
     onSignIn: () -> Unit,
     onSignOut: () -> Unit,
     onCreateHousehold: (String) -> Unit,
+    onRetryOpeningHousehold: () -> Unit,
     onRetryInvitationAcceptance: () -> Unit,
     invitationGateway: InvitationGateway,
     inventoryGateway: InventoryGateway,
@@ -111,11 +114,19 @@ private fun MyStuffApp(
                 onSignIn = onSignIn,
             )
 
+            AppDestination.OpeningHousehold -> OpeningHouseholdScreen(
+                opening = state.operation == SessionOperation.OpeningHousehold,
+                errorMessage = state.errorMessage,
+                onRetry = onRetryOpeningHousehold,
+                onSignOut = onSignOut,
+            )
+
             AppDestination.HouseholdEntry -> HouseholdEntryScreen(
                 identity = requireNotNull(state.identity),
-                operationInProgress = state.operationInProgress,
+                operation = state.operation,
                 householdNameError = state.householdNameError,
                 errorMessage = state.errorMessage,
+                invitationErrorMessage = state.invitationErrorMessage,
                 pendingInvitationId = state.pendingInvitationId,
                 onCreateHousehold = onCreateHousehold,
                 onRetryInvitationAcceptance = onRetryInvitationAcceptance,
@@ -165,7 +176,7 @@ private fun MyStuffApp(
                 HouseholdRootScreen(
                     inventoryState = inventoryState,
                     invitationState = invitationState,
-                    signOutInProgress = state.operationInProgress,
+                    signOutInProgress = state.operation == SessionOperation.SigningOut,
                     sessionMessage = state.errorMessage,
                     onCreateInvitation = invitationController::create,
                     onRevokeInvitation = invitationController::revoke,

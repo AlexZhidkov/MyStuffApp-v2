@@ -25,6 +25,16 @@ class FirebaseHouseholdGatewayTest {
         assertEquals("member-1", store.createdByMemberId)
         assertEquals(
             mapOf(
+                "householdId" to "household-1",
+                "role" to "owner",
+                "householdName" to "Our Home",
+                "ownerMemberId" to "member-1",
+                "useTags" to false,
+            ),
+            store.createdDocuments?.membership,
+        )
+        assertEquals(
+            mapOf(
                 "name" to "Our Home",
                 "ownerMemberId" to "member-1",
                 "rootItemId" to "household-1",
@@ -56,11 +66,11 @@ class FirebaseHouseholdGatewayTest {
     }
 
     @Test
-    fun `returning Member is reopened from persisted Household documents`() {
-        val documents = householdDocuments()
+    fun `returning Member is reopened from one bootstrap document`() {
+        val bootstrap = householdBootstrap()
         val store = FakeHouseholdDocumentStore(
-            householdIdForMember = "household-1",
-            loadedDocuments = documents,
+            cachedBootstrap = Result.success(bootstrap),
+            serverBootstrap = Result.success(bootstrap),
         )
         val gateway = FirebaseHouseholdGateway(store)
         var result: Result<Household?>? = null
@@ -83,17 +93,20 @@ class FirebaseHouseholdGatewayTest {
             result?.getOrThrow(),
         )
         assertEquals(false, result?.getOrThrow()?.useTags)
+        assertEquals(
+            listOf(HouseholdDocumentSource.Cache, HouseholdDocumentSource.Server),
+            store.loadedSources,
+        )
     }
 
     @Test
     fun `persisted useTags enables Tags for the Household`() {
-        val documents = householdDocuments().let { existing ->
-            existing.copy(household = existing.household + ("useTags" to true))
+        val bootstrap = householdBootstrap().let { existing ->
+            existing.copy(data = existing.data + ("useTags" to true))
         }
         val gateway = FirebaseHouseholdGateway(
             FakeHouseholdDocumentStore(
-                householdIdForMember = "household-1",
-                loadedDocuments = documents,
+                serverBootstrap = Result.success(bootstrap),
             ),
         )
         var result: Result<Household?>? = null
@@ -112,33 +125,131 @@ class FirebaseHouseholdGatewayTest {
 
         assertNull(result?.getOrThrow())
     }
+
+    @Test
+    fun `cached membership is not opened until the server confirms it is current`() {
+        val store = FakeHouseholdDocumentStore(
+            cachedBootstrap = Result.success(householdBootstrap()),
+            serverBootstrap = Result.success(null),
+        )
+        val gateway = FirebaseHouseholdGateway(store)
+        var result: Result<Household?>? = null
+
+        gateway.findForMember("member-1") { result = it }
+
+        assertNull(result?.getOrThrow())
+        assertEquals(
+            listOf(HouseholdDocumentSource.Cache, HouseholdDocumentSource.Server),
+            store.loadedSources,
+        )
+    }
+
+    @Test
+    fun `cache miss remains unresolved until the server confirms no membership`() {
+        val store = FakeHouseholdDocumentStore(completeServerImmediately = false)
+        val gateway = FirebaseHouseholdGateway(store)
+        var callbackCount = 0
+        var result: Result<Household?>? = null
+
+        gateway.findForMember("member-1") {
+            callbackCount += 1
+            result = it
+        }
+
+        assertEquals(0, callbackCount)
+
+        store.completeServer(Result.success(null))
+
+        assertEquals(1, callbackCount)
+        assertNull(result?.getOrThrow())
+    }
+
+    @Test
+    fun `legacy membership reopens once and is upgraded to a bootstrap document`() {
+        val store = FakeHouseholdDocumentStore(
+            serverBootstrap = Result.success(
+                HouseholdBootstrapDocument(
+                    memberId = "member-1",
+                    data = mapOf(
+                        "householdId" to "household-1",
+                        "role" to "owner",
+                    ),
+                ),
+            ),
+            legacyHousehold = Result.success(
+                mapOf(
+                    "name" to "Our Home",
+                    "ownerMemberId" to "member-1",
+                    "useTags" to false,
+                ),
+            ),
+        )
+        val gateway = FirebaseHouseholdGateway(store)
+        var result: Result<Household?>? = null
+
+        gateway.findForMember("member-1") { result = it }
+
+        assertEquals("Our Home", result?.getOrThrow()?.rootItem?.name)
+        assertEquals(
+            householdBootstrap().data,
+            store.savedBootstrap?.data,
+        )
+    }
 }
 
 private class FakeHouseholdDocumentStore(
     private val householdId: String = "unused-household",
     override val serverTimestamp: Any = Any(),
-    private val householdIdForMember: String? = null,
-    private val loadedDocuments: HouseholdDocuments? = null,
+    private val cachedBootstrap: Result<HouseholdBootstrapDocument?> = Result.success(null),
+    private val serverBootstrap: Result<HouseholdBootstrapDocument?> = Result.success(null),
+    private val completeServerImmediately: Boolean = true,
+    private val legacyHousehold: Result<Map<String, Any?>> =
+        Result.failure(IllegalStateException("No legacy Household configured")),
 ) : HouseholdDocumentStore {
+    private var pendingServer: ((Result<HouseholdBootstrapDocument?>) -> Unit)? = null
+    val loadedSources = mutableListOf<HouseholdDocumentSource>()
     var createdByMemberId: String? = null
         private set
     var createdDocuments: HouseholdDocuments? = null
         private set
+    var savedBootstrap: HouseholdBootstrapDocument? = null
+        private set
 
     override fun newHouseholdId(): String = householdId
 
-    override fun findHouseholdIdForMember(
+    override fun loadBootstrap(
         memberId: String,
-        onResult: (Result<String?>) -> Unit,
+        source: HouseholdDocumentSource,
+        onResult: (Result<HouseholdBootstrapDocument?>) -> Unit,
     ) {
-        onResult(Result.success(householdIdForMember))
+        loadedSources += source
+        if (source == HouseholdDocumentSource.Cache) {
+            onResult(cachedBootstrap)
+        } else if (completeServerImmediately) {
+            onResult(serverBootstrap)
+        } else {
+            pendingServer = onResult
+        }
     }
 
-    override fun loadHousehold(
+    fun completeServer(result: Result<HouseholdBootstrapDocument?>) {
+        requireNotNull(pendingServer).invoke(result)
+        pendingServer = null
+    }
+
+    override fun loadHouseholdSummary(
         householdId: String,
-        onResult: (Result<HouseholdDocuments>) -> Unit,
+        onResult: (Result<Map<String, Any?>>) -> Unit,
     ) {
-        onResult(Result.success(requireNotNull(loadedDocuments)))
+        onResult(legacyHousehold)
+    }
+
+    override fun saveBootstrap(
+        bootstrap: HouseholdBootstrapDocument,
+        onResult: (Result<Unit>) -> Unit,
+    ) {
+        savedBootstrap = bootstrap
+        onResult(Result.success(Unit))
     }
 
     override fun createHousehold(
@@ -152,26 +263,13 @@ private class FakeHouseholdDocumentStore(
     }
 }
 
-private fun householdDocuments(): HouseholdDocuments = HouseholdDocuments(
-    householdId = "household-1",
-    household = mapOf(
-        "name" to "Our Home",
-        "ownerMemberId" to "member-1",
-        "rootItemId" to "household-1",
-        "createdAt" to Any(),
-    ),
-    rootItem = mapOf(
+private fun householdBootstrap(): HouseholdBootstrapDocument = HouseholdBootstrapDocument(
+    memberId = "member-1",
+    data = mapOf(
         "householdId" to "household-1",
-        "name" to "Our Home",
-        "parentItemId" to null,
-        "photoUrl" to null,
-        "description" to null,
-        "tags" to emptyList<String>(),
-        "createdAt" to Any(),
-        "updatedAt" to Any(),
-        "createdById" to "member-1",
-        "createdByDisplayName" to "Alex",
-        "updatedById" to "member-1",
-        "updatedByDisplayName" to "Alex",
+        "role" to "owner",
+        "householdName" to "Our Home",
+        "ownerMemberId" to "member-1",
+        "useTags" to false,
     ),
 )

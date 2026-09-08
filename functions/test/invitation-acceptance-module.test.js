@@ -14,7 +14,7 @@ const now = new Date("2026-09-03T10:00:00Z");
 test("the intended Google Account accepts a pending invitation once", async () => {
   const database = fakeDatabase({
     "invitations/invitation-1": invitation(),
-    "households/household-1": { name: "Our Home" },
+    "households/household-1": household(),
   });
   const acceptance = createInvitationAcceptanceModule({
     database,
@@ -31,6 +31,9 @@ test("the intended Google Account accepts a pending invitation once", async () =
   assert.deepEqual(database.data("memberships/member-2"), {
     householdId: "household-1",
     role: "member",
+    householdName: "Our Home",
+    ownerMemberId: "member-1",
+    useTags: false,
   });
   assert.deepEqual(database.data("invitations/invitation-1"), {
     ...invitation(),
@@ -91,7 +94,7 @@ test("invitation acceptance rejects expired and non-pending invitations", async 
 test("incomplete invitation data is rejected without creating membership", async () => {
   const database = fakeDatabase({
     "invitations/invitation-1": invitation({ expiresAt: "not-a-timestamp" }),
-    "households/household-1": { name: "Our Home" },
+    "households/household-1": household(),
   });
   const acceptance = createInvitationAcceptanceModule({ database, clock: fixedClock() });
 
@@ -111,7 +114,7 @@ test("unknown invitations and an existing Household membership are rejected", as
 
   const database = fakeDatabase({
     "invitations/invitation-1": invitation(),
-    "households/household-1": { name: "Our Home" },
+    "households/household-1": household(),
     "memberships/member-2": { householdId: "household-2", role: "member" },
   });
   const acceptance = createInvitationAcceptanceModule({ database, clock: fixedClock() });
@@ -124,7 +127,7 @@ test("unknown invitations and an existing Household membership are rejected", as
 
 function acceptanceFor({ invitationDocument }) {
   const documents = {
-    "households/household-1": { name: "Our Home" },
+    "households/household-1": household(),
   };
   if (invitationDocument !== undefined) {
     documents["invitations/invitation-1"] = invitationDocument;
@@ -152,6 +155,15 @@ function invitation(overrides = {}) {
     status: "pending",
     replacesInvitationId: null,
     replacedByInvitationId: null,
+    ...overrides,
+  };
+}
+
+function household(overrides = {}) {
+  return {
+    name: "Our Home",
+    ownerMemberId: "member-1",
+    useTags: false,
     ...overrides,
   };
 }

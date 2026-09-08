@@ -21,8 +21,17 @@ interface AuthenticationGateway {
 
 enum class AppDestination {
     SignIn,
+    OpeningHousehold,
     HouseholdEntry,
     HouseholdRoot,
+}
+
+enum class SessionOperation {
+    SigningIn,
+    OpeningHousehold,
+    JoiningHousehold,
+    CreatingHousehold,
+    SigningOut,
 }
 
 data class SessionUiState(
@@ -30,8 +39,9 @@ data class SessionUiState(
     val identity: AuthenticatedIdentity? = null,
     val household: Household? = null,
     val householdNameError: String? = null,
-    val operationInProgress: Boolean = false,
+    val operation: SessionOperation? = null,
     val errorMessage: String? = null,
+    val invitationErrorMessage: String? = null,
     val pendingInvitationId: String? = null,
 )
 
@@ -58,11 +68,11 @@ class SessionController(
     }
 
     fun signIn() {
-        if (state.operationInProgress) return
+        if (state.operation != null) return
 
         updateState(
             state.copy(
-                operationInProgress = true,
+                operation = SessionOperation.SigningIn,
                 errorMessage = null,
             ),
         )
@@ -106,7 +116,7 @@ class SessionController(
             SessionUiState(
                 destination = AppDestination.HouseholdEntry,
                 identity = identity,
-                operationInProgress = true,
+                operation = SessionOperation.JoiningHousehold,
                 pendingInvitationId = invitationId,
             ),
         )
@@ -127,7 +137,7 @@ class SessionController(
     fun retryInvitationAcceptance() {
         val identity = state.identity ?: return
         val invitationId = state.pendingInvitationId ?: return
-        if (state.operationInProgress) return
+        if (state.operation != null) return
         acceptInvitation(identity, invitationId)
     }
 
@@ -138,11 +148,11 @@ class SessionController(
     ) {
         updateState(
             SessionUiState(
-                destination = AppDestination.HouseholdEntry,
+                destination = AppDestination.OpeningHousehold,
                 identity = identity,
-                operationInProgress = true,
+                operation = SessionOperation.OpeningHousehold,
                 pendingInvitationId = pendingInvitationId,
-                errorMessage = invitationError,
+                invitationErrorMessage = invitationError,
             ),
         )
         householdGateway.findForMember(identity.id) { result ->
@@ -157,17 +167,17 @@ class SessionController(
                         identity = identity,
                         household = household,
                         pendingInvitationId = pendingInvitationId,
-                        errorMessage = invitationError,
+                        invitationErrorMessage = invitationError,
                     ),
                 )
             }.onFailure { failure ->
                 updateState(
                     SessionUiState(
-                        destination = AppDestination.HouseholdEntry,
+                        destination = AppDestination.OpeningHousehold,
                         identity = identity,
-                        errorMessage = invitationError
-                            ?: failure.message
-                            ?: "Couldn't open your Household.",
+                        errorMessage = failure.message?.takeIf(String::isNotBlank)
+                            ?: "Please try again.",
+                        invitationErrorMessage = invitationError,
                         pendingInvitationId = pendingInvitationId,
                     ),
                 )
@@ -175,14 +185,24 @@ class SessionController(
         }
     }
 
+    fun retryOpeningHousehold() {
+        val identity = state.identity ?: return
+        if (state.destination != AppDestination.OpeningHousehold || state.operation != null) return
+        openHouseholdFor(
+            identity = identity,
+            pendingInvitationId = state.pendingInvitationId,
+            invitationError = state.invitationErrorMessage,
+        )
+    }
+
     fun signOut() {
-        if (state.operationInProgress) return
+        if (state.operation != null) return
 
         publishIdentity(null)
         updateState(
             SessionUiState(
                 destination = AppDestination.SignIn,
-                operationInProgress = true,
+                operation = SessionOperation.SigningOut,
             ),
         )
         authenticationGateway.signOut { result ->
@@ -197,7 +217,11 @@ class SessionController(
 
     fun createHousehold(rawName: String) {
         val identity = state.identity ?: return
-        if (state.operationInProgress || state.household != null) return
+        if (
+            state.operation != null ||
+            state.household != null ||
+            state.destination != AppDestination.HouseholdEntry
+        ) return
 
         val name = rawName.trim(Char::isWhitespace)
         val nameError = when {
@@ -213,7 +237,7 @@ class SessionController(
 
         updateState(
             state.copy(
-                operationInProgress = true,
+                operation = SessionOperation.CreatingHousehold,
                 errorMessage = null,
                 householdNameError = null,
             ),
@@ -230,7 +254,7 @@ class SessionController(
             }.onFailure { failure ->
                 updateState(
                     state.copy(
-                        operationInProgress = false,
+                        operation = null,
                         errorMessage = failure.message ?: "Couldn't create your Household.",
                     ),
                 )
@@ -288,8 +312,9 @@ class SessionController(
                 )
             } else {
                 SessionUiState(
-                    destination = AppDestination.HouseholdEntry,
+                    destination = AppDestination.OpeningHousehold,
                     identity = identity,
+                    operation = SessionOperation.OpeningHousehold,
                     pendingInvitationId = invitationId,
                 )
             }

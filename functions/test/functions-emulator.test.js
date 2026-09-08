@@ -85,6 +85,7 @@ test(
       name: "Invitation Home",
       ownerMemberId: "invitation-owner",
       rootItemId: invitationHouseholdId,
+      useTags: false,
     });
     await database
       .doc(`households/${invitationHouseholdId}/items/${invitationHouseholdId}`)
@@ -128,6 +129,9 @@ test(
       assert.deepEqual(membership.data(), {
         householdId: invitationHouseholdId,
         role: "member",
+        householdName: "Invitation Home",
+        ownerMemberId: "invitation-owner",
+        useTags: false,
       });
       assert.equal(invitation.data()?.status, "accepted");
       assert.equal(invitation.data()?.acceptedByMemberId, invitedMemberId);

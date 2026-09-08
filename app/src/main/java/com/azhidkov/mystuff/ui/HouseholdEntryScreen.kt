@@ -1,8 +1,6 @@
 package com.azhidkov.mystuff.ui
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -10,7 +8,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -35,14 +32,16 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.azhidkov.mystuff.AuthenticatedIdentity
 import com.azhidkov.mystuff.R
+import com.azhidkov.mystuff.SessionOperation
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HouseholdEntryScreen(
     identity: AuthenticatedIdentity,
-    operationInProgress: Boolean,
+    operation: SessionOperation?,
     householdNameError: String?,
     errorMessage: String?,
+    invitationErrorMessage: String?,
     pendingInvitationId: String?,
     onCreateHousehold: (String) -> Unit,
     onRetryInvitationAcceptance: () -> Unit,
@@ -62,7 +61,7 @@ fun HouseholdEntryScreen(
                 },
                 actions = {
                     AppBarOverflowMenu(
-                        enabled = !operationInProgress,
+                        enabled = operation == null,
                         onSignOut = onSignOut,
                     )
                 },
@@ -80,6 +79,9 @@ fun HouseholdEntryScreen(
                 .padding(horizontal = 24.dp)
                 .widthIn(max = 720.dp),
         ) {
+            if (operation != null) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
             Spacer(Modifier.height(32.dp))
             Text(
                 text = stringResource(
@@ -100,7 +102,7 @@ fun HouseholdEntryScreen(
                 Spacer(Modifier.height(12.dp))
                 Text(
                     text = stringResource(
-                        if (operationInProgress) {
+                        if (operation == SessionOperation.JoiningHousehold) {
                             R.string.accepting_invitation
                         } else {
                             R.string.accept_invitation_body
@@ -109,17 +111,17 @@ fun HouseholdEntryScreen(
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (errorMessage != null) {
+                if (invitationErrorMessage != null) {
                     Spacer(Modifier.height(12.dp))
                     Text(
-                        text = errorMessage,
+                        text = invitationErrorMessage,
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     Spacer(Modifier.height(12.dp))
                     Button(
                         onClick = onRetryInvitationAcceptance,
-                        enabled = !operationInProgress,
+                        enabled = operation == null,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text(stringResource(R.string.retry_invitation))
@@ -127,58 +129,55 @@ fun HouseholdEntryScreen(
                 }
                 Spacer(Modifier.height(32.dp))
             }
-            Text(
-                text = stringResource(R.string.create_household_title),
-                style = MaterialTheme.typography.headlineLarge,
-                fontWeight = FontWeight.Bold,
-            )
-            Spacer(Modifier.height(12.dp))
-            Text(
-                text = stringResource(R.string.create_household_body),
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(28.dp))
-            OutlinedTextField(
-                value = householdName,
-                onValueChange = { householdName = it },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !operationInProgress,
-                label = { Text(stringResource(R.string.household_name)) },
-                supportingText = {
-                    Text(
-                        householdNameError
-                            ?: stringResource(R.string.household_name_supporting_text),
-                    )
-                },
-                isError = householdNameError != null,
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(
-                    onDone = { onCreateHousehold(householdName) },
-                ),
-            )
-            if (errorMessage != null && pendingInvitationId == null) {
+            if (operation != SessionOperation.JoiningHousehold) {
+                Text(
+                    text = stringResource(R.string.create_household_title),
+                    style = MaterialTheme.typography.headlineLarge,
+                    fontWeight = FontWeight.Bold,
+                )
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    text = errorMessage,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodyMedium,
+                    text = stringResource(R.string.create_household_body),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            }
-            Spacer(Modifier.height(20.dp))
-            Button(
-                onClick = { onCreateHousehold(householdName) },
-                enabled = !operationInProgress,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    if (operationInProgress) {
-                        LinearProgressIndicator()
-                    }
+                Spacer(Modifier.height(28.dp))
+                OutlinedTextField(
+                    value = householdName,
+                    onValueChange = { householdName = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = operation == null,
+                    label = { Text(stringResource(R.string.household_name)) },
+                    supportingText = {
+                        Text(
+                            householdNameError
+                                ?: stringResource(R.string.household_name_supporting_text),
+                        )
+                    },
+                    isError = householdNameError != null,
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(
+                        onDone = { onCreateHousehold(householdName) },
+                    ),
+                )
+                if (errorMessage != null && pendingInvitationId == null) {
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text = errorMessage,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+                Spacer(Modifier.height(20.dp))
+                Button(
+                    onClick = { onCreateHousehold(householdName) },
+                    enabled = operation == null,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
                     Text(
                         stringResource(
-                            if (operationInProgress) {
+                            if (operation == SessionOperation.CreatingHousehold) {
                                 R.string.creating_household
                             } else {
                                 R.string.create_household
@@ -186,13 +185,13 @@ fun HouseholdEntryScreen(
                         ),
                     )
                 }
+                Spacer(Modifier.height(28.dp))
+                Text(
+                    text = stringResource(R.string.accept_invitation_link_prompt),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
-            Spacer(Modifier.height(28.dp))
-            Text(
-                text = stringResource(R.string.accept_invitation_link_prompt),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
             Spacer(Modifier.weight(1f))
             Text(
                 text = identity.email.orEmpty(),

@@ -263,6 +263,40 @@ service cloud.firestore {
         && existsAfter(rootItemPath(householdId));
     }
 
+    function validOwnerMembershipCreate(memberId) {
+      let householdId = request.resource.data.householdId;
+      let household = getAfter(householdPath(householdId)).data;
+      return request.resource.data.keys().hasOnly([
+          'householdId', 'role', 'householdName', 'ownerMemberId', 'useTags'
+        ])
+        && householdId is string
+        && request.resource.data.role == 'owner'
+        && request.resource.data.householdName == household.name
+        && request.resource.data.ownerMemberId == household.ownerMemberId
+        && request.resource.data.ownerMemberId == memberId
+        && request.resource.data.useTags == household.useTags
+        && household.useTags is bool
+        && existsAfter(rootItemPath(householdId));
+    }
+
+    function validMembershipBootstrapUpgrade(memberId) {
+      let householdId = resource.data.householdId;
+      let household = get(householdPath(householdId)).data;
+      return resource.data.keys().hasOnly(['householdId', 'role'])
+        && request.resource.data.keys().hasOnly([
+          'householdId', 'role', 'householdName', 'ownerMemberId', 'useTags'
+        ])
+        && request.resource.data.householdId == householdId
+        && request.resource.data.role == resource.data.role
+        && (resource.data.role == 'owner' || resource.data.role == 'member')
+        && request.resource.data.householdName == household.name
+        && request.resource.data.ownerMemberId == household.ownerMemberId
+        && (resource.data.role == 'owner') == (household.ownerMemberId == memberId)
+        && request.resource.data.useTags == household.useTags
+        && household.useTags is bool
+        && exists(rootItemPath(householdId));
+    }
+
     function validRootItemCreate(householdId, itemId) {
       let household = getAfter(householdPath(householdId)).data;
       return itemId == householdId
@@ -354,13 +388,11 @@ service cloud.firestore {
       allow read: if signedIn() && request.auth.uid == memberId;
       allow create: if signedIn()
         && request.auth.uid == memberId
-        && request.resource.data.keys().hasOnly(['householdId', 'role'])
-        && request.resource.data.householdId is string
-        && request.resource.data.role == 'owner'
-        && getAfter(householdPath(request.resource.data.householdId))
-          .data.ownerMemberId == memberId
-        && existsAfter(rootItemPath(request.resource.data.householdId));
-      allow update, delete: if false;
+        && validOwnerMembershipCreate(memberId);
+      allow update: if signedIn()
+        && request.auth.uid == memberId
+        && validMembershipBootstrapUpgrade(memberId);
+      allow delete: if false;
     }
 
     match /invitations/{invitationId} {

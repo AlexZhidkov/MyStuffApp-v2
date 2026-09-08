@@ -16,12 +16,22 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
 import kotlinx.coroutines.launch
+import java.lang.ref.WeakReference
 
 class FirebaseAuthenticationGateway(
-    private val activity: ComponentActivity,
     private val firebaseAuth: FirebaseAuth = FirebaseAuth.getInstance(),
-    private val credentialManager: CredentialManager = CredentialManager.create(activity),
 ) : AuthenticationGateway {
+    private var activityReference = WeakReference<ComponentActivity>(null)
+
+    fun attach(activity: ComponentActivity) {
+        activityReference = WeakReference(activity)
+    }
+
+    fun detach(activity: ComponentActivity) {
+        if (activityReference.get() === activity) {
+            activityReference.clear()
+        }
+    }
 
     override val currentIdentity: AuthenticatedIdentity?
         get() {
@@ -40,11 +50,17 @@ class FirebaseAuthenticationGateway(
     }
 
     override fun signIn(onResult: (Result<AuthenticatedIdentity>) -> Unit) {
+        val activity = activityReference.get()
+        if (activity == null) {
+            onResult(Result.failure(GoogleAuthenticationException("Google sign-in is unavailable.")))
+            return
+        }
+        val credentialManager = CredentialManager.create(activity)
         activity.lifecycleScope.launch {
             val credential = try {
                 credentialManager.getCredential(
                     context = activity,
-                    request = googleCredentialRequest(),
+                    request = googleCredentialRequest(activity),
                 ).credential
             } catch (_: GetCredentialCancellationException) {
                 onResult(
@@ -113,6 +129,12 @@ class FirebaseAuthenticationGateway(
                 return
             }
 
+        val activity = activityReference.get()
+        if (activity == null) {
+            onResult(Result.success(Unit))
+            return
+        }
+        val credentialManager = CredentialManager.create(activity)
         activity.lifecycleScope.launch {
             onResult(
                 runCatching {
@@ -122,7 +144,7 @@ class FirebaseAuthenticationGateway(
         }
     }
 
-    private fun googleCredentialRequest(): GetCredentialRequest {
+    private fun googleCredentialRequest(activity: ComponentActivity): GetCredentialRequest {
         val googleIdOption = GetGoogleIdOption.Builder()
             .setFilterByAuthorizedAccounts(false)
             .setServerClientId(activity.getString(R.string.default_web_client_id))

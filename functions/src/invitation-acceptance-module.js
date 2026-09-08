@@ -43,10 +43,21 @@ export function createInvitationAcceptanceModule({
         const householdReference = database.doc(`households/${householdId}`);
         const householdSnapshot = await transaction.get(householdReference);
         if (!householdSnapshot.exists) throw new UnknownInvitationError();
+        const household = householdSnapshot.data();
+        if (
+          typeof household?.name !== "string" ||
+          typeof household?.ownerMemberId !== "string" ||
+          typeof household?.useTags !== "boolean"
+        ) {
+          throw new UnknownInvitationError();
+        }
 
         transaction.create(membershipReference, {
           householdId,
           role: "member",
+          householdName: household.name,
+          ownerMemberId: household.ownerMemberId,
+          useTags: household.useTags,
         });
         transaction.update(invitationReference, {
           status: "accepted",

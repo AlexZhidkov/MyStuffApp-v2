@@ -2,6 +2,7 @@ package com.azhidkov.mystuff
 
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.Source
 
 class FirebaseHouseholdGateway internal constructor(
     private val store: HouseholdDocumentStore,
@@ -12,18 +13,48 @@ class FirebaseHouseholdGateway internal constructor(
         memberId: String,
         onResult: (Result<Household?>) -> Unit,
     ) {
-        store.findHouseholdIdForMember(memberId) { membershipResult ->
-            membershipResult.onSuccess { householdId ->
-                if (householdId == null) {
+        var cachedHousehold: Household? = null
+        // A cached membership may have been revoked, so it is only reused after the server
+        // confirms the same summary. Both requests start immediately to avoid delaying startup.
+        store.loadBootstrap(memberId, HouseholdDocumentSource.Cache) { result ->
+            cachedHousehold = result.getOrNull()?.let { bootstrap ->
+                runCatching(bootstrap::toHousehold).getOrNull()
+            }
+        }
+        store.loadBootstrap(memberId, HouseholdDocumentSource.Server) { result ->
+            result.onSuccess { bootstrap ->
+                if (bootstrap == null) {
                     onResult(Result.success(null))
-                    return@onSuccess
-                }
-                store.loadHousehold(householdId) { documentsResult ->
-                    onResult(documentsResult.mapCatching(HouseholdDocuments::toHousehold))
+                } else if (bootstrap.isLegacy()) {
+                    reopenLegacyMembership(bootstrap, onResult)
+                } else {
+                    onResult(
+                        runCatching(bootstrap::toHousehold).map { authoritative ->
+                            cachedHousehold?.takeIf { it == authoritative } ?: authoritative
+                        },
+                    )
                 }
             }.onFailure { failure ->
                 onResult(Result.failure(failure))
             }
+        }
+    }
+
+    private fun reopenLegacyMembership(
+        legacy: HouseholdBootstrapDocument,
+        onResult: (Result<Household?>) -> Unit,
+    ) {
+        val householdId = runCatching { legacy.data.string(HOUSEHOLD_ID) }
+            .getOrElse {
+                onResult(Result.failure(it))
+                return
+            }
+        store.loadHouseholdSummary(householdId) { result ->
+            val upgradedResult = result.mapCatching(legacy::withHouseholdSummary)
+            upgradedResult.onSuccess { upgraded ->
+                store.saveBootstrap(upgraded) {}
+            }
+            onResult(upgradedResult.mapCatching(HouseholdBootstrapDocument::toHousehold))
         }
     }
 
@@ -47,6 +78,7 @@ class FirebaseHouseholdGateway internal constructor(
 
 internal data class HouseholdDocuments(
     val householdId: String,
+    val membership: Map<String, Any?>,
     val household: Map<String, Any?>,
     val rootItem: Map<String, Any?>,
 ) {
@@ -81,19 +113,72 @@ internal data class HouseholdDocuments(
     }
 }
 
+internal data class HouseholdBootstrapDocument(
+    val memberId: String,
+    val data: Map<String, Any?>,
+) {
+    fun isLegacy(): Boolean =
+        HOUSEHOLD_NAME !in data && OWNER_MEMBER_ID !in data && USE_TAGS !in data
+
+    fun withHouseholdSummary(household: Map<String, Any?>): HouseholdBootstrapDocument = copy(
+        data = data + mapOf(
+            HOUSEHOLD_NAME to household.string(NAME),
+            OWNER_MEMBER_ID to household.string(OWNER_MEMBER_ID),
+            USE_TAGS to household.boolean(USE_TAGS),
+        ),
+    )
+
+    fun toHousehold(): Household {
+        val role = data.string(ROLE)
+        val householdId = data.string(HOUSEHOLD_ID)
+        val householdName = data.string(HOUSEHOLD_NAME)
+        val ownerMemberId = data.string(OWNER_MEMBER_ID)
+        if (
+            role != OWNER && role != MEMBER ||
+            (role == OWNER) != (memberId == ownerMemberId)
+        ) {
+            throw HouseholdDataException()
+        }
+        return Household(
+            id = householdId,
+            ownerMemberId = ownerMemberId,
+            useTags = data.boolean(USE_TAGS),
+            rootItem = Item(
+                id = householdId,
+                name = householdName,
+                parentItemId = null,
+                photoUrl = null,
+                description = null,
+                tags = emptyList(),
+            ),
+        )
+    }
+}
+
+internal enum class HouseholdDocumentSource {
+    Cache,
+    Server,
+}
+
 internal interface HouseholdDocumentStore {
     val serverTimestamp: Any
 
     fun newHouseholdId(): String
 
-    fun findHouseholdIdForMember(
+    fun loadBootstrap(
         memberId: String,
-        onResult: (Result<String?>) -> Unit,
+        source: HouseholdDocumentSource,
+        onResult: (Result<HouseholdBootstrapDocument?>) -> Unit,
     )
 
-    fun loadHousehold(
+    fun loadHouseholdSummary(
         householdId: String,
-        onResult: (Result<HouseholdDocuments>) -> Unit,
+        onResult: (Result<Map<String, Any?>>) -> Unit,
+    )
+
+    fun saveBootstrap(
+        bootstrap: HouseholdBootstrapDocument,
+        onResult: (Result<Unit>) -> Unit,
     )
 
     fun createHousehold(
@@ -111,57 +196,62 @@ private class FirestoreHouseholdDocumentStore(
 
     override fun newHouseholdId(): String = firestore.collection(HOUSEHOLDS).document().id
 
-    override fun findHouseholdIdForMember(
+    override fun loadBootstrap(
         memberId: String,
-        onResult: (Result<String?>) -> Unit,
+        source: HouseholdDocumentSource,
+        onResult: (Result<HouseholdBootstrapDocument?>) -> Unit,
     ) {
-        firestore.collection(MEMBERSHIPS).document(memberId).get()
+        val firestoreSource = when (source) {
+            HouseholdDocumentSource.Cache -> Source.CACHE
+            HouseholdDocumentSource.Server -> Source.SERVER
+        }
+        firestore.collection(MEMBERSHIPS).document(memberId).get(firestoreSource)
             .addOnSuccessListener { membership ->
                 onResult(
                     if (!membership.exists()) {
                         Result.success(null)
                     } else {
-                        runCatching {
-                            membership.getString(HOUSEHOLD_ID) ?: throw HouseholdDataException()
-                        }
+                        Result.success(
+                            HouseholdBootstrapDocument(
+                                memberId = memberId,
+                                data = membership.data.orEmpty(),
+                            ),
+                        )
                     },
                 )
             }
             .addOnFailureListener { failure -> onResult(Result.failure(failure)) }
     }
 
-    override fun loadHousehold(
+    override fun loadHouseholdSummary(
         householdId: String,
-        onResult: (Result<HouseholdDocuments>) -> Unit,
+        onResult: (Result<Map<String, Any?>>) -> Unit,
     ) {
-        val householdReference = firestore.collection(HOUSEHOLDS).document(householdId)
-        householdReference.get()
-            .addOnSuccessListener { householdDocument ->
-                val householdData = householdDocument.data
-                val rootItemId = householdDocument.getString(ROOT_ITEM_ID)
-                if (householdData == null || rootItemId == null) {
-                    onResult(Result.failure(HouseholdDataException()))
-                    return@addOnSuccessListener
-                }
-                householdReference.collection(ITEMS).document(rootItemId).get()
-                    .addOnSuccessListener { rootItemDocument ->
-                        val rootItemData = rootItemDocument.data
-                        onResult(
-                            if (rootItemData == null) {
-                                Result.failure(HouseholdDataException())
-                            } else {
-                                Result.success(
-                                    HouseholdDocuments(
-                                        householdId = householdId,
-                                        household = householdData,
-                                        rootItem = rootItemData,
-                                    ),
-                                )
-                            },
-                        )
-                    }
-                    .addOnFailureListener { failure -> onResult(Result.failure(failure)) }
+        firestore.collection(HOUSEHOLDS).document(householdId).get(Source.SERVER)
+            .addOnSuccessListener { household ->
+                val data = household.data
+                onResult(
+                    if (data == null) {
+                        Result.failure(HouseholdDataException())
+                    } else {
+                        Result.success(data)
+                    },
+                )
             }
+            .addOnFailureListener { failure -> onResult(Result.failure(failure)) }
+    }
+
+    override fun saveBootstrap(
+        bootstrap: HouseholdBootstrapDocument,
+        onResult: (Result<Unit>) -> Unit,
+    ) {
+        firestore.collection(MEMBERSHIPS).document(bootstrap.memberId).update(
+            mapOf(
+                HOUSEHOLD_NAME to bootstrap.data[HOUSEHOLD_NAME],
+                OWNER_MEMBER_ID to bootstrap.data[OWNER_MEMBER_ID],
+                USE_TAGS to bootstrap.data[USE_TAGS],
+            ),
+        ).addOnSuccessListener { onResult(Result.success(Unit)) }
             .addOnFailureListener { failure -> onResult(Result.failure(failure)) }
     }
 
@@ -180,13 +270,7 @@ private class FirestoreHouseholdDocumentStore(
             if (transaction.get(membershipReference).exists()) {
                 throw ExistingHouseholdException()
             }
-            transaction.set(
-                membershipReference,
-                mapOf(
-                    HOUSEHOLD_ID to documents.householdId,
-                    ROLE to OWNER,
-                ),
-            )
+            transaction.set(membershipReference, documents.membership)
             transaction.set(householdReference, documents.household)
             transaction.set(rootItemReference, documents.rootItem)
         }.addOnSuccessListener {
@@ -208,6 +292,13 @@ private fun newHouseholdDocuments(
         ?: "Household Member"
     return HouseholdDocuments(
         householdId = householdId,
+        membership = mapOf(
+            HOUSEHOLD_ID to householdId,
+            ROLE to OWNER,
+            HOUSEHOLD_NAME to name,
+            OWNER_MEMBER_ID to owner.id,
+            USE_TAGS to false,
+        ),
         household = mapOf(
             NAME to name,
             OWNER_MEMBER_ID to owner.id,
@@ -247,13 +338,18 @@ private fun Map<String, Any?>.booleanOrDefault(key: String, default: Boolean = f
     return value as? Boolean ?: throw HouseholdDataException()
 }
 
+private fun Map<String, Any?>.boolean(key: String): Boolean =
+    this[key] as? Boolean ?: throw HouseholdDataException()
+
 private const val MEMBERSHIPS = "memberships"
 private const val HOUSEHOLDS = "households"
 private const val ITEMS = "items"
 private const val HOUSEHOLD_ID = "householdId"
 private const val ROLE = "role"
 private const val OWNER = "owner"
+private const val MEMBER = "member"
 private const val NAME = "name"
+private const val HOUSEHOLD_NAME = "householdName"
 private const val OWNER_MEMBER_ID = "ownerMemberId"
 private const val ROOT_ITEM_ID = "rootItemId"
 private const val USE_TAGS = "useTags"

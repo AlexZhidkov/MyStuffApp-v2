@@ -49,20 +49,20 @@ async function seedHousehold() {
 
 async function seedHouseholdMember() {
   await testEnvironment.withSecurityRulesDisabled(async (context) => {
-    await setDoc(doc(context.firestore(), "memberships/member-2"), {
-      householdId: "household-1",
-      role: "member",
-    });
+    await setDoc(
+      doc(context.firestore(), "memberships/member-2"),
+      membershipData("household-1", "member", "Our Home", "member-1"),
+    );
   });
 }
 
 async function seedOtherHousehold() {
   await testEnvironment.withSecurityRulesDisabled(async (context) => {
     const database = context.firestore();
-    await setDoc(doc(database, "memberships/member-3"), {
-      householdId: "household-2",
-      role: "owner",
-    });
+    await setDoc(
+      doc(database, "memberships/member-3"),
+      membershipData("household-2", "owner", "Other Home", "member-3"),
+    );
     await setDoc(doc(database, "households/household-2"), {
       name: "Other Home",
       ownerMemberId: "member-3",
@@ -178,12 +178,20 @@ function householdCreationBatch(
   name,
   rootOverrides = {},
   householdOverrides = {},
+  membershipOverrides = {},
 ) {
   const batch = writeBatch(database);
-  batch.set(doc(database, "memberships/member-1"), {
-    householdId: "household-1",
-    role: "owner",
-  });
+  batch.set(
+    doc(database, "memberships/member-1"),
+    membershipData(
+      "household-1",
+      "owner",
+      name,
+      "member-1",
+      false,
+      membershipOverrides,
+    ),
+  );
   batch.set(doc(database, "households/household-1"), {
     name,
     ownerMemberId: "member-1",
@@ -195,6 +203,24 @@ function householdCreationBatch(
   batch.set(doc(database, "households/household-1/items/household-1"),
     rootItemData("household-1", name, rootOverrides));
   return batch;
+}
+
+function membershipData(
+  householdId,
+  role,
+  householdName,
+  ownerMemberId,
+  useTags = false,
+  overrides = {},
+) {
+  return {
+    householdId,
+    role,
+    householdName,
+    ownerMemberId,
+    useTags,
+    ...overrides,
+  };
 }
 
 function rootItemData(householdId, name, overrides = {}) {
@@ -317,6 +343,40 @@ test("Household useTags feature toggle must be Boolean", async () => {
   );
 });
 
+test("Household bootstrap summary must match its Household", async () => {
+  const database = testEnvironment.authenticatedContext("member-1").firestore();
+
+  await assertFails(
+    householdCreationBatch(
+      database,
+      "Our Home",
+      {},
+      {},
+      { householdName: "Other Home" },
+    ).commit(),
+  );
+});
+
+test("Member can upgrade only their legacy membership to its matching bootstrap", async () => {
+  await seedHousehold();
+  await testEnvironment.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), "memberships/member-1"), {
+      householdId: "household-1",
+      role: "owner",
+    });
+  });
+  const database = testEnvironment.authenticatedContext("member-1").firestore();
+  const membership = doc(database, "memberships/member-1");
+
+  await assertSucceeds(updateDoc(membership, {
+    householdName: "Our Home",
+    ownerMemberId: "member-1",
+    useTags: false,
+  }));
+
+  await assertFails(updateDoc(membership, { householdName: "Other Home" }));
+});
+
 test("Household root Item cannot carry an Item Photo projection", async () => {
   const database = testEnvironment.authenticatedContext("member-1").firestore();
 
@@ -331,10 +391,10 @@ test("Member cannot replace their membership to create another Household", async
   await seedHousehold();
   const database = testEnvironment.authenticatedContext("member-1").firestore();
   const batch = writeBatch(database);
-  batch.set(doc(database, "memberships/member-1"), {
-    householdId: "household-2",
-    role: "owner",
-  });
+  batch.set(
+    doc(database, "memberships/member-1"),
+    membershipData("household-2", "owner", "Other Home", "member-1"),
+  );
   batch.set(doc(database, "households/household-2"), {
     name: "Other Home",
     ownerMemberId: "member-1",

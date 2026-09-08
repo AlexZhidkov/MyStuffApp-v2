@@ -5,6 +5,105 @@ import org.junit.Test
 
 class SessionControllerTest {
     @Test
+    fun `creation is unavailable while signed-in membership is being confirmed`() {
+        val identity = AuthenticatedIdentity(
+            id = "member-1",
+            displayName = "Alex",
+            email = "alex@example.com",
+        )
+        val householdGateway = FakeHouseholdGateway(completeLookupImmediately = false)
+        val controller = SessionController(
+            authenticationGateway = FakeAuthenticationGateway(currentIdentity = identity),
+            householdGateway = householdGateway,
+        )
+
+        assertEquals(AppDestination.OpeningHousehold, controller.state.destination)
+        assertEquals(SessionOperation.OpeningHousehold, controller.state.operation)
+
+        controller.createHousehold("Another Home")
+
+        assertEquals(0, householdGateway.createCalls)
+
+        householdGateway.completeLookup(Result.success(null))
+
+        assertEquals(AppDestination.HouseholdEntry, controller.state.destination)
+        assertEquals(null, controller.state.operation)
+    }
+
+    @Test
+    fun `failed Household opening stays separate from creation and can be retried`() {
+        val identity = AuthenticatedIdentity("member-1", "Alex", "alex@example.com")
+        val household = testHousehold(ownerMemberId = identity.id)
+        val householdGateway = FakeHouseholdGateway(completeLookupImmediately = false)
+        val controller = SessionController(
+            authenticationGateway = FakeAuthenticationGateway(currentIdentity = identity),
+            householdGateway = householdGateway,
+        )
+
+        householdGateway.completeLookup(Result.failure(IllegalStateException("Network unavailable")))
+
+        assertEquals(AppDestination.OpeningHousehold, controller.state.destination)
+        assertEquals(null, controller.state.operation)
+        assertEquals("Network unavailable", controller.state.errorMessage)
+
+        controller.createHousehold("Another Home")
+
+        assertEquals(0, householdGateway.createCalls)
+
+        controller.retryOpeningHousehold()
+
+        assertEquals(SessionOperation.OpeningHousehold, controller.state.operation)
+
+        householdGateway.completeLookup(Result.success(household))
+
+        assertEquals(AppDestination.HouseholdRoot, controller.state.destination)
+        assertEquals(household, controller.state.household)
+    }
+
+    @Test
+    fun `session actions expose only their operation-specific progress state`() {
+        val identity = AuthenticatedIdentity("member-1", "Alex", "alex@example.com")
+
+        val signingIn = SessionController(FakeAuthenticationGateway())
+        signingIn.signIn()
+        assertEquals(SessionOperation.SigningIn, signingIn.state.operation)
+
+        val opening = SessionController(
+            authenticationGateway = FakeAuthenticationGateway(currentIdentity = identity),
+            householdGateway = FakeHouseholdGateway(completeLookupImmediately = false),
+        )
+        assertEquals(SessionOperation.OpeningHousehold, opening.state.operation)
+
+        val joining = SessionController(
+            authenticationGateway = FakeAuthenticationGateway(currentIdentity = identity),
+            invitationAcceptanceGateway = FakeInvitationAcceptanceGateway(
+                completeImmediately = false,
+            ),
+            invitationId = "invitation-1",
+        )
+        assertEquals(SessionOperation.JoiningHousehold, joining.state.operation)
+
+        val creatingGateway = FakeHouseholdGateway(completeCreateImmediately = false)
+        val creating = SessionController(
+            authenticationGateway = FakeAuthenticationGateway(currentIdentity = identity),
+            householdGateway = creatingGateway,
+        )
+        creating.createHousehold("Our Home")
+        assertEquals(SessionOperation.CreatingHousehold, creating.state.operation)
+
+        val signOutGateway = FakeAuthenticationGateway(
+            currentIdentity = identity,
+            completeSignOutImmediately = false,
+        )
+        val signingOut = SessionController(
+            authenticationGateway = signOutGateway,
+            householdGateway = FakeHouseholdGateway(),
+        )
+        signingOut.signOut()
+        assertEquals(SessionOperation.SigningOut, signingOut.state.operation)
+    }
+
+    @Test
     fun `opening an invitation signs in then accepts it and opens the shared Household`() {
         val identity = AuthenticatedIdentity(
             id = "member-2",
@@ -60,7 +159,7 @@ class SessionControllerTest {
         assertEquals(AppDestination.HouseholdEntry, controller.state.destination)
         assertEquals(
             "This invitation was sent to a different Google Account.",
-            controller.state.errorMessage,
+            controller.state.invitationErrorMessage,
         )
         assertEquals("invitation-1", controller.state.pendingInvitationId)
     }
@@ -90,7 +189,10 @@ class SessionControllerTest {
 
         assertEquals(AppDestination.HouseholdRoot, controller.state.destination)
         assertEquals(currentHousehold, controller.state.household)
-        assertEquals("You already belong to a Household.", controller.state.errorMessage)
+        assertEquals(
+            "You already belong to a Household.",
+            controller.state.invitationErrorMessage,
+        )
     }
 
     @Test
@@ -254,7 +356,7 @@ class SessionControllerTest {
         controller.signIn()
 
         assertEquals(AppDestination.SignIn, controller.state.destination)
-        assertEquals(false, controller.state.operationInProgress)
+        assertEquals(null, controller.state.operation)
         assertEquals(
             "Couldn't sign in. Network unavailable",
             controller.state.errorMessage,
@@ -341,6 +443,7 @@ class SessionControllerTest {
 
 private class FakeInvitationAcceptanceGateway(
     private val result: Result<String> = Result.success("household-1"),
+    private val completeImmediately: Boolean = true,
 ) : InvitationAcceptanceGateway {
     var acceptedInvitationId: String? = null
         private set
@@ -350,13 +453,16 @@ private class FakeInvitationAcceptanceGateway(
         onResult: (Result<String>) -> Unit,
     ) {
         acceptedInvitationId = invitationId
-        onResult(result)
+        if (completeImmediately) onResult(result)
     }
 }
 
 private class FakeHouseholdGateway(
     private val existingHousehold: Household? = null,
+    private val completeLookupImmediately: Boolean = true,
+    private val completeCreateImmediately: Boolean = true,
 ) : HouseholdGateway {
+    private var pendingLookup: ((Result<Household?>) -> Unit)? = null
     var createCalls = 0
         private set
     var createdName: String? = null
@@ -366,7 +472,16 @@ private class FakeHouseholdGateway(
         memberId: String,
         onResult: (Result<Household?>) -> Unit,
     ) {
-        onResult(Result.success(existingHousehold))
+        if (completeLookupImmediately) {
+            onResult(Result.success(existingHousehold))
+        } else {
+            pendingLookup = onResult
+        }
+    }
+
+    fun completeLookup(result: Result<Household?>) {
+        requireNotNull(pendingLookup).invoke(result)
+        pendingLookup = null
     }
 
     override fun create(
@@ -376,8 +491,9 @@ private class FakeHouseholdGateway(
     ) {
         createCalls += 1
         createdName = name
-        onResult(
-            Result.success(
+        if (completeCreateImmediately) {
+            onResult(
+                Result.success(
                 Household(
                     id = "new-household",
                     ownerMemberId = owner.id,
@@ -390,14 +506,16 @@ private class FakeHouseholdGateway(
                         tags = emptyList(),
                     ),
                 ),
-            ),
-        )
+                ),
+            )
+        }
     }
 }
 
 private class FakeAuthenticationGateway(
     var signInResult: Result<AuthenticatedIdentity>? = null,
     override var currentIdentity: AuthenticatedIdentity? = null,
+    private val completeSignOutImmediately: Boolean = true,
 ) : AuthenticationGateway {
     private var identityObserver: ((AuthenticatedIdentity?) -> Unit)? = null
     var signOutCalls = 0
@@ -409,7 +527,7 @@ private class FakeAuthenticationGateway(
 
     override fun signOut(onResult: (Result<Unit>) -> Unit) {
         signOutCalls += 1
-        onResult(Result.success(Unit))
+        if (completeSignOutImmediately) onResult(Result.success(Unit))
     }
 
     override fun observeIdentity(onChanged: (AuthenticatedIdentity?) -> Unit): () -> Unit {

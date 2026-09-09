@@ -358,6 +358,68 @@ class FirebaseInventoryGatewayTest {
     }
 
     @Test
+    fun `adding Photos to an Item with a photo does not rewrite Item metadata`() {
+        val documents = FakeInventoryDocumentStore()
+        val photos = FakeInventoryPhotoStore()
+        val attachments = FakeItemPhotoAttachmentGateway()
+        val gateway = FirebaseInventoryGateway(documents, photos, attachments)
+        val existing = inventoryItem(
+            "item-1",
+            "Drill",
+            "garage",
+            photoAttachmentId = "existing-photo",
+            photoUrl = "gs://mystuff/existing.webp",
+            photoThumbnailUrl = "gs://mystuff/existing-thumb.webp",
+        )
+        var result: Result<Item>? = null
+
+        gateway.addItemPhotos(
+            householdId = "household-1",
+            item = existing,
+            updater = inventoryIdentity(),
+            photos = listOf(ItemPhoto("content://receipt.webp")),
+            creationOrderStart = 4,
+        ) { result = it }
+
+        assertEquals(existing, result?.getOrThrow())
+        assertNull(documents.updatedData)
+        assertEquals(listOf("attachment-1"), attachments.createdIds)
+        assertEquals(listOf(4L), attachments.createdOrders)
+        assertEquals(1, photos.uploads.size)
+    }
+
+    @Test
+    fun `first added Photo projects only photo fields when Item has no Item Photo`() {
+        val documents = FakeInventoryDocumentStore()
+        val photos = FakeInventoryPhotoStore()
+        val attachments = FakeItemPhotoAttachmentGateway()
+        val gateway = FirebaseInventoryGateway(documents, photos, attachments)
+        var result: Result<Item>? = null
+
+        gateway.addItemPhotos(
+            householdId = "household-1",
+            item = inventoryItem("item-1", "Drill", "garage"),
+            updater = inventoryIdentity(),
+            photos = listOf(ItemPhoto("content://drill.webp")),
+            creationOrderStart = 0,
+        ) { result = it }
+
+        assertEquals("attachment-1", result?.getOrThrow()?.photoAttachmentId)
+        assertEquals(
+            setOf(
+                "photoAttachmentId",
+                "photoUrl",
+                "photoThumbnailUrl",
+                "updatedAt",
+                "updatedById",
+                "updatedByDisplayName",
+            ),
+            documents.updatedData?.keys,
+        )
+        assertEquals(2, photos.uploads.size)
+    }
+
+    @Test
     fun `removing an attachment-backed Item Photo deletes its attachment and clears the projection`() {
         val documents = FakeInventoryDocumentStore()
         val photos = FakeInventoryPhotoStore()

@@ -4,8 +4,8 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -39,7 +39,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -178,6 +177,11 @@ private fun HouseholdRootContent(
 ) {
     var showInvitations by remember { mutableStateOf(false) }
     var deleteCandidate by remember { mutableStateOf<Item?>(null) }
+    val itemPhotoPickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickMultipleVisualMedia(),
+    ) { uris ->
+        inventoryActions.photoPickerSelected(uris.map { ItemPhoto(it.toString()) })
+    }
 
     if (showInvitations) {
         BackHandler { showInvitations = false }
@@ -195,7 +199,10 @@ private fun HouseholdRootContent(
     if (itemDraft != null) {
         val context = LocalContext.current
         val unsavedPhotos = itemDraft.photos + listOfNotNull(itemDraft.photo)
-        BackHandler(enabled = !inventoryState.operationInProgress) {
+        BackHandler(
+            enabled = !inventoryState.operationInProgress &&
+                itemDraft.stage != ItemFormStage.Crop,
+        ) {
             discardUnsavedPhotoSources(context, unsavedPhotos)
             inventoryActions.closeItemForm()
         }
@@ -206,7 +213,7 @@ private fun HouseholdRootContent(
 
             ItemFormStage.Crop -> CropPhotoScreen(
                 photo = requireNotNull(itemDraft.photo),
-                unsavedPhotos = unsavedPhotos,
+                unsavedPhotos = listOfNotNull(itemDraft.photo),
                 processingPurpose = if (
                     itemDraft.photoSelectionPurpose != ItemPhotoSelectionPurpose.ReplaceItemPhoto
                 ) {
@@ -214,6 +221,10 @@ private fun HouseholdRootContent(
                 } else {
                     PhotoProcessingPurpose.ItemPhoto
                 },
+                selectionSource = itemDraft.photoSelectionSource,
+                selectionIndex = itemDraft.photoSelectionTotal - itemDraft.pendingPhotoUris.size,
+                selectionTotal = itemDraft.photoSelectionTotal,
+                saving = inventoryState.operationInProgress,
                 actions = inventoryActions,
             )
 
@@ -223,6 +234,35 @@ private fun HouseholdRootContent(
             )
         }
         return
+    }
+
+    inventoryState.itemPhotoAddition?.let { addition ->
+        val unsavedPhotos = listOfNotNull(addition.photo)
+        when (addition.stage) {
+            ItemFormStage.CameraPermission,
+            ItemFormStage.Camera,
+            -> CameraCaptureStep(
+                stage = addition.stage,
+                unsavedPhotos = unsavedPhotos,
+                actions = inventoryActions,
+                onCancel = inventoryActions::cancelPhotoSelection,
+            )
+
+            ItemFormStage.Crop -> CropPhotoScreen(
+                photo = requireNotNull(addition.photo),
+                unsavedPhotos = unsavedPhotos,
+                processingPurpose = PhotoProcessingPurpose.ItemAttachment,
+                selectionSource = addition.source,
+                selectionIndex = addition.selectionTotal - addition.pendingPhotoUris.size,
+                selectionTotal = addition.selectionTotal,
+                addingToExistingItem = true,
+                saving = addition.saving,
+                actions = inventoryActions,
+            )
+
+            ItemFormStage.Details -> Unit
+        }
+        if (addition.stage != ItemFormStage.Details) return
     }
 
     inventoryState.itemMove?.let { moveState ->
@@ -483,7 +523,17 @@ private fun HouseholdRootContent(
                             ItemActionsOverflowMenu(
                                 canDelete = inventoryState.childItems.isEmpty() &&
                                     !inventoryState.operationInProgress,
+                                actionsEnabled = !inventoryState.operationInProgress,
                                 onEdit = inventoryActions::beginEditItem,
+                                onTakePhoto = inventoryActions::beginTakeItemPhoto,
+                                onChoosePhotos = {
+                                    inventoryActions.beginChooseItemPhotos()
+                                    itemPhotoPickerLauncher.launch(
+                                        PickVisualMediaRequest(
+                                            ActivityResultContracts.PickVisualMedia.ImageOnly,
+                                        ),
+                                    )
+                                },
                                 onMove = inventoryActions::beginMoveItem,
                                 onDelete = {
                                     deleteCandidate = inventoryState.selectedItem
@@ -625,7 +675,10 @@ private fun HouseholdRootContent(
 @Composable
 private fun ItemActionsOverflowMenu(
     canDelete: Boolean,
+    actionsEnabled: Boolean,
     onEdit: () -> Unit,
+    onTakePhoto: () -> Unit,
+    onChoosePhotos: () -> Unit,
     onMove: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -654,6 +707,35 @@ private fun ItemActionsOverflowMenu(
                         contentDescription = null,
                     )
                 },
+                enabled = actionsEnabled,
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.take_photo)) },
+                onClick = {
+                    expanded = false
+                    onTakePhoto()
+                },
+                leadingIcon = {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_photo_camera),
+                        contentDescription = null,
+                    )
+                },
+                enabled = actionsEnabled,
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.choose_photos)) },
+                onClick = {
+                    expanded = false
+                    onChoosePhotos()
+                },
+                leadingIcon = {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_photo),
+                        contentDescription = null,
+                    )
+                },
+                enabled = actionsEnabled,
             )
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.move_item)) },
@@ -667,6 +749,7 @@ private fun ItemActionsOverflowMenu(
                         contentDescription = null,
                     )
                 },
+                enabled = actionsEnabled,
             )
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.delete_item)) },
@@ -1044,28 +1127,6 @@ private fun ItemFormScreen(
         if (state.operationInProgress) R.string.saving_item else R.string.save_item,
     )
     val saveAndGenerateDescription = stringResource(R.string.save_and_generate_description)
-    val storedPhotoItem = draft.editingItemId
-        ?.takeIf(state.inventory::contains)
-        ?.let(state.inventory::item)
-        ?.takeUnless {
-            draft.photoRemoved ||
-                (draft.photo != null &&
-                    draft.photoSelectionPurpose == ItemPhotoSelectionPurpose.ReplaceItemPhoto)
-        }
-    val replaceItemPhoto = {
-        discardUnsavedPhotoSources(context, unsavedPhotos)
-        actions.beginReplaceItemPhoto()
-    }
-    val addItemAttachments = {
-        discardUnsavedPhotoSources(context, unsavedPhotos)
-        actions.beginAddItemAttachments()
-    }
-    val photoAction: () -> Unit = when {
-        !editing -> actions::addAnotherPhoto
-        draft.photoSelectionPurpose == ItemPhotoSelectionPurpose.AddAttachments ->
-            actions::addAnotherPhoto
-        else -> replaceItemPhoto
-    }
     Scaffold(
         contentWindowInsets = WindowInsets.safeDrawing,
         topBar = {
@@ -1108,7 +1169,7 @@ private fun ItemFormScreen(
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
-            if (draft.photos.isNotEmpty()) {
+            if (!editing && draft.photos.isNotEmpty()) {
                 items(draft.photos) { photo ->
                     LocalItemPhoto(
                         photo = photo,
@@ -1118,125 +1179,36 @@ private fun ItemFormScreen(
                     )
                 }
             }
-            storedPhotoItem?.let { itemWithPhoto ->
-                if (storedPhotoLocation(itemWithPhoto, ItemPhotoPresentation.Detail) != null) {
-                    item {
-                        StoredItemPhoto(
-                            item = itemWithPhoto,
-                            presentation = ItemPhotoPresentation.Detail,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(200.dp),
-                        )
-                    }
-                }
-            }
-            item {
+            if (!editing) item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                 ) {
-                    val replacingPhoto =
-                        editing &&
-                            draft.photoSelectionPurpose !=
-                            ItemPhotoSelectionPurpose.AddAttachments &&
-                            (draft.photos.isNotEmpty() || storedPhotoItem?.photoUrl != null)
-                    if (replacingPhoto) {
-                        FilledTonalIconButton(
-                            onClick = photoAction,
-                            enabled = formEnabled,
-                        ) {
-                            Icon(
-                                painter = painterResource(R.drawable.ic_photo_camera),
-                                contentDescription = stringResource(R.string.replace_photo),
-                            )
-                        }
-                    } else {
-                        TextButton(
-                            onClick = photoAction,
-                            enabled = formEnabled,
-                        ) {
-                            Text(
-                                stringResource(
-                                    if (editing &&
-                                        draft.photoSelectionPurpose ==
-                                        ItemPhotoSelectionPurpose.AddAttachments
-                                    ) {
-                                        if (draft.photos.isEmpty()) {
-                                            R.string.add_attachments
-                                        } else {
-                                            R.string.add_another_attachment
-                                        }
-                                    } else if (editing) {
-                                        R.string.add_photo
-                                    } else if (draft.photos.isEmpty()) {
-                                        R.string.add_photo
-                                    } else {
-                                        R.string.add_another_photo
-                                    },
-                                ),
-                            )
-                        }
-                    }
-                    if (
-                        editing &&
-                        draft.photoSelectionPurpose != ItemPhotoSelectionPurpose.AddAttachments
+                    TextButton(
+                        onClick = actions::addAnotherPhoto,
+                        enabled = formEnabled,
                     ) {
-                        FilledTonalIconButton(
-                            onClick = addItemAttachments,
-                            enabled = formEnabled,
-                        ) {
-                            Icon(
-                                painter = painterResource(R.drawable.ic_add),
-                                contentDescription = stringResource(R.string.add_attachments),
-                            )
-                        }
+                        Text(
+                            stringResource(
+                                if (draft.photos.isEmpty()) {
+                                    R.string.add_photo
+                                } else {
+                                    R.string.add_another_photo
+                                },
+                            ),
+                        )
                     }
-                    if (!editing || draft.photoSelectionPurpose == ItemPhotoSelectionPurpose.AddAttachments) {
-                        val choosePhotos = {
-                            if (editing) actions.beginChooseItemAttachments()
+                    TextButton(
+                        onClick = {
                             photoPickerLauncher.launch(
                                 PickVisualMediaRequest(
                                     ActivityResultContracts.PickVisualMedia.ImageOnly,
                                 ),
                             )
-                        }
-                        if (editing) {
-                            FilledTonalIconButton(
-                                onClick = choosePhotos,
-                                enabled = formEnabled,
-                            ) {
-                                Icon(
-                                    painter = painterResource(R.drawable.ic_photo_camera),
-                                    contentDescription = stringResource(R.string.choose_attachments),
-                                )
-                            }
-                        } else {
-                            TextButton(
-                                onClick = choosePhotos,
-                                enabled = formEnabled,
-                            ) {
-                                Text(stringResource(R.string.choose_photos))
-                            }
-                        }
-                    }
-                    if (
-                        editing &&
-                        draft.photoSelectionPurpose == ItemPhotoSelectionPurpose.ReplaceItemPhoto &&
-                        (draft.photos.isNotEmpty() || storedPhotoItem?.photoUrl != null)
+                        },
+                        enabled = formEnabled,
                     ) {
-                        FilledTonalIconButton(
-                            onClick = {
-                                discardUnsavedPhotoSources(context, unsavedPhotos)
-                                actions.removeItemPhoto()
-                            },
-                            enabled = formEnabled,
-                        ) {
-                            Icon(
-                                painter = painterResource(R.drawable.ic_delete),
-                                contentDescription = stringResource(R.string.remove_photo),
-                            )
-                        }
+                        Text(stringResource(R.string.choose_photos))
                     }
                 }
             }

@@ -73,7 +73,7 @@ internal class AttachmentUploadFailureRegistry {
                     itemId = failure.itemId,
                     attachmentId = failure.attachmentId,
                     originatingMemberId = failure.originatingMemberId,
-                    message = "Couldn't upload the Item Attachment. Tap Retry to try again.",
+                    message = "Couldn't upload the Photo. Tap Retry to try again.",
                 )
                 true
             }

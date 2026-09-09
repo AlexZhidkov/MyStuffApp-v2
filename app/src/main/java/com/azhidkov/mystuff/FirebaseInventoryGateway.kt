@@ -326,6 +326,61 @@ class FirebaseInventoryGateway internal constructor(
         }
     }
 
+    override fun addItemPhotos(
+        householdId: String,
+        item: Item,
+        updater: AuthenticatedIdentity,
+        photos: List<ItemPhoto>,
+        creationOrderStart: Long?,
+        onResult: (Result<Item>) -> Unit,
+    ) {
+        if (photos.isEmpty()) {
+            onResult(Result.success(item))
+            return
+        }
+        val plans = photos.map { photo ->
+            AttachmentPhotoPlan(
+                photo = photo,
+                photoPlan = newPhotoPlan(householdId, item.id, photo),
+            )
+        }
+        createAdditionalPhotoAttachments(
+            householdId = householdId,
+            item = item,
+            plans = plans,
+            creationOrderStart = creationOrderStart,
+            onFailure = { failure, created ->
+                deletePhotoAttachments(householdId, item, created) {
+                    onResult(Result.failure(failure))
+                }
+            },
+        ) { created ->
+            val first = created.first()
+            if (item.photoAttachmentId == null) {
+                projectCreatedPhoto(
+                    householdId = householdId,
+                    item = item,
+                    photoPlan = first.photoPlan,
+                    updater = updater,
+                    photo = first.photo,
+                    creationOrder = first.creationOrder,
+                    additionalPhotos = created.drop(1),
+                    onResult = onResult,
+                )
+            } else {
+                uploadCreatedPhotosAndComplete(
+                    householdId = householdId,
+                    result = Result.success(item),
+                    item = item,
+                    updater = updater,
+                    firstPhotoPlan = null,
+                    additionalPhotos = created,
+                    onResult = onResult,
+                )
+            }
+        }
+    }
+
     override fun moveItem(
         householdId: String,
         item: Item,

@@ -24,6 +24,10 @@ _Avoid_: Stuff, asset, product, location
 An optional image Item Attachment designated to represent an Item other than the Household.
 _Avoid_: Item image, full-size image
 
+**Photo**:
+The Member-facing name for any image Item Attachment, whether or not it is the Item Photo.
+_Avoid_: Attachment, image attachment (in Member-facing UI)
+
 **Item Attachment**:
 One supporting file owned by an Item other than the Household, such as a photo, receipt, or instructions. An Item Attachment is not an Item and does not occupy a place in the Inventory tree.
 _Avoid_: Child Item, document Item

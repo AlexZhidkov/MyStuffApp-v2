@@ -39,6 +39,16 @@ interface InventoryGateway {
         onResult: (Result<Item>) -> Unit,
     )
 
+    /** Appends Photos without rewriting the Item's editable metadata. */
+    fun addItemPhotos(
+        householdId: String,
+        item: Item,
+        updater: AuthenticatedIdentity,
+        photos: List<ItemPhoto>,
+        creationOrderStart: Long?,
+        onResult: (Result<Item>) -> Unit,
+    ) = onResult(Result.failure(UnsupportedOperationException("Adding Photos is unavailable.")))
+
     fun moveItem(
         householdId: String,
         item: Item,
@@ -107,12 +117,15 @@ interface InventoryActions {
     fun confirmMoveItem()
     fun closeMoveItem()
     fun deleteItem()
+    fun beginTakeItemPhoto()
+    fun beginChooseItemPhotos()
     fun beginAddItemAttachments()
     fun beginChooseItemAttachments() = Unit
     fun beginReplaceItemPhoto()
     fun removeItemPhoto()
     fun cameraUnavailable()
     fun resolveCameraPermission(granted: Boolean)
+    fun photoCaptureCancelled()
     fun photoCaptureFailed()
     fun photoCaptured(photo: ItemPhoto)
     fun photoPickerSelected(photos: List<ItemPhoto>) = Unit
@@ -120,6 +133,7 @@ interface InventoryActions {
     fun useCroppedPhoto(photo: ItemPhoto)
     fun usePhotoWithoutCropping(photo: ItemPhoto) = Unit
     fun continueWithoutPhoto()
+    fun cancelPhotoSelection()
     fun addAnotherPhoto() = Unit
     fun closeItemForm()
     fun changeItemName(name: String)
@@ -180,12 +194,19 @@ enum class ItemPhotoSelectionPurpose {
     AddAttachments,
 }
 
+enum class ItemPhotoSelectionSource {
+    Camera,
+    Gallery,
+}
+
 data class ItemFormState(
     val name: String = "",
     val parentItemId: String,
     val stage: ItemFormStage = ItemFormStage.CameraPermission,
     val photoSelectionPurpose: ItemPhotoSelectionPurpose =
         ItemPhotoSelectionPurpose.CreateAttachments,
+    val photoSelectionSource: ItemPhotoSelectionSource = ItemPhotoSelectionSource.Camera,
+    val photoSelectionTotal: Int = 1,
     val photo: ItemPhoto? = null,
     val photos: List<ItemPhoto> = emptyList(),
     val pendingPhotoUris: List<String> = emptyList(),
@@ -201,12 +222,24 @@ data class ItemFormState(
     val photoRemoved: Boolean = false,
 )
 
+data class ItemPhotoAdditionState(
+    val itemId: String,
+    val stage: ItemFormStage,
+    val source: ItemPhotoSelectionSource,
+    val photo: ItemPhoto? = null,
+    val pendingPhotoUris: List<String> = emptyList(),
+    val selectionTotal: Int = 1,
+    val nextCreationOrder: Long? = null,
+    val saving: Boolean = false,
+)
+
 data class InventoryUiState(
     val inventory: Inventory,
     val selectedItemId: String,
     val useTags: Boolean = false,
     val search: InventorySearchState = InventorySearchState(),
     val itemDraft: ItemFormState? = null,
+    val itemPhotoAddition: ItemPhotoAdditionState? = null,
     val itemMove: ItemMoveState? = null,
     val loading: Boolean = false,
     val operationInProgress: Boolean = false,
@@ -550,7 +583,11 @@ class InventoryController internal constructor(
     }
 
     override fun beginAddItem() {
-        if (state.itemDraft != null || state.operationInProgress) return
+        if (
+            state.itemDraft != null ||
+            state.itemPhotoAddition != null ||
+            state.operationInProgress
+        ) return
         val parentItemId = when {
             state.search.openedResultId != null ->
                 state.selectedItem.parentItemId ?: state.inventory.rootItemId
@@ -569,6 +606,7 @@ class InventoryController internal constructor(
     override fun beginEditItem() {
         if (
             state.itemDraft != null ||
+            state.itemPhotoAddition != null ||
             state.operationInProgress ||
             state.selectedItemId == state.inventory.rootItemId
         ) {
@@ -596,6 +634,7 @@ class InventoryController internal constructor(
     override fun beginMoveItem() {
         if (
             state.itemDraft != null ||
+            state.itemPhotoAddition != null ||
             state.itemMove != null ||
             state.operationInProgress ||
             state.selectedItemId == state.inventory.rootItemId
@@ -614,6 +653,7 @@ class InventoryController internal constructor(
     override fun deleteItem() {
         if (
             state.itemDraft != null ||
+            state.itemPhotoAddition != null ||
             state.itemMove != null ||
             state.operationInProgress ||
             state.selectedItemId == state.inventory.rootItemId ||
@@ -739,6 +779,52 @@ class InventoryController internal constructor(
         )
     }
 
+    override fun beginTakeItemPhoto() {
+        if (
+            state.itemDraft != null ||
+            state.itemPhotoAddition != null ||
+            state.operationInProgress ||
+            state.selectedItemId == state.inventory.rootItemId
+        ) {
+            return
+        }
+        updateState(
+            state.copy(
+                itemPhotoAddition = ItemPhotoAdditionState(
+                    itemId = state.selectedItemId,
+                    stage = ItemFormStage.CameraPermission,
+                    source = ItemPhotoSelectionSource.Camera,
+                    nextCreationOrder = nextItemAttachmentCreationOrder(state.selectedItemId),
+                ),
+                errorMessage = null,
+                successMessage = null,
+            ),
+        )
+    }
+
+    override fun beginChooseItemPhotos() {
+        if (
+            state.itemDraft != null ||
+            state.itemPhotoAddition != null ||
+            state.operationInProgress ||
+            state.selectedItemId == state.inventory.rootItemId
+        ) {
+            return
+        }
+        updateState(
+            state.copy(
+                itemPhotoAddition = ItemPhotoAdditionState(
+                    itemId = state.selectedItemId,
+                    stage = ItemFormStage.Details,
+                    source = ItemPhotoSelectionSource.Gallery,
+                    nextCreationOrder = nextItemAttachmentCreationOrder(state.selectedItemId),
+                ),
+                errorMessage = null,
+                successMessage = null,
+            ),
+        )
+    }
+
     override fun beginChooseItemAttachments() {
         val draft = state.itemDraft ?: return
         if (
@@ -801,30 +887,110 @@ class InventoryController internal constructor(
     }
 
     override fun cameraUnavailable() {
+        state.itemPhotoAddition?.let {
+            if (it.stage != ItemFormStage.CameraPermission) return
+            updateState(
+                state.copy(
+                    itemPhotoAddition = null,
+                    errorMessage = "No camera is available.",
+                ),
+            )
+            return
+        }
         transitionItemFormState(ItemFormStage.CameraPermission) {
             it.copy(stage = ItemFormStage.Details)
         }
     }
 
     override fun resolveCameraPermission(granted: Boolean) {
+        state.itemPhotoAddition?.let { addition ->
+            if (addition.stage != ItemFormStage.CameraPermission) return
+            updateState(
+                if (granted) {
+                    state.copy(
+                        itemPhotoAddition = addition.copy(stage = ItemFormStage.Camera),
+                        errorMessage = null,
+                    )
+                } else {
+                    state.copy(
+                        itemPhotoAddition = null,
+                        errorMessage = "Camera permission is required to take a Photo.",
+                    )
+                },
+            )
+            return
+        }
         transitionItemFormState(ItemFormStage.CameraPermission) {
             it.copy(stage = if (granted) ItemFormStage.Camera else ItemFormStage.Details)
         }
     }
 
+    override fun photoCaptureCancelled() {
+        state.itemPhotoAddition?.let {
+            if (it.stage != ItemFormStage.Camera) return
+            updateState(state.copy(itemPhotoAddition = null, errorMessage = null))
+            return
+        }
+        photoCaptureFailed()
+    }
+
     override fun photoCaptureFailed() {
+        state.itemPhotoAddition?.let {
+            if (it.stage != ItemFormStage.Camera) return
+            updateState(
+                state.copy(
+                    itemPhotoAddition = null,
+                    errorMessage = "Couldn't open the camera.",
+                ),
+            )
+            return
+        }
         transitionItemFormState(ItemFormStage.Camera) {
             it.copy(stage = ItemFormStage.Details)
         }
     }
 
     override fun photoCaptured(photo: ItemPhoto) {
+        state.itemPhotoAddition?.let { addition ->
+            if (addition.stage != ItemFormStage.Camera) return
+            updateState(
+                state.copy(
+                    itemPhotoAddition = addition.copy(
+                        stage = ItemFormStage.Crop,
+                        photo = photo,
+                    ),
+                    errorMessage = null,
+                ),
+            )
+            return
+        }
         transitionItemFormState(ItemFormStage.Camera) {
             it.copy(stage = ItemFormStage.Crop, photo = photo)
         }
     }
 
     override fun photoPickerSelected(photos: List<ItemPhoto>) {
+        state.itemPhotoAddition?.let { addition ->
+            if (
+                addition.stage != ItemFormStage.Details ||
+                addition.source != ItemPhotoSelectionSource.Gallery
+            ) return
+            val first = photos.firstOrNull()
+            updateState(
+                state.copy(
+                    itemPhotoAddition = first?.let {
+                        addition.copy(
+                            stage = ItemFormStage.Crop,
+                            photo = it,
+                            pendingPhotoUris = photos.drop(1).map(ItemPhoto::uri),
+                            selectionTotal = photos.size,
+                        )
+                    },
+                    errorMessage = null,
+                ),
+            )
+            return
+        }
         val draft = state.itemDraft ?: return
         if (draft.stage != ItemFormStage.Details || state.operationInProgress) return
         val first = photos.firstOrNull() ?: return
@@ -834,6 +1000,8 @@ class InventoryController internal constructor(
                     stage = ItemFormStage.Crop,
                     photo = first,
                     pendingPhotoUris = photos.drop(1).map(ItemPhoto::uri),
+                    photoSelectionSource = ItemPhotoSelectionSource.Gallery,
+                    photoSelectionTotal = photos.size,
                 ),
                 errorMessage = null,
             ),
@@ -841,27 +1009,77 @@ class InventoryController internal constructor(
     }
 
     override fun retakePhoto() {
+        state.itemPhotoAddition?.let { addition ->
+            if (
+                addition.stage != ItemFormStage.Crop ||
+                addition.source != ItemPhotoSelectionSource.Camera ||
+                addition.saving
+            ) return
+            updateState(
+                state.copy(
+                    itemPhotoAddition = addition.copy(
+                        stage = ItemFormStage.Camera,
+                        photo = null,
+                    ),
+                    errorMessage = null,
+                ),
+            )
+            return
+        }
         transitionItemFormState(ItemFormStage.Crop) {
             it.copy(stage = ItemFormStage.Camera, photo = null)
         }
     }
 
     override fun useCroppedPhoto(photo: ItemPhoto) {
+        if (state.itemPhotoAddition != null) {
+            saveAddedPhoto(photo)
+            return
+        }
         transitionItemFormState(ItemFormStage.Crop) {
             it.acceptPhoto(photo)
         }
     }
 
     override fun usePhotoWithoutCropping(photo: ItemPhoto) {
+        if (state.itemPhotoAddition != null) {
+            saveAddedPhoto(photo)
+            return
+        }
         transitionItemFormState(ItemFormStage.Crop) {
             it.acceptPhoto(photo)
         }
     }
 
     override fun continueWithoutPhoto() {
+        state.itemPhotoAddition?.let { addition ->
+            if (addition.stage != ItemFormStage.Crop || addition.saving) return
+            updateState(state.copy(itemPhotoAddition = addition.advance(), errorMessage = null))
+            return
+        }
         transitionItemFormState(ItemFormStage.Crop) {
             it.advancePhotoSelection(accepted = null)
         }
+    }
+
+    override fun cancelPhotoSelection() {
+        state.itemPhotoAddition?.let {
+            if (it.saving) return
+            updateState(state.copy(itemPhotoAddition = null, errorMessage = null))
+            return
+        }
+        val draft = state.itemDraft ?: return
+        if (draft.stage != ItemFormStage.Crop || state.operationInProgress) return
+        updateState(
+            state.copy(
+                itemDraft = draft.copy(
+                    stage = ItemFormStage.Details,
+                    photo = null,
+                    pendingPhotoUris = emptyList(),
+                ),
+                errorMessage = null,
+            ),
+        )
     }
 
     override fun addAnotherPhoto() {
@@ -873,6 +1091,8 @@ class InventoryController internal constructor(
                     stage = ItemFormStage.CameraPermission,
                     photo = null,
                     pendingPhotoUris = emptyList(),
+                    photoSelectionSource = ItemPhotoSelectionSource.Camera,
+                    photoSelectionTotal = 1,
                 ),
                 errorMessage = null,
             ),
@@ -1421,6 +1641,61 @@ class InventoryController internal constructor(
         updateState(state.copy(itemDraft = transition(draft)))
     }
 
+    private fun saveAddedPhoto(photo: ItemPhoto) {
+        val addition = state.itemPhotoAddition ?: return
+        if (addition.stage != ItemFormStage.Crop || addition.saving) return
+        val item = runCatching { state.inventory.item(addition.itemId) }.getOrNull() ?: return
+        updateState(
+            state.copy(
+                itemPhotoAddition = addition.copy(photo = photo, saving = true),
+                errorMessage = null,
+            ),
+        )
+        gateway.addItemPhotos(
+            householdId = household.id,
+            item = item,
+            updater = identity,
+            photos = listOf(photo),
+            creationOrderStart = addition.nextCreationOrder,
+        ) { result ->
+            val current = state.itemPhotoAddition
+                ?.takeIf { it.itemId == addition.itemId && it.saving }
+                ?: return@addItemPhotos
+            result.onSuccess { savedItem ->
+                val currentItem = state.inventory.item(savedItem.id)
+                val projectedItem = currentItem.copy(
+                    photoAttachmentId = savedItem.photoAttachmentId,
+                    photoUrl = savedItem.photoUrl,
+                    photoThumbnailUrl = savedItem.photoThumbnailUrl,
+                )
+                observedInventory = observedInventory.withItem(projectedItem)
+                updateState(
+                    state.copy(
+                        inventory = state.inventory.withItem(projectedItem),
+                        itemPhotoAddition = current.advance(accepted = true),
+                        errorMessage = null,
+                    ),
+                )
+            }.onFailure { failure ->
+                updateState(
+                    state.copy(
+                        itemPhotoAddition = current.copy(photo = photo, saving = false),
+                        errorMessage = failure.message ?: "Couldn't add the Photo.",
+                    ),
+                )
+            }
+        }
+    }
+
+    private fun nextItemAttachmentCreationOrder(itemId: String): Long? {
+        val collection = state.itemAttachments
+            ?.takeIf { it.itemId == itemId && !it.loading && it.errorMessage == null }
+            ?: return null
+        if (collection.attachments.isEmpty()) return 0
+        if (collection.attachments.any { it.creationOrder == null }) return null
+        return collection.attachments.maxOf { requireNotNull(it.creationOrder) } + 1
+    }
+
     private fun ItemFormState.acceptPhoto(photo: ItemPhoto): ItemFormState =
         advancePhotoSelection(accepted = photo)
 
@@ -1448,6 +1723,17 @@ class InventoryController internal constructor(
                 },
             )
         }
+    }
+
+    private fun ItemPhotoAdditionState.advance(accepted: Boolean = false): ItemPhotoAdditionState? {
+        val nextUri = pendingPhotoUris.firstOrNull() ?: return null
+        return copy(
+            stage = ItemFormStage.Crop,
+            photo = ItemPhoto(nextUri),
+            pendingPhotoUris = pendingPhotoUris.drop(1),
+            nextCreationOrder = if (accepted) nextCreationOrder?.plus(1) else nextCreationOrder,
+            saving = false,
+        )
     }
 
 }

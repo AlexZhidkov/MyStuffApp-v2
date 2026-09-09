@@ -48,6 +48,7 @@ internal fun CameraCaptureStep(
     stage: ItemFormStage,
     unsavedPhotos: List<ItemPhoto>,
     actions: InventoryActions,
+    onCancel: () -> Unit = actions::closeItemForm,
 ) {
     val context = LocalContext.current
     var pendingPhotoUri by remember { mutableStateOf<Uri?>(null) }
@@ -63,7 +64,7 @@ internal fun CameraCaptureStep(
             actions.photoCaptured(ItemPhoto(uri.toString()))
         } else {
             uri?.let { discardUnsavedPhotoSources(context, listOf(ItemPhoto(it.toString()))) }
-            actions.photoCaptureFailed()
+            actions.photoCaptureCancelled()
         }
     }
 
@@ -72,7 +73,7 @@ internal fun CameraCaptureStep(
             discardUnsavedPhotoSources(context, listOf(ItemPhoto(it.toString())))
         }
         discardUnsavedPhotoSources(context, unsavedPhotos)
-        actions.closeItemForm()
+        onCancel()
     }
     BackHandler(onBack = cancel)
 

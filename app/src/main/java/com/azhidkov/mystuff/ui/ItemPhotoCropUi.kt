@@ -5,6 +5,7 @@ package com.azhidkov.mystuff.ui
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.ImageDecoder
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTransformGestures
@@ -55,6 +56,7 @@ import androidx.core.content.FileProvider
 import androidx.core.net.toUri
 import com.azhidkov.mystuff.InventoryActions
 import com.azhidkov.mystuff.ItemPhoto
+import com.azhidkov.mystuff.ItemPhotoSelectionSource
 import com.azhidkov.mystuff.R
 import java.io.File
 import kotlin.math.max
@@ -68,6 +70,11 @@ internal fun CropPhotoScreen(
     photo: ItemPhoto,
     unsavedPhotos: List<ItemPhoto>,
     processingPurpose: PhotoProcessingPurpose = PhotoProcessingPurpose.ItemPhoto,
+    selectionSource: ItemPhotoSelectionSource = ItemPhotoSelectionSource.Camera,
+    selectionIndex: Int = 1,
+    selectionTotal: Int = 1,
+    addingToExistingItem: Boolean = false,
+    saving: Boolean = false,
     actions: InventoryActions,
 ) {
     val context = LocalContext.current
@@ -88,20 +95,46 @@ internal fun CropPhotoScreen(
         )
     }
     var cropping by remember { mutableStateOf(false) }
-    LaunchedEffect(photo) { cropping = false }
+    var processingError by remember { mutableStateOf(false) }
+    val busy = cropping || saving
+    val cancel = {
+        discardUnsavedPhotoSources(context, unsavedPhotos + photo)
+        if (
+            !addingToExistingItem &&
+            selectionSource == ItemPhotoSelectionSource.Camera
+        ) {
+            actions.closeItemForm()
+        } else {
+            actions.cancelPhotoSelection()
+        }
+    }
+    LaunchedEffect(photo) {
+        cropping = false
+        processingError = false
+    }
+    BackHandler(enabled = !busy, onBack = cancel)
 
     Scaffold(
         contentWindowInsets = WindowInsets.safeDrawing,
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.crop_photo)) },
+                title = {
+                    Text(
+                        if (selectionTotal > 1) {
+                            stringResource(
+                                R.string.crop_photo_progress,
+                                selectionIndex,
+                                selectionTotal,
+                            )
+                        } else {
+                            stringResource(R.string.crop_photo)
+                        },
+                    )
+                },
                 actions = {
                     IconButton(
-                        onClick = {
-                            discardUnsavedPhotoSources(context, unsavedPhotos + photo)
-                            actions.closeItemForm()
-                        },
-                        enabled = !cropping,
+                        onClick = cancel,
+                        enabled = !busy,
                     ) {
                         Icon(
                             painter = painterResource(R.drawable.ic_clear),
@@ -123,6 +156,12 @@ internal fun CropPhotoScreen(
                 text = stringResource(R.string.crop_photo_body),
                 style = MaterialTheme.typography.bodyLarge,
             )
+            if (processingError) {
+                Text(
+                    text = stringResource(R.string.photo_processing_failed),
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
             bitmap?.let { loadedBitmap ->
                 Box(
                     modifier = Modifier
@@ -183,11 +222,12 @@ internal fun CropPhotoScreen(
                                 actions.useCroppedPhoto(processedPhoto)
                             }.onFailure {
                                 cropping = false
+                                processingError = true
                             }
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    enabled = !cropping && cropSize != IntSize.Zero,
+                    enabled = !busy && cropSize != IntSize.Zero,
                 ) {
                     Text(
                         stringResource(
@@ -214,30 +254,47 @@ internal fun CropPhotoScreen(
                                     actions.usePhotoWithoutCropping(processed)
                                 }.onFailure {
                                     cropping = false
+                                    processingError = true
                                 }
                             }
                         },
-                        enabled = !cropping,
+                        enabled = !busy,
                     ) {
                         Text(stringResource(R.string.use_original_photo))
                     }
-                    TextButton(
-                        onClick = {
-                            discardUnsavedPhotoSources(context, listOf(photo))
-                            actions.retakePhoto()
-                        },
-                        enabled = !cropping,
-                    ) {
-                        Text(stringResource(R.string.retake_photo))
+                    if (selectionSource == ItemPhotoSelectionSource.Camera) {
+                        TextButton(
+                            onClick = {
+                                discardUnsavedPhotoSources(context, listOf(photo))
+                                actions.retakePhoto()
+                            },
+                            enabled = !busy,
+                        ) {
+                            Text(stringResource(R.string.retake_photo))
+                        }
                     }
                     TextButton(
                         onClick = {
                             discardUnsavedPhotoSources(context, listOf(photo))
-                            actions.continueWithoutPhoto()
+                            when {
+                                selectionSource == ItemPhotoSelectionSource.Gallery ->
+                                    actions.continueWithoutPhoto()
+                                addingToExistingItem -> actions.cancelPhotoSelection()
+                                else -> actions.continueWithoutPhoto()
+                            }
                         },
-                        enabled = !cropping,
+                        enabled = !busy,
                     ) {
-                        Text(stringResource(R.string.continue_without_photo))
+                        Text(
+                            stringResource(
+                                when {
+                                    selectionSource == ItemPhotoSelectionSource.Gallery ->
+                                        R.string.skip_photo
+                                    addingToExistingItem -> R.string.cancel
+                                    else -> R.string.continue_without_photo
+                                },
+                            ),
+                        )
                     }
                 }
             } ?: Box(

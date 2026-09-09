@@ -581,6 +581,32 @@ class InventoryControllerTest {
     }
 
     @Test
+    fun `leaving Add Item gallery cropping preserves the draft and accepted Photos`() {
+        val controller = InventoryController(household(), identity(), FakeInventoryGateway(inventory()))
+        controller.beginAddItem()
+        controller.resolveCameraPermission(granted = false)
+        controller.changeItemName("Receipts")
+        controller.photoPickerSelected(
+            listOf(
+                ItemPhoto("content://picker/first.jpg"),
+                ItemPhoto("content://picker/second.jpg"),
+            ),
+        )
+        controller.usePhotoWithoutCropping(ItemPhoto("content://processed/first.webp"))
+
+        controller.cancelPhotoSelection()
+
+        assertEquals(ItemFormStage.Details, controller.state.itemFormStage)
+        assertEquals("Receipts", controller.state.itemDraft?.name)
+        assertEquals(
+            listOf(ItemPhoto("content://processed/first.webp")),
+            controller.state.itemDraft?.photos,
+        )
+        assertNull(controller.state.itemDraft?.photo)
+        assertTrue(controller.state.itemDraft?.pendingPhotoUris?.isEmpty() == true)
+    }
+
+    @Test
     fun `saved Item keeps its cropped photo`() {
         val gateway = FakeInventoryGateway(inventory())
         val controller = InventoryController(household(), identity(), gateway)
@@ -1602,6 +1628,119 @@ class InventoryControllerTest {
     }
 
     @Test
+    fun `Item photo actions add camera and gallery Photos without opening Edit`() {
+        val household = household()
+        val existing = item(
+            id = "drill",
+            name = "Drill",
+            parentItemId = household.id,
+            description = "Cordless drill",
+            tags = listOf("Power Tools"),
+            webUrl = "https://example.com/drill",
+        )
+        val gateway = FakeInventoryGateway(
+            Inventory.from(household, listOf(household.rootItem, existing)),
+        )
+        val controller = InventoryController(household, identity(), gateway)
+        controller.openItem(existing.id)
+
+        controller.beginTakeItemPhoto()
+        assertNull(controller.state.itemDraft)
+        assertEquals(ItemFormStage.CameraPermission, controller.state.itemPhotoAddition?.stage)
+        assertEquals(ItemPhotoSelectionSource.Camera, controller.state.itemPhotoAddition?.source)
+        controller.resolveCameraPermission(granted = true)
+        controller.photoCaptured(ItemPhoto("content://camera/photo.jpg"))
+        controller.usePhotoWithoutCropping(ItemPhoto("content://camera/photo.webp"))
+
+        assertNull(controller.state.itemPhotoAddition)
+        assertEquals(
+            listOf(ItemPhoto("content://camera/photo.webp")),
+            gateway.addedPhotos,
+        )
+
+        controller.beginChooseItemPhotos()
+
+        controller.photoPickerSelected(
+            listOf(
+                ItemPhoto("content://picker/receipt.jpg"),
+                ItemPhoto("content://picker/manual.jpg"),
+            ),
+        )
+        controller.usePhotoWithoutCropping(ItemPhoto("content://receipt.webp"))
+        assertEquals(2, controller.state.itemPhotoAddition?.selectionTotal)
+        assertEquals("content://picker/manual.jpg", controller.state.itemPhotoAddition?.photo?.uri)
+        controller.continueWithoutPhoto()
+
+        assertEquals(
+            listOf(
+                ItemPhoto("content://camera/photo.webp"),
+                ItemPhoto("content://receipt.webp"),
+            ),
+            gateway.addedPhotos,
+        )
+        assertNull(controller.state.itemDraft)
+        assertNull(controller.state.itemPhotoAddition)
+        assertEquals(existing.name, controller.state.selectedItem.name)
+        assertEquals(existing.description, controller.state.selectedItem.description)
+        assertEquals(existing.tags, controller.state.selectedItem.tags)
+        assertEquals(existing.webUrl, controller.state.selectedItem.webUrl)
+    }
+
+    @Test
+    fun `cancelling an existing Item gallery batch keeps accepted Photos`() {
+        val household = household()
+        val existing = item("drill", "Drill", household.id)
+        val gateway = FakeInventoryGateway(
+            Inventory.from(household, listOf(household.rootItem, existing)),
+        )
+        val controller = InventoryController(household, identity(), gateway)
+        controller.openItem(existing.id)
+        controller.beginChooseItemPhotos()
+        controller.photoPickerSelected(
+            listOf(
+                ItemPhoto("content://picker/first.jpg"),
+                ItemPhoto("content://picker/second.jpg"),
+                ItemPhoto("content://picker/third.jpg"),
+            ),
+        )
+
+        controller.useCroppedPhoto(ItemPhoto("content://first.webp"))
+        controller.cancelPhotoSelection()
+
+        assertEquals(listOf(ItemPhoto("content://first.webp")), gateway.addedPhotos)
+        assertNull(controller.state.itemPhotoAddition)
+        assertEquals(existing.id, controller.state.selectedItemId)
+    }
+
+    @Test
+    fun `existing Item camera denial and cancellation return to the Item`() {
+        val household = household()
+        val existing = item("drill", "Drill", household.id)
+        val controller = InventoryController(
+            household,
+            identity(),
+            FakeInventoryGateway(
+                Inventory.from(household, listOf(household.rootItem, existing)),
+            ),
+        )
+        controller.openItem(existing.id)
+
+        controller.beginTakeItemPhoto()
+        controller.resolveCameraPermission(granted = false)
+
+        assertNull(controller.state.itemPhotoAddition)
+        assertEquals("Camera permission is required to take a Photo.", controller.state.errorMessage)
+
+        controller.beginTakeItemPhoto()
+        controller.resolveCameraPermission(granted = true)
+        controller.photoCaptureCancelled()
+
+        assertNull(controller.state.itemPhotoAddition)
+        assertNull(controller.state.errorMessage)
+        assertEquals(existing.id, controller.state.selectedItemId)
+    }
+
+    @Test
     fun `first added attachment can supply a missing Item Photo`() {
         val household = household()
         val existing = item("drill", "Drill", household.id)
@@ -1735,6 +1874,8 @@ private class FakeInventoryGateway(
         private set
     var updatedAdditionalPhotos: List<ItemPhoto> = emptyList()
         private set
+    val addedPhotos = mutableListOf<ItemPhoto>()
+    val addedCreationOrderStarts = mutableListOf<Long?>()
     var movedParentItemId: String? = null
         private set
     val deletedItemIds = mutableListOf<String>()
@@ -1845,6 +1986,30 @@ private class FakeInventoryGateway(
         )
         updatedAttachmentToDelete = attachmentToDelete
         updatedAdditionalPhotos = additionalPhotos
+        inventory = inventory.withItem(updated)
+        onResult(Result.success(updated))
+    }
+
+    override fun addItemPhotos(
+        householdId: String,
+        item: Item,
+        updater: AuthenticatedIdentity,
+        photos: List<ItemPhoto>,
+        creationOrderStart: Long?,
+        onResult: (Result<Item>) -> Unit,
+    ) {
+        addedPhotos += photos
+        addedCreationOrderStarts += creationOrderStart
+        val first = photos.firstOrNull()
+        val updated = if (item.photoAttachmentId == null && first != null) {
+            item.copy(
+                photoAttachmentId = "attachment-${addedPhotos.size}",
+                photoUrl = "gs://mystuff/households/$householdId/items/${item.id}/attachments/attachment-${addedPhotos.size}.webp",
+                photoThumbnailUrl = "gs://mystuff/households/$householdId/items/${item.id}/attachments/attachment-${addedPhotos.size}-thumb.webp",
+            )
+        } else {
+            item
+        }
         inventory = inventory.withItem(updated)
         onResult(Result.success(updated))
     }

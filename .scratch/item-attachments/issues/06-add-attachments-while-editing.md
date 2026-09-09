@@ -18,3 +18,4 @@
 - Added a separate Edit attachment-addition flow that reuses camera capture, multi-selection, arbitrary-ratio cropping, and attachment-specific image optimization.
 - Edit saves append immutable attachment records, continue known creation-order sequences, preserve an existing Item Photo, or project the first new attachment when no Item Photo exists.
 - Cancellation, camera back, retake, skip, and replacement transitions clean up app-owned temporary photo files without deleting picker-owned sources.
+- Superseded by [Simplify adding Photos to an existing Item](../../existing-item-photo-picker/spec.md): existing-Item Photo addition now starts from the Item overflow menu, and Edit is metadata-only.

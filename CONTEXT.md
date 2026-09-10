@@ -12,8 +12,12 @@ _Avoid_: Account, family account, workspace
 A person who has access to a Household through their own identity.
 _Avoid_: User, collaborator
 
+**Household Access**:
+An ongoing authorization, managed by the Household Owner, for one Google email address to access a Household. It binds to that Google identity on first sign-in and lasts until the Household Owner removes it.
+_Avoid_: Invitation, invite, access link
+
 **Household Owner**:
-The Member responsible for Household membership and ownership.
+The Member responsible for Household Access and ownership.
 _Avoid_: Administrator, superuser
 
 **Item**:

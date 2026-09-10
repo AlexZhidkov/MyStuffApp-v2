@@ -2,11 +2,11 @@
 
 **What to build:** A privately distributable prototype whose complete two-Member Household journey is verified through automated correctness checks and a facilitated target-device session.
 
-**Blocked by:** 07 — Members edit Item details and Tags; 08 — Members find Items through Household search; 09 — Members move an Item subtree; 10 — Members permanently delete Items and subtrees; 11 — Household Owner removes a Member; 12 — Members rename and the Owner deletes the Household.
+**Blocked by:** 07 — Members edit Item details and Tags; 08 — Members find Items through Household search; 09 — Members move an Item subtree; 10 — Members permanently delete Items and subtrees; 11 — Household Owner manages Household Access; 12 — Members rename and the Owner deletes the Household.
 
 **Status:** ready-for-agent
 
-- [ ] Automated checks pass for Firebase authorization, one-Household membership, invitation acceptance and expiry, tree invariants, Item validation, movement, deletion, photo cleanup, and search ranking.
+- [ ] Automated checks pass for Firebase authorization, one-Household membership, Household Access claiming and removal, tree invariants, Item validation, movement, deletion, photo cleanup, and search ranking.
 - [ ] Two connected Members see each other's Household and Inventory changes without manual refresh.
 - [ ] Firebase default behavior is used for offline caching, offline writes, and concurrent changes without custom guarantees.
 - [ ] The private/internal Android build installs and runs on a Google Pixel 8 Pro running Android 17.

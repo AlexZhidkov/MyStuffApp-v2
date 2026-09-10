@@ -1,7 +1,7 @@
 # Household Inventory Android Prototype
 
 Status: Draft
-Last updated: 2026-07-29
+Last updated: 2026-09-10
 
 ## Product summary
 
@@ -23,13 +23,13 @@ The prototype will be evaluated through direct Member feedback rather than a num
 
 ## V1 scope
 
-V1 is a private prototype distributed only to invited testers. It is not a public Play Store release and is not expected to meet production launch standards.
+V1 is a private prototype distributed only to selected testers. It is not a public Play Store release and is not expected to meet production launch standards.
 
 V1 includes:
 
 - Google sign-in
 - One Household membership per Member
-- Household creation, invitations, and Member removal
+- Household creation and Owner-managed Household Access
 - A generic tree of Items without separate Item types
 - Camera-first Item creation with an optional photo
 - Browsing, editing, moving, and deleting Items
@@ -67,7 +67,7 @@ V1 includes:
 - Tags are the only classification mechanism.
 - Duplicate Item names are allowed, including beneath the same Parent Item.
 - All Members have equal permissions for Inventory operations.
-- Only the Household Owner manages membership and deletes the Household.
+- Only the Household Owner manages Household Access and deletes the Household.
 - Delete means permanent removal; v1 has no trash or restore workflow.
 
 ## Participants
@@ -76,16 +76,15 @@ V1 includes:
 
 The Member who creates the Household. The Household Owner has the same Inventory permissions as every other Member and additionally can:
 
-- Invite a Member
-- Revoke a pending invitation
-- View and remove Members
+- Add a Google email address to the Household's Members
+- View and remove Household Access
 - Delete the Household
 
 Ownership transfer is not supported in v1.
 
 ### Household Member
 
-A person who joins the Household using an invitation tied to their Google Account. A Member can browse, search, add, edit, move, and delete Items and can rename the Household.
+A person whose Google identity has access to the Household. A Member can browse, search, add, edit, move, and delete Items and can rename the Household.
 
 ## Core journeys
 
@@ -93,8 +92,10 @@ A person who joins the Household using an invitation tied to their Google Accoun
 
 1. A person signs in using their Google Account.
 2. If they already belong to a Household, the app opens that Household.
-3. If they do not belong to a Household, the app offers Household creation and invitation acceptance.
-4. A Member who already belongs to a Household cannot accept an invitation to another Household in v1.
+3. If they do not belong to a Household and their Google email has Household Access, the app automatically joins them to an eligible Household.
+4. If multiple Households are eligible, the backend chooses an arbitrary first match without asking the person.
+5. If no Household is eligible, the app offers Household creation.
+6. A Member who already belongs to a Household cannot join another Household in v1.
 
 ### Set up a Household
 
@@ -104,12 +105,12 @@ A person who joins the Household using an invitation tied to their Google Accoun
 4. The Household Owner adds child Items such as Kitchen, Garage, and Shed.
 5. Members may add deeper child Items such as cupboards, shelves, boxes, tools, and belongings.
 
-### Invite a Member
+### Give a Member access
 
 1. The Household Owner enters the intended Member's Google email address.
-2. The app creates a single-use invitation tied to that email address.
-3. The intended person opens the invitation and signs in with the same Google Account.
-4. If the invitation is valid and the person has no other Household membership, they join the Household.
+2. The app adds ongoing Household Access for that email address without sending a message or creating a link.
+3. The intended person signs in normally with the same Google Account.
+4. If they do not already belong to a Household, the app automatically joins them and binds the Household Access to their stable Google identity.
 
 ### Add an Item
 
@@ -163,14 +164,14 @@ V1 does not guarantee a particular ordering for Child Items.
 | ACC-01 | A person can sign in and sign out using their Google Account; no other authentication provider is supported.                                                                                                                      |
 | ACC-02 | A signed-in person with no Household membership can create a named Household and becomes its Household Owner.                                                                                                                     |
 | ACC-03 | A Member can belong to no more than one Household in v1.                                                                                                                                                                          |
-| ACC-04 | A Member who already belongs to a Household cannot create another Household or accept another Household invitation.                                                                                                               |
-| ACC-05 | The Household Owner can create an invitation tied to one Google email address.                                                                                                                                                    |
-| ACC-06 | An invitation is single-use, revocable, and valid for seven days. Accepting, revoking, or replacing it invalidates the original link immediately.                                                                                 |
-| ACC-07 | Invitation acceptance requires sign-in with the Google Account whose email address matches the invitation.                                                                                                                        |
-| ACC-08 | The Household Owner can view and remove Household Members but cannot remove themselves.                                                                                                                                           |
-| ACC-09 | Removing a Member retains the Household's Items and their attribution metadata but removes that Member's backend access to the Household.                                                                                         |
+| ACC-04 | A Member who already belongs to a Household cannot create or join another Household.                                                                                                                                             |
+| ACC-05 | The Household Owner manages ongoing Household Access in one Members screen without the app sending messages or creating links.                                                                                                  |
+| ACC-06 | Household Access matches the entered and authenticated Google email addresses after trimming and ignoring letter case; different addresses, including dot and `+` alias variants, remain distinct.                                  |
+| ACC-07 | On first eligible sign-in, Household Access binds to the Google identity's stable UID and automatically makes the person a Member. If several Households match, the backend atomically chooses an arbitrary first match without asking. |
+| ACC-08 | The Members screen shows the non-removable Owner first; an unclaimed row shows its email and **Not signed in yet**, while a claimed row shows the Member's Google name and email.                                                   |
+| ACC-09 | The Household Owner can remove another Member after confirmation but cannot remove themselves. Removal revokes backend access while retaining Items and attribution; re-adding the email creates fresh Household Access.           |
 | ACC-10 | All Members can view, add, edit, move, and delete non-root Items and can rename the Household.                                                                                                                                    |
-| ACC-11 | Only the Household Owner can manage invitations and membership or delete the Household.                                                                                                                                           |
+| ACC-11 | Only the Household Owner can manage Household Access or delete the Household.                                                                                                                                                    |
 | ACC-12 | Household names are trimmed, must contain 1–100 Unicode characters, and preserve their entered capitalization.                                                                                                                    |
 | ACC-13 | Household deletion is a separate settings action that shows the total Member and Item counts, states that all Household data and photos will be permanently removed, and requires the Household Owner to type the Household name. |
 
@@ -266,7 +267,7 @@ The Household is the root Item and boundary of one shared Inventory.
 - Name
 - Household Owner
 - Current Members
-- Pending invitations
+- Household Access
 - Created timestamp
 
 There is exactly one Household root in each Inventory.
@@ -279,15 +280,14 @@ There is exactly one Household root in each Inventory.
 - Household role: Owner or Member
 - Membership status
 
-### Invitation
+### Household Access
 
-- Immutable identity
 - Household identity
-- Intended Google email address
-- Created and expiry timestamps
-- Status: pending, accepted, revoked, expired, or replaced
+- Normalized Google email address
+- Bound Member identity after the first eligible sign-in
+- Created timestamp
 
-An invitation expires seven days after creation and can be accepted only once.
+Household Access is awaiting first sign-in until it binds to a Google identity. It remains active without expiring until the Household Owner removes it.
 
 ### Item
 
@@ -319,6 +319,7 @@ The model must preserve these invariants:
 - The Item form shows the Parent Item as a complete Item Path at the top of the screen.
 - Item details visually distinguish the selected Item from its Child Items.
 - Empty states explain the next useful action.
+- The Owner manages allowed email addresses and current Members in one Members screen, with the Owner clearly identified and unclaimed access labelled **Not signed in yet**.
 - Complete Item Paths remain available even when compact views collapse middle segments.
 - Destructive actions explain exactly what data will be permanently removed.
 - The app follows familiar Android navigation and system-back behavior.
@@ -329,8 +330,8 @@ The model must preserve these invariants:
 - Household data is readable and writable only by current Household Members.
 - Firebase authorization rules enforce the Household boundary independently of the client UI.
 - All current Members have equal access to Inventory operations.
-- Only the Household Owner can manage invitations, remove Members, or delete the Household.
-- Invitations are restricted to the intended Google Account, expire after seven days, are revocable, and cannot be reused.
+- Only the Household Owner can add or remove Household Access or delete the Household.
+- Household Access is restricted to the exact intended Google Account email, binds to its stable identity on first eligible sign-in, and remains until removed.
 - Removing a Member blocks their backend access to the Household.
 - Camera permission is requested only from the Member-initiated **Add item** or photo-edit flow.
 - Formal security review, offline cache revocation, account deletion, and production credential-hardening requirements are deferred beyond v1.
@@ -365,7 +366,7 @@ Automated tests cover correctness, including:
 
 - Firebase authorization boundaries
 - One-Household-per-Member enforcement
-- Account-bound invitation acceptance and expiry
+- Account-bound Household Access claiming and removal
 - Tree connectivity and cycle prevention
 - Root movement and Item-delete prevention
 - Item creation and validation
@@ -381,7 +382,7 @@ Performance and responsiveness are checked manually on the target device. V1 has
 The private prototype is ready for evaluation when:
 
 - A person can sign in with a Google Account and create a Household when they have no current Household.
-- The Household Owner can issue a seven-day, account-bound invitation that the intended Google Account can accept once.
+- The Household Owner can add account-bound Household Access, and the intended Google Account automatically joins on its first eligible sign-in.
 - A Member cannot create or join a second Household.
 - Two connected Members see the same Inventory and receive each other's changes without manual refresh.
 - A Member can build and browse a multi-level Item tree with duplicate names and no Item types.
@@ -407,7 +408,7 @@ The private prototype is ready for evaluation when:
 | Firebase default offline behavior may expose incomplete or stale data    | Make no offline guarantee and defer custom caching and revocation behavior.                                                                         |
 | Unsaved form data may be lost when the active flow is interrupted        | Accept this limitation for v1 and keep only an in-place retry while the form remains open.                                                          |
 | Accessibility has not been designed or validated                         | Accessibility work is explicitly deferred beyond v1.                                                                                                |
-| Private Household data could expose sensitive locations                  | Retain Firebase authorization rules and account-bound invitations even in the prototype.                                                            |
+| Private Household data could expose sensitive locations                  | Retain Firebase authorization rules and account-bound Household Access even in the prototype.                                                       |
 
 ## Future considerations
 

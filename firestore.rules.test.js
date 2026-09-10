@@ -891,5 +891,9 @@ test("only the Household Owner can list and create Household Access", async () =
     ...accessData,
     email: "pat@example.com",
   }));
+  await assertFails(setDoc(access(ownerDatabase, "owner@example.com"), {
+    ...accessData,
+    email: "owner@example.com",
+  }));
   await assertFails(deleteDoc(access(ownerDatabase, "sam@example.com")));
 });

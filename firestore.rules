@@ -57,6 +57,7 @@ service cloud.firestore {
         && request.resource.data.claimedAt == null
         && request.resource.data.createdAt == request.time
         && email != household.ownerEmail
+        && email != request.auth.token.email.lower()
         && isOwner(householdId);
     }
 

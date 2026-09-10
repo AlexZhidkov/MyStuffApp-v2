@@ -73,6 +73,12 @@ test("only the Household Owner can remove access and removal deletes membership"
     "memberships/member-2": { householdId: "household-1", role: "member" },
     "households/household-1": household("Our Home"),
     "households/household-1/access/sam@example.com": access("sam@example.com", "household-1", "member-2"),
+    "households/household-1/items/item-1": {
+      householdId: "household-1",
+      name: "Drill",
+      createdByDisplayName: "Alex",
+      updatedByDisplayName: "Sam",
+    },
   });
   const module = createHouseholdAccessModule({ database });
 
@@ -83,6 +89,12 @@ test("only the Household Owner can remove access and removal deletes membership"
   });
   assert.equal(database.data("memberships/member-2"), undefined);
   assert.equal(database.data("households/household-1/access/sam@example.com"), undefined);
+  assert.deepEqual(database.data("households/household-1/items/item-1"), {
+    householdId: "household-1",
+    name: "Drill",
+    createdByDisplayName: "Alex",
+    updatedByDisplayName: "Sam",
+  });
 
   await assert.rejects(
     module.removeAccess({ memberId: "member-2", householdId: "household-1", email: "sam@example.com" }),

@@ -26,8 +26,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -66,13 +67,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
@@ -177,6 +180,7 @@ private fun HouseholdRootContent(
 ) {
     var showInvitations by remember { mutableStateOf(false) }
     var deleteCandidate by remember { mutableStateOf<Item?>(null) }
+    val keyboardController = LocalSoftwareKeyboardController.current
     val itemPhotoPickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.PickMultipleVisualMedia(),
     ) { uris ->
@@ -327,25 +331,38 @@ private fun HouseholdRootContent(
                                 inventoryActions.openItem(inventoryState.inventory.rootItemId)
                             },
                         )
-                        TextField(
-                            value = inventoryState.searchQuery,
-                            onValueChange = inventoryActions::changeSearchQuery,
+                        Box(
                             modifier = Modifier.weight(1f),
-                            singleLine = true,
-                            label = { Text(stringResource(R.string.search_household)) },
-                            trailingIcon = {
-                                if (inventoryState.searchQuery.isNotEmpty()) {
-                                    IconButton(
-                                        onClick = { inventoryActions.changeSearchQuery("") },
-                                    ) {
-                                        Icon(
-                                            painter = painterResource(R.drawable.ic_clear),
-                                            contentDescription = stringResource(R.string.clear_search),
-                                        )
+                            contentAlignment = Alignment.CenterEnd,
+                        ) {
+                            TextField(
+                                value = inventoryState.searchQuery,
+                                onValueChange = inventoryActions::changeSearchQuery,
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                label = { Text(stringResource(R.string.search_household)) },
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                keyboardActions = KeyboardActions(
+                                    onSearch = { keyboardController?.hide() },
+                                ),
+                                trailingIcon = {
+                                    if (inventoryState.searchQuery.isNotEmpty()) {
+                                        Spacer(Modifier.size(48.dp))
                                     }
+                                },
+                            )
+                            if (inventoryState.searchQuery.isNotEmpty()) {
+                                IconButton(
+                                    onClick = { inventoryActions.changeSearchQuery("") },
+                                    modifier = Modifier.align(Alignment.CenterEnd),
+                                ) {
+                                    Icon(
+                                        painter = painterResource(R.drawable.ic_clear),
+                                        contentDescription = stringResource(R.string.clear_search),
+                                    )
                                 }
-                            },
-                        )
+                            }
+                        }
                     }
                 },
                 actions = {

@@ -454,7 +454,7 @@ private fun HouseholdRootContent(
                                     Text(
                                         text = result.itemPathText,
                                         style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.primary,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
                             }

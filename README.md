@@ -26,8 +26,8 @@ Currently implemented:
 - A signed-in Household entry screen
 - Transactional Household creation with one root Item and an Owner membership
 - Automatic reopening of an existing Household after sign-in
-- Owner-only, seven-day Household invitations with revocation and link replacement
-- Single-use invitation links that resume after Google sign-in and add the intended Member
+- Owner-managed persistent Household Access keyed by normalized Google email
+- Automatic Household Access claiming on Google sign-in with owner-only removal
 - Child Item creation and editing with names, descriptions, web URLs, Tags, and camera-first
   optional mobile-sized WebP photos and thumbnails
 - Independent persistent background uploads with terminal failure cleanup and
@@ -36,7 +36,7 @@ Currently implemented:
   and complete Item Paths
 - Optimistic drag-and-drop Child Item ordering shared by every Household Member
 - Confirmed permanent deletion of childless Items and their stored photos
-- Firebase rules and emulator tests for Household, Item, invitation, and photo authorization
+- Firebase rules and emulator tests for Household, Item, Household Access, and photo authorization
 - Unit-tested session state transitions
 
 Household deletion and connected synchronization are planned in the

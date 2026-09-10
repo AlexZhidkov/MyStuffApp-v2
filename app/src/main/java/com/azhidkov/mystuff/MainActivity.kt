@@ -35,13 +35,12 @@ class MainActivity : ComponentActivity() {
             this,
             SessionViewModel.Factory(
                 applicationContext = applicationContext,
-                invitationId = invitationIdFromLink(intent?.dataString),
             ),
         )[SessionViewModel::class.java]
         sessionViewModel.attach(this)
         val sessionController = sessionViewModel.controller
         val itemPhotoLoader = sessionViewModel.itemPhotoLoader
-        val invitationGateway = FirebaseInvitationGateway()
+        val householdAccessGateway = sessionViewModel.householdAccessGateway
         val inventoryGateway = FirebaseInventoryGateway()
         val itemAttachmentGateway = FirebaseItemAttachmentGateway()
         val searchGateway = FirebaseSearchGateway()
@@ -70,8 +69,7 @@ class MainActivity : ComponentActivity() {
                     onSignOut = sessionController::signOut,
                     onCreateHousehold = sessionController::createHousehold,
                     onRetryOpeningHousehold = sessionController::retryOpeningHousehold,
-                    onRetryInvitationAcceptance = sessionController::retryInvitationAcceptance,
-                    invitationGateway = invitationGateway,
+                    householdAccessGateway = householdAccessGateway,
                     inventoryGateway = inventoryGateway,
                     itemAttachmentGateway = itemAttachmentGateway,
                     searchGateway = searchGateway,
@@ -95,8 +93,7 @@ private fun MyStuffApp(
     onSignOut: () -> Unit,
     onCreateHousehold: (String) -> Unit,
     onRetryOpeningHousehold: () -> Unit,
-    onRetryInvitationAcceptance: () -> Unit,
-    invitationGateway: InvitationGateway,
+    householdAccessGateway: HouseholdAccessGateway,
     inventoryGateway: InventoryGateway,
     itemAttachmentGateway: ItemAttachmentGateway,
     searchGateway: SearchGateway,
@@ -126,21 +123,18 @@ private fun MyStuffApp(
                 operation = state.operation,
                 householdNameError = state.householdNameError,
                 errorMessage = state.errorMessage,
-                invitationErrorMessage = state.invitationErrorMessage,
-                pendingInvitationId = state.pendingInvitationId,
                 onCreateHousehold = onCreateHousehold,
-                onRetryInvitationAcceptance = onRetryInvitationAcceptance,
                 onSignOut = onSignOut,
             )
 
             AppDestination.HouseholdRoot -> {
                 val household = requireNotNull(state.household)
                 val identity = requireNotNull(state.identity)
-                val invitationController = remember(household.id, identity.id) {
-                    InvitationController(
+                val householdAccessController = remember(household.id, identity.id) {
+                    HouseholdAccessController(
                         household = household,
-                        currentMemberId = identity.id,
-                        gateway = invitationGateway,
+                        currentIdentity = identity,
+                        gateway = householdAccessGateway,
                     )
                 }
                 val inventoryController = remember(household.id, identity.id) {
@@ -159,13 +153,13 @@ private fun MyStuffApp(
                 var inventoryState by remember(inventoryController) {
                     mutableStateOf(inventoryController.state)
                 }
-                var invitationState by remember(invitationController) {
-                    mutableStateOf(invitationController.state)
+                var householdAccessState by remember(householdAccessController) {
+                    mutableStateOf(householdAccessController.state)
                 }
-                DisposableEffect(invitationController) {
-                    invitationController.onStateChanged = { invitationState = it }
-                    invitationState = invitationController.state
-                    onDispose { invitationController.onStateChanged = {} }
+                DisposableEffect(householdAccessController) {
+                    householdAccessController.onStateChanged = { householdAccessState = it }
+                    householdAccessState = householdAccessController.state
+                    onDispose { householdAccessController.onStateChanged = {} }
                 }
                 DisposableEffect(inventoryController) {
                     inventoryController.onStateChanged = { inventoryState = it }
@@ -175,14 +169,12 @@ private fun MyStuffApp(
 
                 HouseholdRootScreen(
                     inventoryState = inventoryState,
-                    invitationState = invitationState,
+                    householdAccessState = householdAccessState,
+                    currentIdentity = identity,
                     signOutInProgress = state.operation == SessionOperation.SigningOut,
                     sessionMessage = state.errorMessage,
-                    onCreateInvitation = invitationController::create,
-                    onRevokeInvitation = invitationController::revoke,
-                    onReplaceInvitation = { invitationId, email ->
-                        invitationController.replace(invitationId, email)
-                    },
+                    onAddHouseholdAccess = householdAccessController::add,
+                    onRemoveHouseholdAccess = householdAccessController::remove,
                     inventoryActions = inventoryController,
                     onSignOut = onSignOut,
                 )

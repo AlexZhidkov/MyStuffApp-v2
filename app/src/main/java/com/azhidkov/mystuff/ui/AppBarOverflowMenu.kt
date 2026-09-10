@@ -21,7 +21,7 @@ import com.azhidkov.mystuff.R
 @Composable
 internal fun AppBarOverflowMenu(
     enabled: Boolean,
-    onInvitations: (() -> Unit)? = null,
+    onMembers: (() -> Unit)? = null,
     onSignOut: () -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -56,9 +56,9 @@ internal fun AppBarOverflowMenu(
                 },
                 enabled = enabled,
             )
-            onInvitations?.let {
+            onMembers?.let {
                 DropdownMenuItem(
-                    text = { Text(stringResource(R.string.invitations)) },
+                    text = { Text(stringResource(R.string.members)) },
                     onClick = {
                         expanded = false
                         it()

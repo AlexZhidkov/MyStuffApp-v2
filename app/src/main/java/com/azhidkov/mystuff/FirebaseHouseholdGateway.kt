@@ -6,10 +6,36 @@ import com.google.firebase.firestore.Source
 
 class FirebaseHouseholdGateway internal constructor(
     private val store: HouseholdDocumentStore,
+    private val accessClaimGateway: HouseholdAccessClaimGateway =
+        NoHouseholdAccessClaimGateway,
 ) : HouseholdGateway {
-    constructor() : this(FirestoreHouseholdDocumentStore())
+    constructor(accessClaimGateway: HouseholdAccessClaimGateway) : this(
+        store = FirestoreHouseholdDocumentStore(),
+        accessClaimGateway = accessClaimGateway,
+    )
+
+    constructor() : this(
+        store = FirestoreHouseholdDocumentStore(),
+        accessClaimGateway = FirebaseHouseholdAccessGateway(),
+    )
 
     override fun findForMember(
+        identity: AuthenticatedIdentity,
+        onResult: (Result<Household?>) -> Unit,
+    ) {
+        accessClaimGateway.claim(identity) { claimResult ->
+            claimResult.onSuccess { loadMembership(identity.id, onResult) }
+                .onFailure { failure -> onResult(Result.failure(failure)) }
+        }
+    }
+
+    // Kept for the document-store seam tests; production always supplies the signed-in identity.
+    internal fun findForMember(
+        memberId: String,
+        onResult: (Result<Household?>) -> Unit,
+    ) = loadMembership(memberId, onResult)
+
+    private fun loadMembership(
         memberId: String,
         onResult: (Result<Household?>) -> Unit,
     ) {
@@ -94,6 +120,7 @@ internal data class HouseholdDocuments(
         return Household(
             id = householdId,
             ownerMemberId = ownerMemberId,
+            ownerEmail = household.nullableString(OWNER_EMAIL),
             useTags = household.booleanOrDefault(USE_TAGS),
             rootItem = Item(
                 id = rootItemId,
@@ -125,7 +152,7 @@ internal data class HouseholdBootstrapDocument(
             HOUSEHOLD_NAME to household.string(NAME),
             OWNER_MEMBER_ID to household.string(OWNER_MEMBER_ID),
             USE_TAGS to household.boolean(USE_TAGS),
-        ),
+        ) + household.nullableString(OWNER_EMAIL)?.let { mapOf(OWNER_EMAIL to it) }.orEmpty(),
     )
 
     fun toHousehold(): Household {
@@ -142,6 +169,7 @@ internal data class HouseholdBootstrapDocument(
         return Household(
             id = householdId,
             ownerMemberId = ownerMemberId,
+            ownerEmail = data.nullableString(OWNER_EMAIL),
             useTags = data.boolean(USE_TAGS),
             rootItem = Item(
                 id = householdId,
@@ -249,6 +277,7 @@ private class FirestoreHouseholdDocumentStore(
             mapOf(
                 HOUSEHOLD_NAME to bootstrap.data[HOUSEHOLD_NAME],
                 OWNER_MEMBER_ID to bootstrap.data[OWNER_MEMBER_ID],
+                OWNER_EMAIL to bootstrap.data[OWNER_EMAIL],
                 USE_TAGS to bootstrap.data[USE_TAGS],
             ),
         ).addOnSuccessListener { onResult(Result.success(Unit)) }
@@ -297,11 +326,13 @@ private fun newHouseholdDocuments(
             ROLE to OWNER,
             HOUSEHOLD_NAME to name,
             OWNER_MEMBER_ID to owner.id,
+            OWNER_EMAIL to requireNotNull(normalizeGoogleEmail(owner.email)),
             USE_TAGS to false,
         ),
         household = mapOf(
             NAME to name,
             OWNER_MEMBER_ID to owner.id,
+            OWNER_EMAIL to requireNotNull(normalizeGoogleEmail(owner.email)),
             ROOT_ITEM_ID to householdId,
             USE_TAGS to false,
             CREATED_AT to serverTimestamp,
@@ -351,6 +382,7 @@ private const val MEMBER = "member"
 private const val NAME = "name"
 private const val HOUSEHOLD_NAME = "householdName"
 private const val OWNER_MEMBER_ID = "ownerMemberId"
+private const val OWNER_EMAIL = "ownerEmail"
 private const val ROOT_ITEM_ID = "rootItemId"
 private const val USE_TAGS = "useTags"
 private const val PARENT_ITEM_ID = "parentItemId"

@@ -18,13 +18,14 @@ data class Item(
 data class Household(
     val id: String,
     val ownerMemberId: String,
+    val ownerEmail: String? = null,
     val rootItem: Item,
     val useTags: Boolean = false,
 )
 
 interface HouseholdGateway {
     fun findForMember(
-        memberId: String,
+        identity: AuthenticatedIdentity,
         onResult: (Result<Household?>) -> Unit,
     )
 
@@ -37,7 +38,7 @@ interface HouseholdGateway {
 
 internal object NoHouseholdGateway : HouseholdGateway {
     override fun findForMember(
-        memberId: String,
+        identity: AuthenticatedIdentity,
         onResult: (Result<Household?>) -> Unit,
     ) {
         onResult(Result.success(null))

@@ -10,16 +10,14 @@ import com.azhidkov.mystuff.ui.itemPhotoBitmapLoader
 
 internal class SessionViewModel private constructor(
     applicationContext: Context,
-    invitationId: String?,
 ) : ViewModel() {
     private val authenticationGateway = FirebaseAuthenticationGateway()
+    val householdAccessGateway = FirebaseHouseholdAccessGateway()
 
     val itemPhotoLoader: ItemPhotoLoader<Bitmap> = itemPhotoBitmapLoader(applicationContext)
     val controller = SessionController(
         authenticationGateway = authenticationGateway,
-        householdGateway = FirebaseHouseholdGateway(),
-        invitationAcceptanceGateway = FirebaseInvitationAcceptanceGateway(),
-        invitationId = invitationId,
+        householdGateway = FirebaseHouseholdGateway(householdAccessGateway),
         onIdentityChanged = itemPhotoLoader::onSessionChanged,
     )
 
@@ -37,9 +35,8 @@ internal class SessionViewModel private constructor(
 
     class Factory(
         private val applicationContext: Context,
-        private val invitationId: String?,
     ) : ViewModelProvider.Factory {
         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-            requireNotNull(modelClass.cast(SessionViewModel(applicationContext, invitationId)))
+            requireNotNull(modelClass.cast(SessionViewModel(applicationContext)))
     }
 }

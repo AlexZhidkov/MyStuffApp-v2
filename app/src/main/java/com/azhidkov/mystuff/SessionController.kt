@@ -15,24 +15,12 @@ interface AuthenticationGateway {
     }
 
     fun signIn(onResult: (Result<AuthenticatedIdentity>) -> Unit)
-
     fun signOut(onResult: (Result<Unit>) -> Unit)
 }
 
-enum class AppDestination {
-    SignIn,
-    OpeningHousehold,
-    HouseholdEntry,
-    HouseholdRoot,
-}
+enum class AppDestination { SignIn, OpeningHousehold, HouseholdEntry, HouseholdRoot }
 
-enum class SessionOperation {
-    SigningIn,
-    OpeningHousehold,
-    JoiningHousehold,
-    CreatingHousehold,
-    SigningOut,
-}
+enum class SessionOperation { SigningIn, OpeningHousehold, CreatingHousehold, SigningOut }
 
 data class SessionUiState(
     val destination: AppDestination,
@@ -41,19 +29,14 @@ data class SessionUiState(
     val householdNameError: String? = null,
     val operation: SessionOperation? = null,
     val errorMessage: String? = null,
-    val invitationErrorMessage: String? = null,
-    val pendingInvitationId: String? = null,
 )
 
 class SessionController(
     private val authenticationGateway: AuthenticationGateway,
     private val householdGateway: HouseholdGateway = NoHouseholdGateway,
-    private val invitationAcceptanceGateway: InvitationAcceptanceGateway =
-        NoInvitationAcceptanceGateway,
-    invitationId: String? = null,
     private val onIdentityChanged: (String?) -> Unit = {},
 ) {
-    var state: SessionUiState = stateFor(authenticationGateway.currentIdentity, invitationId)
+    var state: SessionUiState = stateFor(authenticationGateway.currentIdentity)
         private set
 
     var onStateChanged: (SessionUiState) -> Unit = {}
@@ -63,30 +46,20 @@ class SessionController(
 
     init {
         onIdentityChanged(state.identity?.id)
-        state.identity?.let(::resumeFor)
+        state.identity?.let(::openHouseholdFor)
         stopObservingIdentity = authenticationGateway.observeIdentity(::authenticationChanged)
     }
 
     fun signIn() {
         if (state.operation != null) return
-
-        updateState(
-            state.copy(
-                operation = SessionOperation.SigningIn,
-                errorMessage = null,
-            ),
-        )
+        updateState(state.copy(operation = SessionOperation.SigningIn, errorMessage = null))
         authenticationGateway.signIn { result ->
-            result.onSuccess { identity ->
-                authenticationChanged(identity)
-            }.onFailure { failure ->
-                val pendingInvitationId = state.pendingInvitationId
+            result.onSuccess(::authenticationChanged).onFailure { failure ->
                 authenticationGateway.signOut {
                     updateState(
                         SessionUiState(
                             destination = AppDestination.SignIn,
                             errorMessage = buildSignInError(failure),
-                            pendingInvitationId = pendingInvitationId,
                         ),
                     )
                 }
@@ -99,63 +72,15 @@ class SessionController(
         stopObservingIdentity = {}
     }
 
-    private fun resumeFor(identity: AuthenticatedIdentity) {
-        val invitationId = state.pendingInvitationId
-        if (invitationId == null) {
-            openHouseholdFor(identity)
-        } else {
-            acceptInvitation(identity, invitationId)
-        }
-    }
-
-    private fun acceptInvitation(
-        identity: AuthenticatedIdentity,
-        invitationId: String,
-    ) {
-        updateState(
-            SessionUiState(
-                destination = AppDestination.HouseholdEntry,
-                identity = identity,
-                operation = SessionOperation.JoiningHousehold,
-                pendingInvitationId = invitationId,
-            ),
-        )
-        invitationAcceptanceGateway.accept(invitationId) { result ->
-            result.onSuccess {
-                openHouseholdFor(identity)
-            }.onFailure { failure ->
-                openHouseholdFor(
-                    identity = identity,
-                    pendingInvitationId = invitationId,
-                    invitationError = failure.message
-                        ?: "The invitation could not be accepted.",
-                )
-            }
-        }
-    }
-
-    fun retryInvitationAcceptance() {
-        val identity = state.identity ?: return
-        val invitationId = state.pendingInvitationId ?: return
-        if (state.operation != null) return
-        acceptInvitation(identity, invitationId)
-    }
-
-    private fun openHouseholdFor(
-        identity: AuthenticatedIdentity,
-        pendingInvitationId: String? = null,
-        invitationError: String? = null,
-    ) {
+    private fun openHouseholdFor(identity: AuthenticatedIdentity) {
         updateState(
             SessionUiState(
                 destination = AppDestination.OpeningHousehold,
                 identity = identity,
                 operation = SessionOperation.OpeningHousehold,
-                pendingInvitationId = pendingInvitationId,
-                invitationErrorMessage = invitationError,
             ),
         )
-        householdGateway.findForMember(identity.id) { result ->
+        householdGateway.findForMember(identity) { result ->
             result.onSuccess { household ->
                 updateState(
                     SessionUiState(
@@ -166,8 +91,6 @@ class SessionController(
                         },
                         identity = identity,
                         household = household,
-                        pendingInvitationId = pendingInvitationId,
-                        invitationErrorMessage = invitationError,
                     ),
                 )
             }.onFailure { failure ->
@@ -177,8 +100,6 @@ class SessionController(
                         identity = identity,
                         errorMessage = failure.message?.takeIf(String::isNotBlank)
                             ?: "Please try again.",
-                        invitationErrorMessage = invitationError,
-                        pendingInvitationId = pendingInvitationId,
                     ),
                 )
             }
@@ -188,16 +109,11 @@ class SessionController(
     fun retryOpeningHousehold() {
         val identity = state.identity ?: return
         if (state.destination != AppDestination.OpeningHousehold || state.operation != null) return
-        openHouseholdFor(
-            identity = identity,
-            pendingInvitationId = state.pendingInvitationId,
-            invitationError = state.invitationErrorMessage,
-        )
+        openHouseholdFor(identity)
     }
 
     fun signOut() {
         if (state.operation != null) return
-
         publishIdentity(null)
         updateState(
             SessionUiState(
@@ -269,16 +185,8 @@ class SessionController(
 
     private fun authenticationChanged(identity: AuthenticatedIdentity?) {
         if (!publishIdentity(identity?.id)) return
-        if (identity == null) {
-            updateState(
-                SessionUiState(
-                    destination = AppDestination.SignIn,
-                    pendingInvitationId = state.pendingInvitationId,
-                ),
-            )
-        } else {
-            resumeFor(identity)
-        }
+        if (identity == null) updateState(SessionUiState(destination = AppDestination.SignIn))
+        else openHouseholdFor(identity)
     }
 
     private fun publishIdentity(identityId: String?): Boolean {
@@ -289,34 +197,19 @@ class SessionController(
     }
 
     private companion object {
-        fun buildSignInError(failure: Throwable): String {
-            val detail = failure.message?.takeIf(String::isNotBlank)
-                ?: "Please try again."
-            return "Couldn't sign in. $detail"
-        }
+        fun buildSignInError(failure: Throwable): String =
+            "Couldn't sign in. ${failure.message?.takeIf(String::isNotBlank) ?: "Please try again."}"
 
-        fun buildSignOutError(failure: Throwable): String {
-            val detail = failure.message?.takeIf(String::isNotBlank)
-                ?: "Please try again."
-            return "Signed out of MyStuff. Couldn't clear the Google session. $detail"
-        }
+        fun buildSignOutError(failure: Throwable): String =
+            "Signed out of MyStuff. Couldn't clear the Google session. " +
+                (failure.message?.takeIf(String::isNotBlank) ?: "Please try again.")
 
-        fun stateFor(
-            identity: AuthenticatedIdentity?,
-            invitationId: String?,
-        ): SessionUiState =
-            if (identity == null) {
-                SessionUiState(
-                    destination = AppDestination.SignIn,
-                    pendingInvitationId = invitationId,
-                )
-            } else {
-                SessionUiState(
-                    destination = AppDestination.OpeningHousehold,
-                    identity = identity,
-                    operation = SessionOperation.OpeningHousehold,
-                    pendingInvitationId = invitationId,
-                )
-            }
+        fun stateFor(identity: AuthenticatedIdentity?): SessionUiState =
+            if (identity == null) SessionUiState(destination = AppDestination.SignIn)
+            else SessionUiState(
+                destination = AppDestination.OpeningHousehold,
+                identity = identity,
+                operation = SessionOperation.OpeningHousehold,
+            )
     }
 }

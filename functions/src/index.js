@@ -13,8 +13,8 @@ import { createSearchHandlers } from "./search-handlers.js";
 import { createSearchModule } from "./search-module.js";
 import { createItemMoveHandlers } from "./item-move-handlers.js";
 import { createItemMoveModule } from "./item-move-module.js";
-import { createInvitationAcceptanceHandlers } from "./invitation-acceptance-handlers.js";
-import { createInvitationAcceptanceModule } from "./invitation-acceptance-module.js";
+import { createHouseholdAccessHandlers } from "./household-access-handlers.js";
+import { createHouseholdAccessModule } from "./household-access-module.js";
 import { createItemDeletionHandlers } from "./item-deletion-handlers.js";
 import { createItemDeletionModule } from "./item-deletion-module.js";
 
@@ -30,7 +30,7 @@ const runtimeOptions = {
 };
 let handlers;
 let itemMoveHandlers;
-let invitationAcceptanceHandlers;
+let householdAccessHandlers;
 let itemDeletionHandlers;
 
 function getHandlers() {
@@ -97,17 +97,21 @@ export const cleanupDeletedInventoryItem = onDocumentCreated(
   (event) => getItemDeletionHandlers().cleanupDeletedInventoryItem(event),
 );
 
-function getInvitationAcceptanceHandlers() {
-  if (invitationAcceptanceHandlers !== undefined) {
-    return invitationAcceptanceHandlers;
+function getHouseholdAccessHandlers() {
+  if (householdAccessHandlers !== undefined) {
+    return householdAccessHandlers;
   }
-  invitationAcceptanceHandlers = createInvitationAcceptanceHandlers({
-    acceptance: createInvitationAcceptanceModule({ database: getFirestore() }),
+  householdAccessHandlers = createHouseholdAccessHandlers({
+    householdAccess: createHouseholdAccessModule({ database: getFirestore() }),
     logger,
   });
-  return invitationAcceptanceHandlers;
+  return householdAccessHandlers;
 }
 
-export const acceptHouseholdInvitation = onCall(runtimeOptions, (request) =>
-  getInvitationAcceptanceHandlers().acceptHouseholdInvitation(request),
+export const claimHouseholdAccess = onCall(runtimeOptions, (request) =>
+  getHouseholdAccessHandlers().claimHouseholdAccess(request),
+);
+
+export const removeHouseholdAccess = onCall(runtimeOptions, (request) =>
+  getHouseholdAccessHandlers().removeHouseholdAccess(request),
 );

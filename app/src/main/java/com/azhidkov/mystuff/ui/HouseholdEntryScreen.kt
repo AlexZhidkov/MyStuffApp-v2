@@ -41,10 +41,7 @@ fun HouseholdEntryScreen(
     operation: SessionOperation?,
     householdNameError: String?,
     errorMessage: String?,
-    invitationErrorMessage: String?,
-    pendingInvitationId: String?,
     onCreateHousehold: (String) -> Unit,
-    onRetryInvitationAcceptance: () -> Unit,
     onSignOut: () -> Unit,
 ) {
     var householdName by remember { mutableStateOf("") }
@@ -93,103 +90,59 @@ fun HouseholdEntryScreen(
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(Modifier.height(8.dp))
-            if (pendingInvitationId != null) {
-                Text(
-                    text = stringResource(R.string.accept_invitation_title),
-                    style = MaterialTheme.typography.headlineLarge,
-                    fontWeight = FontWeight.Bold,
-                )
+            Text(
+                text = stringResource(R.string.create_household_title),
+                style = MaterialTheme.typography.headlineLarge,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(Modifier.height(12.dp))
+            Text(
+                text = stringResource(R.string.create_household_body),
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(28.dp))
+            OutlinedTextField(
+                value = householdName,
+                onValueChange = { householdName = it },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = operation == null,
+                label = { Text(stringResource(R.string.household_name)) },
+                supportingText = {
+                    Text(
+                        householdNameError
+                            ?: stringResource(R.string.household_name_supporting_text),
+                    )
+                },
+                isError = householdNameError != null,
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(
+                    onDone = { onCreateHousehold(householdName) },
+                ),
+            )
+            if (errorMessage != null) {
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    text = stringResource(
-                        if (operation == SessionOperation.JoiningHousehold) {
-                            R.string.accepting_invitation
+                    text = errorMessage,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            Spacer(Modifier.height(20.dp))
+            Button(
+                onClick = { onCreateHousehold(householdName) },
+                enabled = operation == null,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    stringResource(
+                        if (operation == SessionOperation.CreatingHousehold) {
+                            R.string.creating_household
                         } else {
-                            R.string.accept_invitation_body
+                            R.string.create_household
                         },
                     ),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                if (invitationErrorMessage != null) {
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        text = invitationErrorMessage,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    Button(
-                        onClick = onRetryInvitationAcceptance,
-                        enabled = operation == null,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(stringResource(R.string.retry_invitation))
-                    }
-                }
-                Spacer(Modifier.height(32.dp))
-            }
-            if (operation != SessionOperation.JoiningHousehold) {
-                Text(
-                    text = stringResource(R.string.create_household_title),
-                    style = MaterialTheme.typography.headlineLarge,
-                    fontWeight = FontWeight.Bold,
-                )
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    text = stringResource(R.string.create_household_body),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(28.dp))
-                OutlinedTextField(
-                    value = householdName,
-                    onValueChange = { householdName = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = operation == null,
-                    label = { Text(stringResource(R.string.household_name)) },
-                    supportingText = {
-                        Text(
-                            householdNameError
-                                ?: stringResource(R.string.household_name_supporting_text),
-                        )
-                    },
-                    isError = householdNameError != null,
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(
-                        onDone = { onCreateHousehold(householdName) },
-                    ),
-                )
-                if (errorMessage != null && pendingInvitationId == null) {
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        text = errorMessage,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                }
-                Spacer(Modifier.height(20.dp))
-                Button(
-                    onClick = { onCreateHousehold(householdName) },
-                    enabled = operation == null,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(
-                        stringResource(
-                            if (operation == SessionOperation.CreatingHousehold) {
-                                R.string.creating_household
-                            } else {
-                                R.string.create_household
-                            },
-                        ),
-                    )
-                }
-                Spacer(Modifier.height(28.dp))
-                Text(
-                    text = stringResource(R.string.accept_invitation_link_prompt),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             Spacer(Modifier.weight(1f))

@@ -29,6 +29,7 @@ class FirebaseHouseholdGatewayTest {
                 "role" to "owner",
                 "householdName" to "Our Home",
                 "ownerMemberId" to "member-1",
+                "ownerEmail" to "alex@example.com",
                 "useTags" to false,
             ),
             store.createdDocuments?.membership,
@@ -37,6 +38,7 @@ class FirebaseHouseholdGatewayTest {
             mapOf(
                 "name" to "Our Home",
                 "ownerMemberId" to "member-1",
+                "ownerEmail" to "alex@example.com",
                 "rootItemId" to "household-1",
                 "useTags" to false,
                 "createdAt" to timestamp,

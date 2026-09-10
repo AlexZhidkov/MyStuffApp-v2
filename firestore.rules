@@ -26,14 +26,6 @@ service cloud.firestore {
       return /databases/$(database)/documents/households/$(householdId)/items/$(itemId)/attachments/$(attachmentId);
     }
 
-    function invitationPath(invitationId) {
-      return /databases/$(database)/documents/invitations/$(invitationId);
-    }
-
-    function invitationDraftPath(invitationId) {
-      return /databases/$(database)/documents/invitationDrafts/$(invitationId);
-    }
-
     function isMember(householdId) {
       return signedIn()
         && get(membershipPath(request.auth.uid)).data.householdId == householdId;
@@ -49,88 +41,23 @@ service cloud.firestore {
         && get(householdPath(householdId)).data.ownerMemberId == request.auth.uid;
     }
 
-    function validInvitationDraftCreate() {
+    function validHouseholdAccessCreate(householdId, email) {
+      let household = get(householdPath(householdId)).data;
       return request.resource.data.keys().hasOnly([
-          'householdId', 'intendedEmail', 'createdAt', 'replacesInvitationId'
+          'householdId', 'email', 'memberId', 'memberDisplayName',
+          'memberEmail', 'createdAt', 'claimedAt'
         ])
-        && request.resource.data.householdId is string
-        && request.resource.data.intendedEmail is string
-        && request.resource.data.intendedEmail.matches(
-          '^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$'
-        )
+        && request.resource.data.householdId == householdId
+        && request.resource.data.email == email
+        && request.resource.data.email.matches('^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$')
+        && request.resource.data.email == request.resource.data.email.lower()
+        && request.resource.data.memberId == null
+        && request.resource.data.memberDisplayName == null
+        && request.resource.data.memberEmail == null
+        && request.resource.data.claimedAt == null
         && request.resource.data.createdAt == request.time
-        && (
-          request.resource.data.replacesInvitationId == null
-          || validReplacementDraftCreate()
-        )
-        && isOwner(request.resource.data.householdId);
-    }
-
-    function validReplacementDraftCreate() {
-      let previousId = request.resource.data.replacesInvitationId;
-      let previous = get(invitationPath(previousId)).data;
-      return previousId is string
-        && previous.status == 'pending'
-        && previous.expiresAt > request.time
-        && previous.householdId == request.resource.data.householdId;
-    }
-
-    function validInvitationCreate(invitationId) {
-      let draft = get(invitationDraftPath(invitationId)).data;
-      return request.resource.data.keys().hasOnly([
-          'householdId', 'intendedEmail', 'createdAt', 'expiresAt', 'status',
-          'replacesInvitationId', 'replacedByInvitationId'
-        ])
-        && request.resource.data.householdId == draft.householdId
-        && request.resource.data.intendedEmail == draft.intendedEmail
-        && request.resource.data.createdAt == draft.createdAt
-        && request.resource.data.expiresAt
-          == draft.createdAt + duration.value(7, 'd')
-        && request.resource.data.status == 'pending'
-        && request.resource.data.replacesInvitationId
-          == draft.replacesInvitationId
-        && request.resource.data.replacedByInvitationId == null
-        && !existsAfter(invitationDraftPath(invitationId))
-        && (
-          draft.replacesInvitationId == null
-          || validReplacementCreate(invitationId)
-        )
-        && isOwner(draft.householdId);
-    }
-
-    function validReplacementCreate(invitationId) {
-      let previousId = request.resource.data.replacesInvitationId;
-      let previous = get(invitationPath(previousId)).data;
-      let previousAfter = getAfter(invitationPath(previousId)).data;
-      return previous.status == 'pending'
-        && previous.expiresAt > request.time
-        && previous.householdId == request.resource.data.householdId
-        && previousAfter.status == 'replaced'
-        && previousAfter.replacedByInvitationId == invitationId;
-    }
-
-    function validInvitationRevoke() {
-      return resource.data.status == 'pending'
-        && resource.data.expiresAt > request.time
-        && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['status'])
-        && request.resource.data.status == 'revoked'
-        && isOwner(resource.data.householdId);
-    }
-
-    function validInvitationReplace(invitationId) {
-      let replacementId = request.resource.data.replacedByInvitationId;
-      let replacement = getAfter(invitationPath(replacementId)).data;
-      return resource.data.status == 'pending'
-        && resource.data.expiresAt > request.time
-        && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['status', 'replacedByInvitationId'])
-        && request.resource.data.status == 'replaced'
-        && replacementId is string
-        && replacement.status == 'pending'
-        && replacement.replacesInvitationId == invitationId
-        && replacement.householdId == resource.data.householdId
-        && isOwner(resource.data.householdId);
+        && email != household.ownerEmail
+        && isOwner(householdId);
     }
 
     function validName(name) {
@@ -252,10 +179,12 @@ service cloud.firestore {
 
     function validHouseholdCreate(householdId) {
       return request.resource.data.keys().hasOnly([
-          'name', 'ownerMemberId', 'rootItemId', 'useTags', 'createdAt'
+          'name', 'ownerMemberId', 'ownerEmail', 'rootItemId', 'useTags', 'createdAt'
         ])
         && validName(request.resource.data.name)
         && request.resource.data.ownerMemberId == request.auth.uid
+        && request.resource.data.ownerEmail is string
+        && request.resource.data.ownerEmail.matches('^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$')
         && request.resource.data.rootItemId == householdId
         && request.resource.data.useTags is bool
         && request.resource.data.createdAt == request.time
@@ -267,13 +196,14 @@ service cloud.firestore {
       let householdId = request.resource.data.householdId;
       let household = getAfter(householdPath(householdId)).data;
       return request.resource.data.keys().hasOnly([
-          'householdId', 'role', 'householdName', 'ownerMemberId', 'useTags'
+          'householdId', 'role', 'householdName', 'ownerMemberId', 'ownerEmail', 'useTags'
         ])
         && householdId is string
         && request.resource.data.role == 'owner'
         && request.resource.data.householdName == household.name
         && request.resource.data.ownerMemberId == household.ownerMemberId
         && request.resource.data.ownerMemberId == memberId
+        && request.resource.data.ownerEmail == household.ownerEmail
         && request.resource.data.useTags == household.useTags
         && household.useTags is bool
         && existsAfter(rootItemPath(householdId));
@@ -284,13 +214,15 @@ service cloud.firestore {
       let household = get(householdPath(householdId)).data;
       return resource.data.keys().hasOnly(['householdId', 'role'])
         && request.resource.data.keys().hasOnly([
-          'householdId', 'role', 'householdName', 'ownerMemberId', 'useTags'
+          'householdId', 'role', 'householdName', 'ownerMemberId', 'ownerEmail', 'useTags'
         ])
         && request.resource.data.householdId == householdId
         && request.resource.data.role == resource.data.role
         && (resource.data.role == 'owner' || resource.data.role == 'member')
         && request.resource.data.householdName == household.name
         && request.resource.data.ownerMemberId == household.ownerMemberId
+        && request.resource.data.get('ownerEmail', household.ownerEmail)
+          == household.ownerEmail
         && (resource.data.role == 'owner') == (household.ownerMemberId == memberId)
         && request.resource.data.useTags == household.useTags
         && household.useTags is bool
@@ -395,22 +327,11 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    match /invitations/{invitationId} {
-      allow read: if isOwner(resource.data.householdId);
-      allow create: if signedIn() && validInvitationCreate(invitationId);
-      allow update: if signedIn()
-        && (
-          validInvitationRevoke()
-          || validInvitationReplace(invitationId)
-        );
-      allow delete: if false;
-    }
-
-    match /invitationDrafts/{invitationId} {
-      allow read: if isOwner(resource.data.householdId);
-      allow create: if signedIn() && validInvitationDraftCreate();
-      allow update: if false;
-      allow delete: if isOwner(resource.data.householdId);
+    match /households/{householdId}/access/{email} {
+      allow read: if isOwner(householdId);
+      allow create: if signedIn() && validHouseholdAccessCreate(householdId, email);
+      // Claiming and removal are backend transactions so membership and access cannot diverge.
+      allow update, delete: if false;
     }
 
     match /households/{householdId} {

@@ -28,7 +28,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -82,9 +81,9 @@ import androidx.compose.ui.zIndex
 import com.azhidkov.mystuff.DeferredInventoryError
 import com.azhidkov.mystuff.FailedItemAttachmentDraft
 import com.azhidkov.mystuff.CarouselImage
-import com.azhidkov.mystuff.HouseholdInvitation
-import com.azhidkov.mystuff.InvitationStatus
-import com.azhidkov.mystuff.InvitationUiState
+import com.azhidkov.mystuff.AuthenticatedIdentity
+import com.azhidkov.mystuff.HouseholdAccess
+import com.azhidkov.mystuff.HouseholdAccessUiState
 import com.azhidkov.mystuff.InventoryActions
 import com.azhidkov.mystuff.InventoryUiState
 import com.azhidkov.mystuff.Item
@@ -97,13 +96,6 @@ import com.azhidkov.mystuff.ItemPhotoSelectionPurpose
 import com.azhidkov.mystuff.R
 import com.azhidkov.mystuff.carouselImages
 import com.azhidkov.mystuff.otherAttachmentCount
-import java.time.Duration
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.time.format.FormatStyle
-import java.util.Locale
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
@@ -111,12 +103,12 @@ import kotlin.math.abs
 @Composable
 fun HouseholdRootScreen(
     inventoryState: InventoryUiState,
-    invitationState: InvitationUiState,
+    householdAccessState: HouseholdAccessUiState,
+    currentIdentity: AuthenticatedIdentity,
     signOutInProgress: Boolean,
     sessionMessage: String?,
-    onCreateInvitation: (String) -> Unit,
-    onRevokeInvitation: (String) -> Unit,
-    onReplaceInvitation: (String, String) -> Unit,
+    onAddHouseholdAccess: (String) -> Unit,
+    onRemoveHouseholdAccess: (String) -> Unit,
     inventoryActions: InventoryActions,
     onSignOut: () -> Unit,
 ) {
@@ -137,11 +129,11 @@ fun HouseholdRootScreen(
     Box(modifier = Modifier.fillMaxSize()) {
         HouseholdRootContent(
             inventoryState = inventoryState,
-            invitationState = invitationState,
+            householdAccessState = householdAccessState,
+            currentIdentity = currentIdentity,
             signOutInProgress = signOutInProgress,
-            onCreateInvitation = onCreateInvitation,
-            onRevokeInvitation = onRevokeInvitation,
-            onReplaceInvitation = onReplaceInvitation,
+            onAddHouseholdAccess = onAddHouseholdAccess,
+            onRemoveHouseholdAccess = onRemoveHouseholdAccess,
             inventoryActions = inventoryActions,
             onSignOut = onSignOut,
         )
@@ -170,15 +162,15 @@ internal suspend fun presentDeferredInventoryError(
 @Composable
 private fun HouseholdRootContent(
     inventoryState: InventoryUiState,
-    invitationState: InvitationUiState,
+    householdAccessState: HouseholdAccessUiState,
+    currentIdentity: AuthenticatedIdentity,
     signOutInProgress: Boolean,
-    onCreateInvitation: (String) -> Unit,
-    onRevokeInvitation: (String) -> Unit,
-    onReplaceInvitation: (String, String) -> Unit,
+    onAddHouseholdAccess: (String) -> Unit,
+    onRemoveHouseholdAccess: (String) -> Unit,
     inventoryActions: InventoryActions,
     onSignOut: () -> Unit,
 ) {
-    var showInvitations by remember { mutableStateOf(false) }
+    var showMembers by remember { mutableStateOf(false) }
     var deleteCandidate by remember { mutableStateOf<Item?>(null) }
     val keyboardController = LocalSoftwareKeyboardController.current
     val itemPhotoPickerLauncher = rememberLauncherForActivityResult(
@@ -187,14 +179,14 @@ private fun HouseholdRootContent(
         inventoryActions.photoPickerSelected(uris.map { ItemPhoto(it.toString()) })
     }
 
-    if (showInvitations) {
-        BackHandler { showInvitations = false }
-        InvitationsScreen(
-            state = invitationState,
-            onCreateInvitation = onCreateInvitation,
-            onRevokeInvitation = onRevokeInvitation,
-            onReplaceInvitation = onReplaceInvitation,
-            onClose = { showInvitations = false },
+    if (showMembers) {
+        BackHandler { showMembers = false }
+        MembersScreen(
+            state = householdAccessState,
+            owner = currentIdentity,
+            onAddAccess = onAddHouseholdAccess,
+            onRemoveAccess = onRemoveHouseholdAccess,
+            onClose = { showMembers = false },
         )
         return
     }
@@ -368,8 +360,8 @@ private fun HouseholdRootContent(
                 actions = {
                     AppBarOverflowMenu(
                         enabled = !signOutInProgress,
-                        onInvitations = if (invitationState.canManage) {
-                            { showInvitations = true }
+                        onMembers = if (householdAccessState.canManage) {
+                            { showMembers = true }
                         } else {
                             null
                         },
@@ -788,18 +780,19 @@ private fun ItemActionsOverflowMenu(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun InvitationsScreen(
-    state: InvitationUiState,
-    onCreateInvitation: (String) -> Unit,
-    onRevokeInvitation: (String) -> Unit,
-    onReplaceInvitation: (String, String) -> Unit,
+private fun MembersScreen(
+    state: HouseholdAccessUiState,
+    owner: AuthenticatedIdentity,
+    onAddAccess: (String) -> Unit,
+    onRemoveAccess: (String) -> Unit,
     onClose: () -> Unit,
 ) {
+    var removeCandidate by remember { mutableStateOf<HouseholdAccess?>(null) }
     Scaffold(
         contentWindowInsets = WindowInsets.safeDrawing,
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.invitations)) },
+                title = { Text(stringResource(R.string.members)) },
                 actions = {
                     IconButton(onClick = onClose) {
                         Icon(
@@ -818,27 +811,58 @@ private fun InvitationsScreen(
                 .padding(horizontal = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            item {
-                InvitationComposer(
-                    state = state,
-                    onCreateInvitation = onCreateInvitation,
+            item(key = "owner") {
+                MemberCard(
+                    name = owner.displayName ?: owner.email ?: stringResource(R.string.household_member),
+                    email = owner.email,
+                    detail = stringResource(R.string.household_owner),
+                    operationInProgress = true,
+                    removable = false,
+                    onRemove = {},
                 )
             }
-            items(
-                items = state.invitations,
-                key = HouseholdInvitation::id,
-            ) { invitation ->
-                InvitationCard(
-                    invitation = invitation,
-                    operationInProgress = state.operationInProgress,
-                    onRevoke = { onRevokeInvitation(invitation.id) },
-                    onReplace = {
-                        onReplaceInvitation(invitation.id, invitation.intendedEmail)
+            items(items = state.access, key = HouseholdAccess::email) { access ->
+                MemberCard(
+                    name = access.memberDisplayName ?: access.email,
+                    email = access.memberEmail ?: if (access.isClaimed) access.email else null,
+                    detail = if (access.isClaimed) {
+                        stringResource(R.string.household_member)
+                    } else {
+                        stringResource(R.string.not_signed_in_yet)
                     },
+                    operationInProgress = state.operationInProgress,
+                    removable = true,
+                    onRemove = { removeCandidate = access },
+                )
+            }
+            item {
+                AccessComposer(
+                    state = state,
+                    onAddAccess = onAddAccess,
                 )
             }
             item { Spacer(Modifier.height(24.dp)) }
         }
+    }
+    removeCandidate?.let { access ->
+        AlertDialog(
+            onDismissRequest = { removeCandidate = null },
+            title = { Text(stringResource(R.string.remove_household_access_title)) },
+            text = { Text(stringResource(R.string.remove_household_access_body, access.email)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onRemoveAccess(access.email)
+                        removeCandidate = null
+                    },
+                ) { Text(stringResource(R.string.remove)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { removeCandidate = null }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
     }
 }
 
@@ -1418,13 +1442,13 @@ private fun ItemFormScreen(
 }
 
 @Composable
-private fun InvitationComposer(
-    state: InvitationUiState,
-    onCreateInvitation: (String) -> Unit,
+private fun AccessComposer(
+    state: HouseholdAccessUiState,
+    onAddAccess: (String) -> Unit,
 ) {
     var email by remember { mutableStateOf("") }
     Text(
-        text = stringResource(R.string.household_invitations_body),
+        text = stringResource(R.string.household_access_body),
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -1441,10 +1465,10 @@ private fun InvitationComposer(
     )
     Spacer(Modifier.height(8.dp))
     Button(
-        onClick = { onCreateInvitation(email) },
+        onClick = { onAddAccess(email) },
         enabled = !state.operationInProgress,
     ) {
-        Text(stringResource(R.string.create_invitation))
+        Text(stringResource(R.string.add_household_access))
     }
     state.errorMessage?.let { error ->
         Spacer(Modifier.height(8.dp))
@@ -1457,17 +1481,16 @@ private fun InvitationComposer(
 }
 
 @Composable
-private fun InvitationCard(
-    invitation: HouseholdInvitation,
+private fun MemberCard(
+    name: String,
+    email: String?,
+    detail: String,
     operationInProgress: Boolean,
-    onRevoke: () -> Unit,
-    onReplace: () -> Unit,
+    removable: Boolean,
+    onRemove: () -> Unit,
 ) {
-    val status by currentInvitationStatus(invitation)
-    val presentation = invitationStatusPresentation(invitation, status)
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = presentation.containerColor),
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -1479,119 +1502,29 @@ private fun InvitationCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = invitation.intendedEmail,
+                    text = name,
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
-                InvitationStatusLabel(presentation.label)
+            }
+            email?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             Text(
-                text = presentation.detail,
+                text = detail,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (status == InvitationStatus.Pending) {
-                Text(
-                    text = stringResource(R.string.invitation_link),
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                SelectionContainer {
-                    Text(
-                        text = invitation.link,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                }
-            }
-            if (status == InvitationStatus.Pending) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = onRevoke, enabled = !operationInProgress) {
-                        Text(stringResource(R.string.revoke_invitation))
-                    }
-                    TextButton(onClick = onReplace, enabled = !operationInProgress) {
-                        Text(stringResource(R.string.replace_invitation))
-                    }
+            if (removable) {
+                TextButton(onClick = onRemove, enabled = !operationInProgress) {
+                    Text(stringResource(R.string.remove))
                 }
             }
         }
     }
 }
-
-@Composable
-private fun currentInvitationStatus(
-    invitation: HouseholdInvitation,
-) = produceState(
-    initialValue = invitation.statusAt(Instant.now()),
-    key1 = invitation.id,
-    key2 = invitation.expiresAt,
-    key3 = invitation.storedStatus,
-) {
-    if (invitation.storedStatus != InvitationStatus.Pending) return@produceState
-    val remaining = Duration.between(Instant.now(), invitation.expiresAt).toMillis()
-    if (remaining > 0) delay(remaining)
-    value = invitation.statusAt(Instant.now())
-}
-
-@Composable
-private fun InvitationStatusLabel(label: String) {
-    Surface(
-        shape = MaterialTheme.shapes.small,
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
-    ) {
-        Text(
-            text = label,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.Bold,
-        )
-    }
-}
-
-@Composable
-private fun invitationStatusPresentation(
-    invitation: HouseholdInvitation,
-    status: InvitationStatus,
-): InvitationStatusPresentation = when (status) {
-    InvitationStatus.Pending -> InvitationStatusPresentation(
-        containerColor = MaterialTheme.colorScheme.primaryContainer,
-        label = stringResource(R.string.invitation_pending),
-        detail = stringResource(
-            R.string.invitation_expires_on,
-            invitation.expiresAt.formattedDate(),
-        ),
-    )
-    InvitationStatus.Accepted -> InvitationStatusPresentation(
-        containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-        label = stringResource(R.string.invitation_accepted),
-        detail = stringResource(R.string.invitation_link_accepted),
-    )
-    InvitationStatus.Revoked -> InvitationStatusPresentation(
-        containerColor = MaterialTheme.colorScheme.errorContainer,
-        label = stringResource(R.string.invitation_revoked),
-        detail = stringResource(R.string.invitation_link_revoked),
-    )
-    InvitationStatus.Replaced -> InvitationStatusPresentation(
-        containerColor = MaterialTheme.colorScheme.secondaryContainer,
-        label = stringResource(R.string.invitation_replaced),
-        detail = stringResource(R.string.invitation_link_replaced),
-    )
-    InvitationStatus.Expired -> InvitationStatusPresentation(
-        containerColor = MaterialTheme.colorScheme.surfaceVariant,
-        label = stringResource(R.string.invitation_expired),
-        detail = stringResource(R.string.invitation_link_expired),
-    )
-}
-
-private data class InvitationStatusPresentation(
-    val containerColor: Color,
-    val label: String,
-    val detail: String,
-)
-
-private fun Instant.formattedDate(): String = DateTimeFormatter
-    .ofLocalizedDate(FormatStyle.MEDIUM)
-    .withLocale(Locale.getDefault())
-    .withZone(ZoneId.systemDefault())
-    .format(this)

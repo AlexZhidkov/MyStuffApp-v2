@@ -52,14 +52,6 @@ internal fun AppBarOverflowMenu(
             onDismissRequest = { expanded = false },
         ) {
             DropdownMenuItem(
-                text = { Text(stringResource(R.string.privacy_policy)) },
-                onClick = {
-                    expanded = false
-                    onPrivacyPolicy()
-                },
-                enabled = enabled,
-            )
-            DropdownMenuItem(
                 text = { Text(stringResource(R.string.about)) },
                 onClick = {
                     expanded = false
@@ -77,6 +69,14 @@ internal fun AppBarOverflowMenu(
                     enabled = enabled,
                 )
             }
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.privacy_policy)) },
+                onClick = {
+                    expanded = false
+                    onPrivacyPolicy()
+                },
+                enabled = enabled,
+            )
             onDeleteHousehold?.let {
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.delete_household)) },
@@ -88,18 +88,18 @@ internal fun AppBarOverflowMenu(
                 )
             }
             DropdownMenuItem(
-                text = { Text(stringResource(R.string.sign_out)) },
-                onClick = {
-                    expanded = false
-                    onSignOut()
-                },
-                enabled = enabled,
-            )
-            DropdownMenuItem(
                 text = { Text(stringResource(R.string.delete_account)) },
                 onClick = {
                     expanded = false
                     onDeleteAccount()
+                },
+                enabled = enabled,
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.sign_out)) },
+                onClick = {
+                    expanded = false
+                    onSignOut()
                 },
                 enabled = enabled,
             )

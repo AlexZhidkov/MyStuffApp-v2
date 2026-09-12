@@ -72,6 +72,19 @@ test("deletion schedules durable cleanup that can retry after a partial failure"
           },
         };
       }
+      if (path === `households/${householdId}`) {
+        return {
+          async get() {
+            return { exists: true, data: () => ({ ownerMemberId: "member-1" }) };
+          },
+        };
+      }
+      if (
+        path === "accountDeletionJobs/member-1" ||
+        path === `householdDeletionJobs/${householdId}`
+      ) {
+        return { async get() { return { exists: false }; } };
+      }
       if (path === cleanupReference.path) return cleanupReference;
       return itemReference;
     },

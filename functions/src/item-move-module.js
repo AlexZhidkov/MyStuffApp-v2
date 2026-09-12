@@ -1,10 +1,10 @@
 import { FieldValue } from "firebase-admin/firestore";
+import { isActiveHouseholdMember } from "./member-authorization.js";
 
 export function createItemMoveModule({ database }) {
   return {
     async moveItem({ householdId, itemId, newParentItemId, updatedById, updatedByDisplayName }) {
-      const membership = await database.doc(`memberships/${updatedById}`).get();
-      if (!membership.exists || membership.data()?.householdId !== householdId) {
+      if (!await isActiveHouseholdMember(database, updatedById, householdId)) {
         throw new ItemMoveMembershipError();
       }
 

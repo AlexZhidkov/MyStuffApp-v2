@@ -10,6 +10,14 @@ service cloud.firestore {
       return /databases/$(database)/documents/memberships/$(memberId);
     }
 
+    function accountDeletionJobPath(memberId) {
+      return /databases/$(database)/documents/accountDeletionJobs/$(memberId);
+    }
+
+    function householdDeletionJobPath(householdId) {
+      return /databases/$(database)/documents/householdDeletionJobs/$(householdId);
+    }
+
     function householdPath(householdId) {
       return /databases/$(database)/documents/households/$(householdId);
     }
@@ -28,11 +36,20 @@ service cloud.firestore {
 
     function isMember(householdId) {
       return signedIn()
+        && !exists(accountDeletionJobPath(request.auth.uid))
+        && !exists(householdDeletionJobPath(householdId))
+        && !exists(
+          accountDeletionJobPath(
+            get(householdPath(householdId)).data.ownerMemberId
+          )
+        )
         && get(membershipPath(request.auth.uid)).data.householdId == householdId;
     }
 
     function isMemberAfter(householdId) {
       return signedIn()
+        && !exists(accountDeletionJobPath(request.auth.uid))
+        && !exists(householdDeletionJobPath(householdId))
         && getAfter(membershipPath(request.auth.uid)).data.householdId == householdId;
     }
 
@@ -318,11 +335,19 @@ service cloud.firestore {
     }
 
     match /memberships/{memberId} {
-      allow read: if signedIn() && request.auth.uid == memberId;
+      allow read: if signedIn()
+        && request.auth.uid == memberId
+        && !exists(accountDeletionJobPath(request.auth.uid))
+        && (
+          !exists(membershipPath(memberId))
+          || isMember(resource.data.householdId)
+        );
       allow create: if signedIn()
+        && !exists(accountDeletionJobPath(request.auth.uid))
         && request.auth.uid == memberId
         && validOwnerMembershipCreate(memberId);
       allow update: if signedIn()
+        && !exists(accountDeletionJobPath(request.auth.uid))
         && request.auth.uid == memberId
         && validMembershipBootstrapUpgrade(memberId);
       allow delete: if false;
@@ -330,24 +355,30 @@ service cloud.firestore {
 
     match /households/{householdId}/access/{email} {
       allow read: if isOwner(householdId);
-      allow create: if signedIn() && validHouseholdAccessCreate(householdId, email);
+      allow create: if signedIn()
+        && !exists(accountDeletionJobPath(request.auth.uid))
+        && validHouseholdAccessCreate(householdId, email);
       // Claiming and removal are backend transactions so membership and access cannot diverge.
       allow update, delete: if false;
     }
 
     match /households/{householdId} {
       allow read: if isMember(householdId);
-      allow create: if signedIn() && validHouseholdCreate(householdId);
+      allow create: if signedIn()
+        && !exists(accountDeletionJobPath(request.auth.uid))
+        && validHouseholdCreate(householdId);
       allow update, delete: if false;
 
       match /items/{itemId} {
         allow read: if isMember(householdId);
         allow create: if signedIn()
+          && !exists(accountDeletionJobPath(request.auth.uid))
           && (
             validRootItemCreate(householdId, itemId)
             || validChildItemCreate(householdId, itemId)
           );
         allow update: if signedIn()
+          && !exists(accountDeletionJobPath(request.auth.uid))
           && validChildItemUpdate(householdId, itemId);
         allow delete: if false;
       }
@@ -365,6 +396,14 @@ service cloud.firestore {
           && isNonRootItemInHousehold(householdId, itemId);
         allow update: if false;
       }
+    }
+
+    match /accountDeletionJobs/{memberId} {
+      allow read, write: if false;
+    }
+
+    match /householdDeletionJobs/{householdId} {
+      allow read, write: if false;
     }
   }
 }

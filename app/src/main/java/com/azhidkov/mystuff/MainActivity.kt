@@ -1,6 +1,8 @@
 package com.azhidkov.mystuff
 
+import android.content.Intent
 import android.graphics.Bitmap
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -22,7 +24,6 @@ import com.azhidkov.mystuff.ui.ItemPhotoLoader
 import com.azhidkov.mystuff.ui.OpeningHouseholdScreen
 import com.azhidkov.mystuff.ui.SignInScreen
 import com.azhidkov.mystuff.ui.theme.MyStuffTheme
-import java.io.File
 
 class MainActivity : ComponentActivity() {
     private lateinit var sessionViewModel: SessionViewModel
@@ -47,9 +48,7 @@ class MainActivity : ComponentActivity() {
         val descriptionGenerationWork = WorkManagerInventoryDescriptionGenerationWork(
             applicationContext,
         )
-        val rootChildItemCache = FileRootChildItemCache(
-            File(cacheDir, ROOT_CHILD_ITEM_CACHE_DIRECTORY),
-        )
+        val rootChildItemCache = sessionViewModel.rootChildItemCache
         setContent {
             var sessionState by remember { mutableStateOf(sessionController.state) }
             DisposableEffect(sessionController) {
@@ -67,6 +66,11 @@ class MainActivity : ComponentActivity() {
                     state = sessionState,
                     onSignIn = sessionController::signIn,
                     onSignOut = sessionController::signOut,
+                    onPrivacyPolicy = { openWebPage(PRIVACY_POLICY_URL) },
+                    onBeginAccountDeletion = sessionController::beginAccountDeletion,
+                    onBeginHouseholdDeletion = sessionController::beginHouseholdDeletion,
+                    onCancelDeletion = sessionController::cancelDeletion,
+                    onConfirmDeletion = sessionController::confirmDeletion,
                     onCreateHousehold = sessionController::createHousehold,
                     onRetryOpeningHousehold = sessionController::retryOpeningHousehold,
                     householdAccessGateway = householdAccessGateway,
@@ -91,6 +95,11 @@ private fun MyStuffApp(
     state: SessionUiState,
     onSignIn: () -> Unit,
     onSignOut: () -> Unit,
+    onPrivacyPolicy: () -> Unit,
+    onBeginAccountDeletion: () -> Unit,
+    onBeginHouseholdDeletion: () -> Unit,
+    onCancelDeletion: () -> Unit,
+    onConfirmDeletion: (String) -> Unit,
     onCreateHousehold: (String) -> Unit,
     onRetryOpeningHousehold: () -> Unit,
     householdAccessGateway: HouseholdAccessGateway,
@@ -101,86 +110,114 @@ private fun MyStuffApp(
     descriptionGenerationWork: InventoryDescriptionGenerationWork,
     itemPhotoLoader: ItemPhotoLoader<Bitmap>,
 ) {
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.background,
-    ) {
-        when (state.destination) {
-            AppDestination.SignIn -> SignInScreen(
-                state = state,
-                onSignIn = onSignIn,
-            )
-
-            AppDestination.OpeningHousehold -> OpeningHouseholdScreen(
-                opening = state.operation == SessionOperation.OpeningHousehold,
-                errorMessage = state.errorMessage,
-                onRetry = onRetryOpeningHousehold,
-                onSignOut = onSignOut,
-            )
-
-            AppDestination.HouseholdEntry -> HouseholdEntryScreen(
-                identity = requireNotNull(state.identity),
-                operation = state.operation,
-                householdNameError = state.householdNameError,
-                errorMessage = state.errorMessage,
-                onCreateHousehold = onCreateHousehold,
-                onSignOut = onSignOut,
-            )
-
-            AppDestination.HouseholdRoot -> {
-                val household = requireNotNull(state.household)
-                val identity = requireNotNull(state.identity)
-                val householdAccessController = remember(household.id, identity.id) {
-                    HouseholdAccessController(
-                        household = household,
-                        currentIdentity = identity,
-                        gateway = householdAccessGateway,
-                    )
-                }
-                val inventoryController = remember(household.id, identity.id) {
-                    InventoryController(
-                        household = household,
-                        identity = identity,
-                        gateway = inventoryGateway,
-                        rootChildItemCache = rootChildItemCache,
-                        descriptionGenerationWork = descriptionGenerationWork,
-                        searchGateway = searchGateway,
-                        searchDebouncer = MainThreadSearchDebouncer(),
-                        itemAttachmentGateway = itemAttachmentGateway,
-                        onInventoryChanged = itemPhotoLoader::onInventoryChanged,
-                    )
-                }
-                var inventoryState by remember(inventoryController) {
-                    mutableStateOf(inventoryController.state)
-                }
-                var householdAccessState by remember(householdAccessController) {
-                    mutableStateOf(householdAccessController.state)
-                }
-                DisposableEffect(householdAccessController) {
-                    householdAccessController.onStateChanged = { householdAccessState = it }
-                    householdAccessState = householdAccessController.state
-                    onDispose { householdAccessController.onStateChanged = {} }
-                }
-                DisposableEffect(inventoryController) {
-                    inventoryController.onStateChanged = { inventoryState = it }
-                    inventoryState = inventoryController.state
-                    onDispose { inventoryController.close() }
-                }
-
-                HouseholdRootScreen(
-                    inventoryState = inventoryState,
-                    householdAccessState = householdAccessState,
-                    currentIdentity = identity,
-                    signOutInProgress = state.operation == SessionOperation.SigningOut,
-                    sessionMessage = state.errorMessage,
-                    onAddHouseholdAccess = householdAccessController::add,
-                    onRemoveHouseholdAccess = householdAccessController::remove,
-                    inventoryActions = inventoryController,
-                    onSignOut = onSignOut,
+    androidx.compose.foundation.layout.Box(modifier = Modifier.fillMaxSize()) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.background,
+        ) {
+            when (state.destination) {
+                AppDestination.SignIn -> SignInScreen(
+                    state = state,
+                    onSignIn = onSignIn,
+                    onPrivacyPolicy = onPrivacyPolicy,
                 )
+
+                AppDestination.OpeningHousehold -> OpeningHouseholdScreen(
+                    opening = state.operation == SessionOperation.OpeningHousehold,
+                    errorMessage = state.errorMessage,
+                    onRetry = onRetryOpeningHousehold,
+                    onSignOut = onSignOut,
+                    onPrivacyPolicy = onPrivacyPolicy,
+                    onDeleteAccount = onBeginAccountDeletion,
+                )
+
+                AppDestination.HouseholdEntry -> HouseholdEntryScreen(
+                    identity = requireNotNull(state.identity),
+                    operation = state.operation,
+                    householdNameError = state.householdNameError,
+                    errorMessage = state.errorMessage,
+                    noticeMessage = state.noticeMessage,
+                    onCreateHousehold = onCreateHousehold,
+                    onSignOut = onSignOut,
+                    onPrivacyPolicy = onPrivacyPolicy,
+                    onDeleteAccount = onBeginAccountDeletion,
+                )
+
+                AppDestination.HouseholdRoot -> {
+                    val household = requireNotNull(state.household)
+                    val identity = requireNotNull(state.identity)
+                    val householdAccessController = remember(household.id, identity.id) {
+                        HouseholdAccessController(
+                            household = household,
+                            currentIdentity = identity,
+                            gateway = householdAccessGateway,
+                        )
+                    }
+                    val inventoryController = remember(household.id, identity.id) {
+                        InventoryController(
+                            household = household,
+                            identity = identity,
+                            gateway = inventoryGateway,
+                            rootChildItemCache = rootChildItemCache,
+                            descriptionGenerationWork = descriptionGenerationWork,
+                            searchGateway = searchGateway,
+                            searchDebouncer = MainThreadSearchDebouncer(),
+                            itemAttachmentGateway = itemAttachmentGateway,
+                            onInventoryChanged = itemPhotoLoader::onInventoryChanged,
+                        )
+                    }
+                    var inventoryState by remember(inventoryController) {
+                        mutableStateOf(inventoryController.state)
+                    }
+                    var householdAccessState by remember(householdAccessController) {
+                        mutableStateOf(householdAccessController.state)
+                    }
+                    DisposableEffect(householdAccessController) {
+                        householdAccessController.onStateChanged = { householdAccessState = it }
+                        householdAccessState = householdAccessController.state
+                        onDispose { householdAccessController.onStateChanged = {} }
+                    }
+                    DisposableEffect(inventoryController) {
+                        inventoryController.onStateChanged = { inventoryState = it }
+                        inventoryState = inventoryController.state
+                        onDispose { inventoryController.close() }
+                    }
+
+                    HouseholdRootScreen(
+                        inventoryState = inventoryState,
+                        householdAccessState = householdAccessState,
+                        currentIdentity = identity,
+                        sessionOperationInProgress = state.operation != null,
+                        sessionMessage = state.errorMessage ?: state.noticeMessage,
+                        onAddHouseholdAccess = householdAccessController::add,
+                        onRemoveHouseholdAccess = householdAccessController::remove,
+                        inventoryActions = inventoryController,
+                        onSignOut = onSignOut,
+                        onPrivacyPolicy = onPrivacyPolicy,
+                        onDeleteAccount = onBeginAccountDeletion,
+                        onDeleteHousehold = if (household.ownerMemberId == identity.id) {
+                            onBeginHouseholdDeletion
+                        } else {
+                            null
+                        },
+                    )
+                }
             }
+        }
+        state.deletionPreview?.let { preview ->
+            com.azhidkov.mystuff.ui.DeletionConfirmationDialog(
+                preview = preview,
+                operation = state.operation,
+                errorMessage = state.deletionErrorMessage,
+                onDismiss = onCancelDeletion,
+                onConfirm = onConfirmDeletion,
+            )
         }
     }
 }
 
-private const val ROOT_CHILD_ITEM_CACHE_DIRECTORY = "root-child-items"
+private fun MainActivity.openWebPage(url: String) {
+    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+}
+
+private const val PRIVACY_POLICY_URL = "https://alexzhidkov.github.io/MyStuffApp-v2/"

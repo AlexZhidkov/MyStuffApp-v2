@@ -41,8 +41,11 @@ fun HouseholdEntryScreen(
     operation: SessionOperation?,
     householdNameError: String?,
     errorMessage: String?,
+    noticeMessage: String?,
     onCreateHousehold: (String) -> Unit,
     onSignOut: () -> Unit,
+    onPrivacyPolicy: () -> Unit,
+    onDeleteAccount: () -> Unit,
 ) {
     var householdName by remember { mutableStateOf("") }
 
@@ -60,6 +63,8 @@ fun HouseholdEntryScreen(
                     AppBarOverflowMenu(
                         enabled = operation == null,
                         onSignOut = onSignOut,
+                        onPrivacyPolicy = onPrivacyPolicy,
+                        onDeleteAccount = onDeleteAccount,
                     )
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -126,6 +131,14 @@ fun HouseholdEntryScreen(
                 Text(
                     text = errorMessage,
                     color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            if (noticeMessage != null) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = noticeMessage,
+                    color = MaterialTheme.colorScheme.primary,
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }

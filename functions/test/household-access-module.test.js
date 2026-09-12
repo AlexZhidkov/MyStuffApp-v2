@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  HouseholdDeletionPendingError,
   HouseholdAccessPermissionError,
   createHouseholdAccessModule,
 } from "../src/household-access-module.js";
@@ -65,6 +66,24 @@ test("several matching Households use the first backend query result", async () 
   assert.deepEqual(result, { householdId: "household-2" });
   assert.equal(database.data("households/household-2/access/sam@example.com").memberId, "member-2");
   assert.equal(database.data("households/household-1/access/sam@example.com").memberId, null);
+});
+
+test("access cannot be claimed while the Owner account is being deleted", async () => {
+  const database = fakeDatabase({
+    "households/household-1": household("Our Home"),
+    "households/household-1/access/sam@example.com": access("sam@example.com"),
+    "accountDeletionJobs/member-1": { memberId: "member-1" },
+  });
+  const module = createHouseholdAccessModule({ database });
+
+  await assert.rejects(
+    module.claimMatchingAccess({
+      memberId: "member-2",
+      authenticatedEmail: "sam@example.com",
+      displayName: "Sam",
+    }),
+    HouseholdDeletionPendingError,
+  );
 });
 
 test("only the Household Owner can remove access and removal deletes membership", async () => {

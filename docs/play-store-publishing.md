@@ -1,18 +1,20 @@
 # Publishing MyStuff to Google Play
 
-> Last verified: 3 September 2026. Google Play requirements change regularly;
+> External requirements last verified: 3 September 2026. Repository implementation
+> status updated: 11 September 2026. Google Play requirements change regularly;
 > check the linked official documentation before submitting a release.
 
 MyStuff can be published to Google Play, and the release build currently compiles
 successfully. However, the app is not yet ready for a public production release.
 
-The main blockers are:
+The policy implementation described in Section 3 now exists in this repository, but
+it is not operational until the Firebase resources and GitHub Pages site are manually
+deployed and verified. The remaining release blockers are:
 
 - The generated Android App Bundle (AAB) is unsigned because
   [`app/build.gradle.kts`](../app/build.gradle.kts) has no release signing configuration.
-- The app creates Firebase accounts but has no account-deletion flow; the
-  [prototype specification](../.scratch/household-inventory/spec.md) explicitly defers it.
-- A public privacy policy and an in-app privacy-policy link are missing.
+- The new Account Deletion Functions, security rules, and public privacy site have not
+  yet been deployed to production.
 - Production Firebase, Google sign-in, and Play Integrity certificates still need configuring.
 
 ## 1. Decide the permanent package name
@@ -56,6 +58,19 @@ Before requesting production review:
    photos, Firebase storage, semantic-search processing, AI description processing,
    retention, and deletion.
 
+These items are implemented by the in-app Account and Household deletion flows,
+durable Firebase cleanup jobs, deletion-aware Firestore and Storage rules, and the
+static site under [`site/`](../site/). The planned public URLs are:
+
+- Privacy Policy: `https://alexzhidkov.github.io/MyStuffApp-v2/`
+- Account deletion: `https://alexzhidkov.github.io/MyStuffApp-v2/delete-account/`
+
+The Pages workflow is manual (`workflow_dispatch`) and has intentionally not been
+run. Before release, enable GitHub Pages with GitHub Actions as its source, run
+`Deploy privacy site` from the repository's `main` branch, and verify both URLs in
+a signed build. The private external-request procedure and failed-job recovery steps
+are in [Account Deletion Operations](account-deletion-operations.md).
+
 Google requires both in-app and external deletion paths for apps that create
 accounts. The privacy policy must be publicly accessible, non-geofenced, and not
 merely a PDF.
@@ -75,7 +90,7 @@ answers solely from dependency names.
 The following command currently compiles the release bundle and runs release lint:
 
 ```bash
-JAVA_HOME=/opt/android-studio/jbr ./gradlew bundleRelease
+JAVA_HOME=/opt/android-studio/jbr ./gradlew bundleRelease lintRelease
 ```
 
 It creates:
@@ -252,6 +267,6 @@ Official reference:
 
 ## Recommended next milestone
 
-Implement account deletion and the in-app privacy-policy entry point first. Release
-signing, Firebase certificate registration, and the initial internal-test upload can
-then be completed without leaving known production-policy blockers unresolved.
+Deploy and verify the Account Deletion backend, deletion-aware rules, and GitHub Pages
+site. Then complete release signing, Firebase certificate registration, and the
+initial internal-test upload.

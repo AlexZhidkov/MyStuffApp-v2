@@ -1,5 +1,7 @@
 import { HttpsError } from "firebase-functions/v2/https";
 import {
+  AccountDeletionPendingError,
+  HouseholdDeletionPendingError,
   HouseholdAccessPermissionError,
   InvalidGoogleEmailError,
   InvalidHouseholdAccessError,
@@ -17,6 +19,12 @@ export function createHouseholdAccessHandlers({ householdAccess, logger }) {
           displayName: auth.name,
         });
       } catch (error) {
+        if (
+          error instanceof AccountDeletionPendingError ||
+          error instanceof HouseholdDeletionPendingError
+        ) {
+          throw new HttpsError("failed-precondition", error.message);
+        }
         if (error instanceof InvalidGoogleEmailError) {
           throw new HttpsError("permission-denied", error.message);
         }
@@ -37,6 +45,12 @@ export function createHouseholdAccessHandlers({ householdAccess, logger }) {
           email: request.data?.email,
         });
       } catch (error) {
+        if (
+          error instanceof AccountDeletionPendingError ||
+          error instanceof HouseholdDeletionPendingError
+        ) {
+          throw new HttpsError("failed-precondition", error.message);
+        }
         if (error instanceof HouseholdAccessPermissionError) {
           throw new HttpsError("permission-denied", error.message);
         }

@@ -33,6 +33,8 @@ fun OpeningHouseholdScreen(
     errorMessage: String?,
     onRetry: () -> Unit,
     onSignOut: () -> Unit,
+    onPrivacyPolicy: () -> Unit,
+    onDeleteAccount: () -> Unit,
 ) {
     Scaffold(
         contentWindowInsets = WindowInsets.safeDrawing,
@@ -48,6 +50,8 @@ fun OpeningHouseholdScreen(
                     AppBarOverflowMenu(
                         enabled = !opening,
                         onSignOut = onSignOut,
+                        onPrivacyPolicy = onPrivacyPolicy,
+                        onDeleteAccount = onDeleteAccount,
                     )
                 },
                 colors = TopAppBarDefaults.topAppBarColors(

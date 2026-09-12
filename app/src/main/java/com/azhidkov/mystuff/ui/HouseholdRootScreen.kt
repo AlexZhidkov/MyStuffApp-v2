@@ -105,12 +105,15 @@ fun HouseholdRootScreen(
     inventoryState: InventoryUiState,
     householdAccessState: HouseholdAccessUiState,
     currentIdentity: AuthenticatedIdentity,
-    signOutInProgress: Boolean,
+    sessionOperationInProgress: Boolean,
     sessionMessage: String?,
     onAddHouseholdAccess: (String) -> Unit,
     onRemoveHouseholdAccess: (String) -> Unit,
     inventoryActions: InventoryActions,
     onSignOut: () -> Unit,
+    onPrivacyPolicy: () -> Unit,
+    onDeleteAccount: () -> Unit,
+    onDeleteHousehold: (() -> Unit)?,
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     val deferredError = inventoryState.deferredError
@@ -131,11 +134,14 @@ fun HouseholdRootScreen(
             inventoryState = inventoryState,
             householdAccessState = householdAccessState,
             currentIdentity = currentIdentity,
-            signOutInProgress = signOutInProgress,
+            sessionOperationInProgress = sessionOperationInProgress,
             onAddHouseholdAccess = onAddHouseholdAccess,
             onRemoveHouseholdAccess = onRemoveHouseholdAccess,
             inventoryActions = inventoryActions,
             onSignOut = onSignOut,
+            onPrivacyPolicy = onPrivacyPolicy,
+            onDeleteAccount = onDeleteAccount,
+            onDeleteHousehold = onDeleteHousehold,
         )
         SnackbarHost(
             hostState = snackbarHostState,
@@ -164,11 +170,14 @@ private fun HouseholdRootContent(
     inventoryState: InventoryUiState,
     householdAccessState: HouseholdAccessUiState,
     currentIdentity: AuthenticatedIdentity,
-    signOutInProgress: Boolean,
+    sessionOperationInProgress: Boolean,
     onAddHouseholdAccess: (String) -> Unit,
     onRemoveHouseholdAccess: (String) -> Unit,
     inventoryActions: InventoryActions,
     onSignOut: () -> Unit,
+    onPrivacyPolicy: () -> Unit,
+    onDeleteAccount: () -> Unit,
+    onDeleteHousehold: (() -> Unit)?,
 ) {
     var showMembers by remember { mutableStateOf(false) }
     var deleteCandidate by remember { mutableStateOf<Item?>(null) }
@@ -359,13 +368,16 @@ private fun HouseholdRootContent(
                 },
                 actions = {
                     AppBarOverflowMenu(
-                        enabled = !signOutInProgress,
+                        enabled = !sessionOperationInProgress,
                         onMembers = if (householdAccessState.canManage) {
                             { showMembers = true }
                         } else {
                             null
                         },
                         onSignOut = onSignOut,
+                        onPrivacyPolicy = onPrivacyPolicy,
+                        onDeleteAccount = onDeleteAccount,
+                        onDeleteHousehold = onDeleteHousehold,
                     )
                 },
                 colors = TopAppBarDefaults.topAppBarColors(

@@ -1,4 +1,5 @@
 import { FieldValue } from "firebase-admin/firestore";
+import { activeHouseholdIdForMember } from "./member-authorization.js";
 
 const SEARCH_INDEX_COLLECTION = "searchIndex";
 const SEARCH_EMBEDDING_FIELD = "searchEmbedding";
@@ -23,10 +24,7 @@ export function createFirestoreSearchRepository(database) {
   return {
     async findHouseholdIdForMember(memberId) {
       return classifyTransientFailure(async () => {
-        const snapshot = await database.doc(`memberships/${memberId}`).get();
-        if (!snapshot.exists) return null;
-        const householdId = snapshot.get("householdId");
-        return typeof householdId === "string" ? householdId : null;
+        return activeHouseholdIdForMember(database, memberId);
       });
     },
 

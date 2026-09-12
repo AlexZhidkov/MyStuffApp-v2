@@ -1,11 +1,12 @@
 import { GoogleGenAI } from "@google/genai";
 import { getApps, initializeApp } from "firebase-admin/app";
+import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 import { logger } from "firebase-functions";
 import { defineSecret } from "firebase-functions/params";
 import { onDocumentCreated, onDocumentWritten } from "firebase-functions/v2/firestore";
-import { onCall } from "firebase-functions/v2/https";
+import { onCall, onRequest } from "firebase-functions/v2/https";
 import { createDeterministicEmbedder } from "./deterministic-embedder.js";
 import { createFirestoreSearchRepository } from "./firestore-search-repository.js";
 import { createGeminiEmbedder } from "./gemini-embedder.js";
@@ -17,6 +18,9 @@ import { createHouseholdAccessHandlers } from "./household-access-handlers.js";
 import { createHouseholdAccessModule } from "./household-access-module.js";
 import { createItemDeletionHandlers } from "./item-deletion-handlers.js";
 import { createItemDeletionModule } from "./item-deletion-module.js";
+import { createDeletionRepository } from "./deletion-repository.js";
+import { createDeletionModule } from "./deletion-module.js";
+import { createDeletionHandlers } from "./deletion-handlers.js";
 
 if (getApps().length === 0) initializeApp();
 
@@ -26,12 +30,16 @@ const emulator = process.env.FUNCTIONS_EMULATOR === "true";
 const runtimeOptions = {
   region: REGION,
   minInstances: 0,
+};
+const geminiRuntimeOptions = {
+  ...runtimeOptions,
   secrets: emulator ? [] : [GEMINI_API_KEY],
 };
 let handlers;
 let itemMoveHandlers;
 let householdAccessHandlers;
 let itemDeletionHandlers;
+let deletionHandlers;
 
 function getHandlers() {
   if (handlers !== undefined) return handlers;
@@ -48,14 +56,14 @@ function getHandlers() {
 
 export const refreshItemSearchIndex = onDocumentWritten(
   {
-    ...runtimeOptions,
+    ...geminiRuntimeOptions,
     document: "households/{householdId}/items/{itemId}",
     retry: true,
   },
   (event) => getHandlers().refreshItemIndex(event),
 );
 
-export const searchInventory = onCall(runtimeOptions, (request) =>
+export const searchInventory = onCall(geminiRuntimeOptions, (request) =>
   getHandlers().searchInventory(request),
 );
 
@@ -114,4 +122,64 @@ export const claimHouseholdAccess = onCall(runtimeOptions, (request) =>
 
 export const removeHouseholdAccess = onCall(runtimeOptions, (request) =>
   getHouseholdAccessHandlers().removeHouseholdAccess(request),
+);
+
+function getDeletionHandlers() {
+  if (deletionHandlers !== undefined) return deletionHandlers;
+  const authentication = getAuth();
+  deletionHandlers = createDeletionHandlers({
+    deletion: createDeletionModule({
+      repository: createDeletionRepository({ database: getFirestore() }),
+      authentication,
+      bucket: getStorage().bucket(),
+    }),
+    authentication,
+    logger,
+  });
+  return deletionHandlers;
+}
+
+export const previewAccountDeletion = onCall(runtimeOptions, (request) =>
+  getDeletionHandlers().previewAccountDeletion(request),
+);
+
+export const requestAccountDeletion = onCall(runtimeOptions, (request) =>
+  getDeletionHandlers().requestAccountDeletion(request),
+);
+
+export const previewHouseholdDeletion = onCall(runtimeOptions, (request) =>
+  getDeletionHandlers().previewHouseholdDeletion(request),
+);
+
+export const requestHouseholdDeletion = onCall(runtimeOptions, (request) =>
+  getDeletionHandlers().requestHouseholdDeletion(request),
+);
+
+export const cleanupAccountDeletion = onDocumentCreated(
+  {
+    ...runtimeOptions,
+    document: "accountDeletionJobs/{memberId}",
+    retry: true,
+    timeoutSeconds: 540,
+  },
+  (event) => getDeletionHandlers().cleanupAccountDeletion(event),
+);
+
+export const cleanupHouseholdDeletion = onDocumentCreated(
+  {
+    ...runtimeOptions,
+    document: "householdDeletionJobs/{householdId}",
+    retry: true,
+    timeoutSeconds: 540,
+  },
+  (event) => getDeletionHandlers().cleanupHouseholdDeletion(event),
+);
+
+export const manuallyDeleteAccount = onRequest(
+  {
+    ...runtimeOptions,
+    invoker: emulator ? "public" : "private",
+    timeoutSeconds: 540,
+  },
+  (request, response) => getDeletionHandlers().manuallyDeleteAccount(request, response),
 );

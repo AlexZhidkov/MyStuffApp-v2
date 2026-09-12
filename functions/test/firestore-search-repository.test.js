@@ -28,6 +28,12 @@ test(
   { skip: !emulatorAvailable },
   async () => {
     const repository = createFirestoreSearchRepository(database);
+    await database.doc("households/household-1").set({
+      ownerMemberId: "owner-1",
+    });
+    await database.doc("households/household-2").set({
+      ownerMemberId: "owner-2",
+    });
     await database.doc("memberships/member-1").set({ householdId: "household-1" });
     await repository.putSearchRecord("household-1", "clock", {
       embedding: vector(1, 0),

@@ -1,0 +1,3 @@
+# Disclose Cloud Processing to Members
+
+Search and Description Generation may continue transmitting their existing Household content, Member queries, and Photos to Firebase and Gemini, but MyStuff will disclose that processing through its public privacy policy and a readily accessible in-app link. This supersedes ADR-0004's decision to perform Search cloud processing without notice: keeping the existing Firebase and Gemini design avoids rebuilding those features, while concise disclosure makes the public-release data posture visible without adding consent prompts unless a later policy audit requires them.

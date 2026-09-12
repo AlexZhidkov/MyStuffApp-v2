@@ -22,6 +22,9 @@ import com.azhidkov.mystuff.R
 internal fun AppBarOverflowMenu(
     enabled: Boolean,
     onMembers: (() -> Unit)? = null,
+    onDeleteHousehold: (() -> Unit)? = null,
+    onPrivacyPolicy: () -> Unit,
+    onDeleteAccount: () -> Unit,
     onSignOut: () -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -49,6 +52,14 @@ internal fun AppBarOverflowMenu(
             onDismissRequest = { expanded = false },
         ) {
             DropdownMenuItem(
+                text = { Text(stringResource(R.string.privacy_policy)) },
+                onClick = {
+                    expanded = false
+                    onPrivacyPolicy()
+                },
+                enabled = enabled,
+            )
+            DropdownMenuItem(
                 text = { Text(stringResource(R.string.about)) },
                 onClick = {
                     expanded = false
@@ -66,11 +77,29 @@ internal fun AppBarOverflowMenu(
                     enabled = enabled,
                 )
             }
+            onDeleteHousehold?.let {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.delete_household)) },
+                    onClick = {
+                        expanded = false
+                        it()
+                    },
+                    enabled = enabled,
+                )
+            }
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.sign_out)) },
                 onClick = {
                     expanded = false
                     onSignOut()
+                },
+                enabled = enabled,
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.delete_account)) },
+                onClick = {
+                    expanded = false
+                    onDeleteAccount()
                 },
                 enabled = enabled,
             )

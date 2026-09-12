@@ -8,7 +8,12 @@ export function createHouseholdAccessModule({ database }) {
 
       return database.runTransaction(async (transaction) => {
         const membershipReference = database.doc(`memberships/${memberId}`);
-        const membership = await transaction.get(membershipReference);
+        const accountDeletionReference = database.doc(`accountDeletionJobs/${memberId}`);
+        const [membership, accountDeletion] = await Promise.all([
+          transaction.get(membershipReference),
+          transaction.get(accountDeletionReference),
+        ]);
+        if (accountDeletion.exists) throw new AccountDeletionPendingError();
         if (membership.exists) {
           return { householdId: membership.data()?.householdId ?? null };
         }
@@ -29,6 +34,15 @@ export function createHouseholdAccessModule({ database }) {
         const household = await transaction.get(householdReference);
         if (!household.exists || !isValidHousehold(household.data())) {
           throw new InvalidHouseholdAccessError();
+        }
+        const [householdDeletion, ownerDeletion] = await Promise.all([
+          transaction.get(database.doc(`householdDeletionJobs/${householdId}`)),
+          transaction.get(database.doc(
+            `accountDeletionJobs/${household.data().ownerMemberId}`,
+          )),
+        ]);
+        if (householdDeletion.exists || ownerDeletion.exists) {
+          throw new HouseholdDeletionPendingError();
         }
 
         transaction.create(membershipReference, {
@@ -55,15 +69,23 @@ export function createHouseholdAccessModule({ database }) {
 
       return database.runTransaction(async (transaction) => {
         const membershipReference = database.doc(`memberships/${memberId}`);
+        const accountDeletionReference = database.doc(`accountDeletionJobs/${memberId}`);
         const householdReference = database.doc(`households/${householdId}`);
         const accessReference = database.doc(
           `households/${householdId}/access/${normalizedEmail}`,
         );
-        const [membership, household, access] = await Promise.all([
+        const householdDeletionReference = database.doc(
+          `householdDeletionJobs/${householdId}`,
+        );
+        const [membership, accountDeletion, householdDeletion, household, access] = await Promise.all([
           transaction.get(membershipReference),
+          transaction.get(accountDeletionReference),
+          transaction.get(householdDeletionReference),
           transaction.get(householdReference),
           transaction.get(accessReference),
         ]);
+        if (accountDeletion.exists) throw new AccountDeletionPendingError();
+        if (householdDeletion.exists) throw new HouseholdDeletionPendingError();
         if (
           !membership.exists ||
           membership.data()?.householdId !== householdId ||
@@ -128,5 +150,19 @@ export class UnknownHouseholdAccessError extends Error {
   constructor() {
     super("This Household Access no longer exists.");
     this.name = "UnknownHouseholdAccessError";
+  }
+}
+
+export class AccountDeletionPendingError extends Error {
+  constructor() {
+    super("Account Deletion is already in progress.");
+    this.name = "AccountDeletionPendingError";
+  }
+}
+
+export class HouseholdDeletionPendingError extends Error {
+  constructor() {
+    super("Household Deletion is already in progress.");
+    this.name = "HouseholdDeletionPendingError";
   }
 }

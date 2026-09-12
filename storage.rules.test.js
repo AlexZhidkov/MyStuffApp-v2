@@ -30,6 +30,9 @@ beforeEach(async () => {
       householdId: "household-1",
       role: "owner",
     });
+    await setDoc(doc(context.firestore(), "households/household-1"), {
+      ownerMemberId: "member-1",
+    });
     await setDoc(doc(context.firestore(), "households/household-1/items/item-1"), {
       householdId: "household-1",
       parentItemId: "household-1",
@@ -85,6 +88,30 @@ test("only a Household Member can transfer a captured immutable photo revision",
   ));
   await assertSucceeds(deleteObject(ref(memberStorage, fullPath)));
   await assertSucceeds(deleteObject(ref(memberStorage, thumbnailPath)));
+});
+
+test("a deletion job immediately revokes Storage access", async () => {
+  const path = "households/household-1/items/item-1/attachments/attachment-1.webp";
+  const memberStorage = testEnvironment.authenticatedContext("member-1").storage();
+  await assertSucceeds(uploadBytes(
+    ref(memberStorage, path),
+    new Uint8Array([1]),
+    { contentType: "image/webp" },
+  ));
+
+  await testEnvironment.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), "accountDeletionJobs/member-1"), {
+      memberId: "member-1",
+      status: "pending",
+    });
+  });
+
+  await assertFails(getBytes(ref(memberStorage, path)));
+  await assertFails(uploadBytes(
+    ref(memberStorage, path),
+    new Uint8Array([2]),
+    { contentType: "image/webp" },
+  ));
 });
 
 test("a Household Member can read and delete legacy Item photo variants but cannot create them", async () => {

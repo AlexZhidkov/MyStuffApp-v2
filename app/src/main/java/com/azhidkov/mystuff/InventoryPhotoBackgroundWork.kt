@@ -420,6 +420,7 @@ internal class WorkManagerPhotoTransferQueue(context: Context) : PhotoTransferQu
                     .setRequiredNetworkType(NetworkType.CONNECTED)
                     .build(),
             )
+            .addTag(PHOTO_TRANSFER_WORK_TAG)
             .build()
         workManager.enqueueUniqueWork(
             photoTransferWorkName(task.storagePath),
@@ -428,6 +429,8 @@ internal class WorkManagerPhotoTransferQueue(context: Context) : PhotoTransferQu
         )
     }
 }
+
+internal const val PHOTO_TRANSFER_WORK_TAG = "inventory-photo-transfer"
 
 internal enum class PhotoTransferResult {
     Success,

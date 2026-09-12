@@ -12,9 +12,21 @@ _Avoid_: Account, family account, workspace
 A person who has access to a Household through their own identity.
 _Avoid_: User, collaborator
 
+**MyStuff Account**:
+The application identity created when a person signs in with their Google Account. Deleting a MyStuff Account does not delete the person's Google Account.
+_Avoid_: Google Account, Household account
+
+**Account Deletion**:
+Permanent removal of a person's MyStuff Account and associated personal data. A non-Owner's shared Household content remains with Former Member Attribution; a Household Owner's Account Deletion deletes the Household. Signing in again later creates a new MyStuff Account without restoring former access or attribution.
+_Avoid_: Deactivation, disablement, sign-out
+
 **Household Access**:
-An ongoing authorization, managed by the Household Owner, for one Google email address to access a Household. It binds to that Google identity on first sign-in and lasts until the Household Owner removes it.
+An ongoing authorization, managed by the Household Owner, for one Google email address to access a Household. It binds to that Google identity on first sign-in and lasts until the Household Owner removes it or the person deletes the matching MyStuff Account; Account Deletion also removes unclaimed Household Access for that email address.
 _Avoid_: Invitation, invite, access link
+
+**Former Member Attribution**:
+The non-identifying **Former member** label retained on an Item when its creating or last-updating Member deletes their MyStuff Account.
+_Avoid_: Deleted Member, original Member name
 
 **Household Owner**:
 The Member responsible for Household Access and ownership.

@@ -4,6 +4,19 @@ service firebase.storage {
   match /b/{bucket}/o {
     function isMember(householdId) {
       return request.auth != null
+        && !firestore.exists(
+          /databases/(default)/documents/accountDeletionJobs/$(request.auth.uid)
+        )
+        && !firestore.exists(
+          /databases/(default)/documents/householdDeletionJobs/$(householdId)
+        )
+        && !firestore.exists(
+          /databases/(default)/documents/accountDeletionJobs/$(
+            firestore.get(
+              /databases/(default)/documents/households/$(householdId)
+            ).data.ownerMemberId
+          )
+        )
         && firestore.exists(
           /databases/(default)/documents/memberships/$(request.auth.uid)
         )

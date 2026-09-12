@@ -13,6 +13,25 @@
     <string name="close">Close</string>
     <string name="members">Members</string>
     <string name="sign_out">Sign out</string>
+    <string name="privacy_policy">Privacy policy</string>
+    <string name="delete_account">Delete account</string>
+    <string name="delete_account_title">Delete your MyStuff Account?</string>
+    <string name="delete_member_account_body">Your MyStuff Account, Household Access, and personal attribution will be permanently removed. Shared Household Items and Photos will remain and show Former member instead of your identity.</string>
+    <string name="delete_owner_account_body">You own %1$s. Deleting your account will also permanently delete this Household for all %2$s, including all %3$s and every Photo.</string>
+    <string name="delete_household">Delete Household</string>
+    <string name="delete_household_title">Delete this Household?</string>
+    <string name="delete_household_body">%1$s will be permanently deleted for all %2$s, including all %3$s and every Photo. Your MyStuff Account will remain.</string>
+    <plurals name="deletion_member_count">
+        <item quantity="one">%1$d Member</item>
+        <item quantity="other">%1$d Members</item>
+    </plurals>
+    <plurals name="deletion_item_count">
+        <item quantity="one">%1$d Item</item>
+        <item quantity="other">%1$d Items</item>
+    </plurals>
+    <string name="deletion_reauthentication_notice">You’ll confirm your Google Account before deletion starts. This cannot be undone.</string>
+    <string name="type_household_name">Type Household name</string>
+    <string name="type_household_name_value">Enter “%1$s” exactly.</string>
     <string name="open_menu">Open menu</string>
     <string name="welcome_person">Welcome, %1$s</string>
     <string name="create_household">Create a Household</string>

@@ -1,8 +1,9 @@
+import { isActiveHouseholdMember } from "./member-authorization.js";
+
 export function createItemDeletionModule({ database, bucket }) {
   return {
     async deleteItem({ householdId, itemId, memberId }) {
-      const membership = await database.doc(`memberships/${memberId}`).get();
-      if (!membership.exists || membership.data()?.householdId !== householdId) {
+      if (!await isActiveHouseholdMember(database, memberId, householdId)) {
         throw new ItemDeletionMembershipError();
       }
       validateNonRootItemId(householdId, itemId);

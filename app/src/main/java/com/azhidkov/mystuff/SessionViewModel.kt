@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import com.azhidkov.mystuff.ui.ItemPhotoLoader
 import com.azhidkov.mystuff.ui.itemPhotoBitmapLoader
+import java.io.File
 
 internal class SessionViewModel private constructor(
     applicationContext: Context,
@@ -15,9 +16,17 @@ internal class SessionViewModel private constructor(
     val householdAccessGateway = FirebaseHouseholdAccessGateway()
 
     val itemPhotoLoader: ItemPhotoLoader<Bitmap> = itemPhotoBitmapLoader(applicationContext)
+    val rootChildItemCache: RootChildItemCache = FileRootChildItemCache(
+        File(applicationContext.cacheDir, ROOT_CHILD_ITEM_CACHE_DIRECTORY),
+    )
     val controller = SessionController(
         authenticationGateway = authenticationGateway,
         householdGateway = FirebaseHouseholdGateway(householdAccessGateway),
+        deletionGateway = FirebaseDeletionGateway(),
+        sessionDataCleaner = AndroidSessionDataCleaner(
+            applicationContext,
+            rootChildItemCache,
+        ),
         onIdentityChanged = itemPhotoLoader::onSessionChanged,
     )
 
@@ -40,3 +49,5 @@ internal class SessionViewModel private constructor(
             requireNotNull(modelClass.cast(SessionViewModel(applicationContext)))
     }
 }
+
+private const val ROOT_CHILD_ITEM_CACHE_DIRECTORY = "root-child-items"

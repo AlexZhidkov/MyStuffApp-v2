@@ -20,6 +20,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,6 +36,7 @@ import com.azhidkov.mystuff.SessionUiState
 fun SignInScreen(
     state: SessionUiState,
     onSignIn: () -> Unit,
+    onPrivacyPolicy: () -> Unit,
 ) {
     Scaffold(
         contentWindowInsets = WindowInsets.safeDrawing,
@@ -78,6 +80,21 @@ fun SignInScreen(
                     ) {
                         Text(
                             text = error,
+                            modifier = Modifier.padding(16.dp),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+                state.noticeMessage?.let { notice ->
+                    Spacer(Modifier.height(24.dp))
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        shape = RoundedCornerShape(16.dp),
+                    ) {
+                        Text(
+                            text = notice,
                             modifier = Modifier.padding(16.dp),
                             style = MaterialTheme.typography.bodyMedium,
                         )
@@ -130,6 +147,10 @@ fun SignInScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
                 )
+                Spacer(Modifier.height(8.dp))
+                TextButton(onClick = onPrivacyPolicy) {
+                    Text(stringResource(R.string.privacy_policy))
+                }
             }
         }
     }

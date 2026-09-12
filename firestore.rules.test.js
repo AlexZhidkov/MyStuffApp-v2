@@ -202,6 +202,40 @@ test("current Member can access the Household and its root Item", async () => {
   );
 });
 
+test("signed-in person can observe that they have no Household membership", async () => {
+  const database = testEnvironment.authenticatedContext("new-member").firestore();
+
+  await assertSucceeds(getDoc(doc(database, "memberships/new-member")));
+});
+
+test("Account and Household deletion jobs immediately revoke client access", async () => {
+  await seedHousehold();
+  const database = testEnvironment.authenticatedContext("member-1").firestore();
+
+  await testEnvironment.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), "accountDeletionJobs/member-1"), {
+      memberId: "member-1",
+      status: "pending",
+    });
+  });
+  await assertFails(getDoc(doc(database, "memberships/member-1")));
+  await assertFails(getDoc(doc(database, "households/household-1")));
+  await assertFails(setDoc(
+    doc(database, "households/household-1/items/item-1"),
+    childItemData("Drill", "household-1"),
+  ));
+
+  await testEnvironment.withSecurityRulesDisabled(async (context) => {
+    await deleteDoc(doc(context.firestore(), "accountDeletionJobs/member-1"));
+    await setDoc(doc(context.firestore(), "householdDeletionJobs/household-1"), {
+      householdId: "household-1",
+      status: "pending",
+    });
+  });
+  await assertFails(getDoc(doc(database, "memberships/member-1")));
+  await assertFails(getDoc(doc(database, "households/household-1")));
+});
+
 test("Member cannot directly read or write backend-owned Search records", async () => {
   await seedHousehold();
   await testEnvironment.withSecurityRulesDisabled(async (context) => {

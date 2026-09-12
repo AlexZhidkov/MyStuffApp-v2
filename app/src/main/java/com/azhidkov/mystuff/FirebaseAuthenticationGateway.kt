@@ -12,6 +12,7 @@ import androidx.credentials.exceptions.NoCredentialException
 import androidx.lifecycle.lifecycleScope
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
+import com.google.firebase.auth.AuthCredential
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
@@ -50,6 +51,75 @@ class FirebaseAuthenticationGateway(
     }
 
     override fun signIn(onResult: (Result<AuthenticatedIdentity>) -> Unit) {
+        googleFirebaseCredential { credentialResult ->
+            credentialResult.onFailure { failure ->
+                onResult(Result.failure(failure))
+            }.onSuccess { firebaseCredential ->
+                val activity = activityReference.get()
+                if (activity == null) {
+                    onResult(
+                        Result.failure(
+                            GoogleAuthenticationException("Google sign-in is unavailable."),
+                        ),
+                    )
+                    return@onSuccess
+                }
+                firebaseAuth.signInWithCredential(firebaseCredential)
+                    .addOnCompleteListener(activity) { task ->
+                        val identity = firebaseAuth.currentUser
+                        if (task.isSuccessful && identity != null) {
+                            onResult(Result.success(identity.toAuthenticatedIdentity()))
+                        } else {
+                            onResult(
+                                Result.failure(
+                                    GoogleAuthenticationException(
+                                        "Google couldn't verify this account. Check your connection and try again.",
+                                    ),
+                                ),
+                            )
+                        }
+                    }
+            }
+        }
+    }
+
+    override fun reauthenticate(onResult: (Result<Unit>) -> Unit) {
+        val currentUser = firebaseAuth.currentUser
+        if (currentUser == null || !currentUser.hasGoogleProvider()) {
+            onResult(Result.failure(GoogleAuthenticationException("Sign in with Google again.")))
+            return
+        }
+        googleFirebaseCredential { credentialResult ->
+            credentialResult.onFailure { failure ->
+                onResult(Result.failure(failure))
+            }.onSuccess { credential ->
+                currentUser.reauthenticate(credential).addOnCompleteListener { task ->
+                    if (!task.isSuccessful) {
+                        onResult(
+                            Result.failure(
+                                GoogleAuthenticationException(
+                                    "Google couldn't verify this account. Please try again.",
+                                ),
+                            ),
+                        )
+                        return@addOnCompleteListener
+                    }
+                    currentUser.getIdToken(true).addOnCompleteListener { tokenTask ->
+                        onResult(
+                            if (tokenTask.isSuccessful) Result.success(Unit)
+                            else Result.failure(
+                                GoogleAuthenticationException(
+                                    "Google sign-in could not be refreshed. Please try again.",
+                                ),
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private fun googleFirebaseCredential(onResult: (Result<AuthCredential>) -> Unit) {
         val activity = activityReference.get()
         if (activity == null) {
             onResult(Result.failure(GoogleAuthenticationException("Google sign-in is unavailable.")))
@@ -104,21 +174,7 @@ class FirebaseAuthenticationGateway(
                 }
 
             val firebaseCredential = GoogleAuthProvider.getCredential(idToken, null)
-            firebaseAuth.signInWithCredential(firebaseCredential)
-                .addOnCompleteListener(activity) { task ->
-                    val identity = firebaseAuth.currentUser
-                    if (task.isSuccessful && identity != null) {
-                        onResult(Result.success(identity.toAuthenticatedIdentity()))
-                    } else {
-                        onResult(
-                            Result.failure(
-                                GoogleAuthenticationException(
-                                    "Google couldn't verify this account. Check your connection and try again.",
-                                ),
-                            ),
-                        )
-                    }
-                }
+            onResult(Result.success(firebaseCredential))
         }
     }
 

@@ -72,6 +72,28 @@ class RootChildItemCacheTest {
             assertFalse(cacheFile.exists())
         }
 
+    @Test
+    fun `clear removes memory disk and stale scheduled writes`() =
+        withTemporaryDirectory { directory ->
+            val scheduled = mutableListOf<() -> Unit>()
+            val cache = FileRootChildItemCache(directory, scheduled::add)
+            val item = Item(
+                id = "garage",
+                name = "Garage",
+                parentItemId = "household-1",
+                photoUrl = null,
+                description = null,
+                tags = emptyList(),
+            )
+
+            cache.store("household-1", listOf(item))
+            cache.clear()
+            scheduled.single().invoke()
+
+            assertNull(cache.load("household-1"))
+            assertFalse(directory.exists())
+        }
+
     private fun withTemporaryDirectory(block: (java.io.File) -> Unit) {
         val directory = Files.createTempDirectory("root-child-item-cache-test").toFile()
         try {

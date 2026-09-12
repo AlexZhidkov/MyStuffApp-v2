@@ -17,12 +17,15 @@ internal interface RootChildItemCache {
     fun load(householdId: String): List<Item>?
 
     fun store(householdId: String, items: List<Item>)
+
+    fun clear() = Unit
 }
 
 internal object NoRootChildItemCache : RootChildItemCache {
     override fun load(householdId: String): List<Item>? = null
 
     override fun store(householdId: String, items: List<Item>) = Unit
+    override fun clear() = Unit
 }
 
 internal class FileRootChildItemCache(
@@ -32,6 +35,7 @@ internal class FileRootChildItemCache(
     },
 ) : RootChildItemCache {
     private val memory = mutableMapOf<String, List<Item>>()
+    private var generation = 0L
 
     override fun load(householdId: String): List<Item>? {
         synchronized(memory) {
@@ -52,14 +56,29 @@ internal class FileRootChildItemCache(
 
     override fun store(householdId: String, items: List<Item>) {
         val snapshot = items.map { item -> item.copy(tags = item.tags.toList()) }
-        synchronized(memory) { memory[householdId] = snapshot }
+        val writeGeneration = synchronized(memory) {
+            memory[householdId] = snapshot
+            generation
+        }
         scheduleWrite {
+            if (synchronized(memory) { generation != writeGeneration }) return@scheduleWrite
             try {
                 writeAtomically(householdId, snapshot)
+                if (synchronized(memory) { generation != writeGeneration }) {
+                    directory.resolve(rootChildItemCacheFileName(householdId)).delete()
+                }
             } catch (_: Exception) {
                 // Disk caching is best effort; the in-memory snapshot remains useful.
             }
         }
+    }
+
+    override fun clear() {
+        synchronized(memory) {
+            generation += 1
+            memory.clear()
+        }
+        directory.deleteRecursively()
     }
 
     private fun read(cacheFile: File, expectedHouseholdId: String): List<Item> =

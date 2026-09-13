@@ -14,6 +14,30 @@
       },
       "oauth_client": [
         {
+          "client_id": "37308974986-4ho1heq0s2qif22d16c8lkk5rv05r6fg.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.azhidkov.stuff",
+            "certificate_hash": "fed64785b9ae6f47e4cbb6dbad83b81358270380"
+          }
+        },
+        {
+          "client_id": "37308974986-bn5ge2t1ahfdugdadutbr7hcciioubvp.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.azhidkov.stuff",
+            "certificate_hash": "5537c25a8708967b3901e37ef647db1cf6383ee3"
+          }
+        },
+        {
+          "client_id": "37308974986-hqqdbh0r4chgcjpp3jfj1l41jgoaqa7e.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.azhidkov.stuff",
+            "certificate_hash": "fa5b670126b001ca9a0cc76710f7ae75830885da"
+          }
+        },
+        {
           "client_id": "37308974986-me7vg7pvqsb415hnekrfagtdrtuptcnp.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
@@ -30,7 +54,17 @@
         {
           "current_key": "AIzaSyAkdNF0fNePhA4AYQvrXMrSsScSFNMNyAs"
         }
-      ]
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "37308974986-tgibl8gn8ia7tchev2dvu96g1g80ha59.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
     }
   ],
   "configuration_version": "1"

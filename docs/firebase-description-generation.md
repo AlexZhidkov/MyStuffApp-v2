@@ -18,12 +18,14 @@ the app.
   route Description Generation through the Search backend.
 - [ ] In **Remote Config**, create the string parameter `description_generation_model`, set its
   default value to a currently validated Gemini model name, and publish the configuration.
-- [ ] In **Project settings > Your apps**, register the SHA-256 fingerprints for every certificate
-  used to sign a privately distributed release build.
-- [ ] In **App Check > Apps**, register the Android app with **Play Integrity**. Configure it as an
-  app distributed exclusively outside Google Play: do not require `PLAY_RECOGNIZED`, do not
-  require `LICENSED`, and set the minimum acceptable device integrity level to **Device
-  integrity** (`MEETS_DEVICE_INTEGRITY`).
+- [x] In **Project settings > Your apps**, register the SHA-1 and SHA-256 fingerprints for all
+  three certificates in Play's recommended quantum-ready setup: the current classical key, the
+  post-quantum key, and the previous classical key used on older Android versions. The upload
+  certificate identifies uploads to Play; it is not the signing identity of an installed release.
+- [x] In **App Check > Apps**, register the Android app with **Play Integrity**. Because release
+  builds are distributed through Google Play, require `PLAY_RECOGNIZED` and `LICENSED`, and set
+  the minimum acceptable device integrity level to **Device integrity**
+  (`MEETS_DEVICE_INTEGRITY`). Keep the token lifetime at one hour.
 - [ ] For each development machine or emulator, run a debug build, copy the App Check debug token
   from Logcat, and register it in **App Check > Apps > Manage debug tokens**. Never commit a debug
   token to the repository.
@@ -34,7 +36,7 @@ the app.
 Firebase's Android setup references are the
 [Remote Config guide](https://firebase.google.com/docs/remote-config/android/get-started),
 [debug-provider guide](https://firebase.google.com/docs/app-check/android/debug-provider),
-[outside-Google-Play Play Integrity guide](https://firebase.google.com/docs/app-check/android/play-integrity-provider),
+[Play Integrity guide](https://firebase.google.com/docs/app-check/android/play-integrity-provider),
 and [Firebase AI Logic App Check guide](https://firebase.google.com/docs/ai-logic/app-check).
 
 ## Integration verification

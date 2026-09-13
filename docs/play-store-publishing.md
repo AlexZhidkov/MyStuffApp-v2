@@ -1,21 +1,20 @@
 # Publishing MyStuff to Google Play
 
-> External requirements last verified: 3 September 2026. Repository implementation
-> status updated: 11 September 2026. Google Play requirements change regularly;
+> External requirements last verified: 12 September 2026. Repository implementation
+> status updated: 12 September 2026. Google Play requirements change regularly;
 > check the linked official documentation before submitting a release.
 
-MyStuff can be published to Google Play, and the release build currently compiles
-successfully. However, the app is not yet ready for a public production release.
+MyStuff has an active Google Play Internal Testing release, `1.0 (1) - Internal test`,
+and the release build currently compiles successfully. However, the app is not yet
+ready for a public production release.
 
-The policy implementation described in Section 3 now exists in this repository, but
-it is not operational until the Firebase resources and GitHub Pages site are manually
-deployed and verified. The remaining release blockers are:
+The policy implementation described in Section 3 is deployed. The production Firebase
+backend is active in `mystuff-ai-app`, and the GitHub Pages privacy and account-deletion
+pages are live. The remaining release blockers are:
 
-- The generated Android App Bundle (AAB) is unsigned because
-  [`app/build.gradle.kts`](../app/build.gradle.kts) has no release signing configuration.
-- The new Account Deletion Functions, security rules, and public privacy site have not
-  yet been deployed to production.
-- Production Firebase, Google sign-in, and Play Integrity certificates still need configuring.
+- Verify the active Internal Testing build on a Play-installed device against the
+  representative journey in Section 7.
+- Complete the remaining Play Console listing, app-content, testing, and production gates.
 
 ## 1. Decide the permanent package name
 
@@ -60,16 +59,16 @@ Before requesting production review:
 
 These items are implemented by the in-app Account and Household deletion flows,
 durable Firebase cleanup jobs, deletion-aware Firestore and Storage rules, and the
-static site under [`site/`](../site/). The planned public URLs are:
+static site under [`site/`](../site/). The deployed public URLs are:
 
 - Privacy Policy: `https://alexzhidkov.github.io/MyStuffApp-v2/`
 - Account deletion: `https://alexzhidkov.github.io/MyStuffApp-v2/delete-account/`
 
-The Pages workflow is manual (`workflow_dispatch`) and has intentionally not been
-run. Before release, enable GitHub Pages with GitHub Actions as its source, run
-`Deploy privacy site` from the repository's `main` branch, and verify both URLs in
-a signed build. The private external-request procedure and failed-job recovery steps
-are in [Account Deletion Operations](account-deletion-operations.md).
+The Pages workflow is manual (`workflow_dispatch`). Both pages were verified live on
+12 September 2026. If the policy changes, run `Deploy privacy site` from the repository's
+`main` branch and verify both URLs again in the Play-delivered build. The private
+external-request procedure and failed-job recovery steps are in
+[Account Deletion Operations](account-deletion-operations.md).
 
 Google requires both in-app and external deletion paths for apps that create
 accounts. The privacy policy must be publicly accessible, non-geofenced, and not
@@ -99,8 +98,11 @@ It creates:
 app/build/outputs/bundle/release/app-release.aab
 ```
 
-Without release signing configuration, that file is unsigned and Play Console will
-not accept it.
+The plain Gradle task does not add an upload signature because the repository does
+not contain release-key material. Generate the upload-signed AAB with the upload key,
+then distribute the release only through Google Play. Play signs the APKs delivered
+to testers and Members with the app-signing key; the upload key is not the installed
+app's identity.
 
 The simplest signing workflow is through Android Studio:
 
@@ -130,8 +132,12 @@ Official reference:
 
 ## 5. Create the Play listing and upload to Internal Testing
 
-Create an app named **MyStuff**, enroll in Play App Signing, and upload the signed
-AAB to **Testing > Internal testing** first.
+The **MyStuff** Play app is enrolled in Play App Signing. **Testing > Internal
+testing** is active with release `1.0 (1) - Internal test` as of 12 September 2026.
+Upload later signed AABs to Internal Testing before promotion.
+
+Internal testers enrol and install from:
+`https://play.google.com/apps/internaltest/4701725446253616628`
 
 The app already targets Android 16 / API 36, which satisfies the Google Play target
 API requirement in effect when this guide was last verified.
@@ -143,25 +149,38 @@ Official references:
 
 ## 6. Connect the Play signing identity to Firebase
 
-After Play App Signing is configured:
+All certificates in Play's recommended quantum-ready signing setup are registered on
+the Firebase Android app: the current classical key, the post-quantum key, and the
+previous classical key used on older Android versions. Firebase generates Android OAuth
+clients from the SHA-1 fingerprints, and the refreshed
+[`app/google-services.json`](../app/google-services.json) must ship in builds that use
+Google sign-in. The Play Console app's Play Integrity API is linked to `mystuff-ai-app`
+(project number `37308974986`).
+
+When the Play app-signing key changes:
 
 1. Open **Play Console > App integrity**.
-2. Copy the Play app-signing SHA-1 and SHA-256 certificate fingerprints.
+2. Copy the SHA-1 and SHA-256 fingerprints for every certificate Play identifies as an
+   app-signing key, including each key in a quantum-ready signing setup.
 3. Add them under **Firebase > Project settings > Your apps > `com.azhidkov.stuff`**.
-4. Also retain any required local upload/release certificate fingerprints.
+4. Retain the previous Play app-signing fingerprints while Play may still deliver
+   builds signed with that key. Do not substitute the upload certificate: it verifies
+   bundle uploads but does not identify Play-installed builds.
 5. Download the updated `google-services.json`.
 6. Replace `app/google-services.json` with the updated file.
 7. Increment `versionCode`, rebuild, and upload a new internal-test AAB if the
    Firebase configuration changed after the first upload.
-8. Link the Play Integrity API to the same Firebase/Google Cloud project.
+8. Confirm the Play Integrity API remains linked to Firebase/Google Cloud project
+   `mystuff-ai-app` (project number `37308974986`).
 9. Register the Play app-signing SHA-256 certificate under Firebase App Check.
 
 This is essential because release builds use the Play Integrity App Check provider
 in `app/src/release/java/com/azhidkov/mystuff/AppCheckProvider.kt`.
 
-For distribution exclusively through Google Play, Firebase recommends requiring
-the `PLAY_RECOGNIZED` and `LICENSED` verdicts. This differs from the repository's
-current private, outside-Play setup notes.
+The Firebase App Check registration currently requires `PLAY_RECOGNIZED`, `LICENSED`,
+and `MEETS_DEVICE_INTEGRITY`, and retains the one-hour token lifetime. Debug builds
+continue to use the App Check debug provider; registering a local debug token does not
+relax the Play Integrity policy used by release builds.
 
 Official references:
 
@@ -170,8 +189,11 @@ Official references:
 
 ## 7. Deploy and verify the production backend
 
-Select the intended production Firebase project, then deploy Functions, indexes,
-and both security-rule sets:
+The production backend was verified active in `mystuff-ai-app` on 12 September 2026:
+Cloud Functions run in `australia-southeast1`, and the deployed Firestore indexes
+include the Household Access and Search indexes. For later deployments, select the
+intended production Firebase project, then deploy Functions, indexes, and both
+security-rule sets:
 
 ```bash
 firebase use mystuff-ai-app
@@ -198,6 +220,13 @@ and test at least:
 - Invitation flows that are represented as available in the store listing
 - Account deletion and associated data cleanup
 - Operation after reinstalling the Play-delivered app
+
+For the Firebase signing and App Check release gate, record a single representative
+Play-installed journey that covers the core protected capabilities:
+
+| Build | Install source | Device | UTC time | Google sign-in | Household | Search | Description Generation | Certificate / App Check evidence |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `1.0 (1) - Internal test` | Internal-testing opt-in |  |  |  |  |  |  |  |
 
 ## 8. Complete the Play Console forms
 
@@ -267,6 +296,5 @@ Official reference:
 
 ## Recommended next milestone
 
-Deploy and verify the Account Deletion backend, deletion-aware rules, and GitHub Pages
-site. Then complete release signing, Firebase certificate registration, and the
-initial internal-test upload.
+Finish the Play-installed verification in Section 7, then complete the store listing
+and app-content forms before publishing the closed-test candidate.

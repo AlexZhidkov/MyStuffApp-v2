@@ -2,6 +2,7 @@ package com.azhidkov.mystuff
 
 import android.content.Context
 import android.graphics.BitmapFactory
+import android.os.Build
 import android.os.FileObserver
 import android.os.Handler
 import android.os.Looper
@@ -368,16 +369,14 @@ internal class WorkManagerInventoryDescriptionGenerationWork(
     private val requestCapture = DescriptionGenerationRequestCapture(photoStore)
     private val observers = mutableSetOf<(DescriptionGenerationWorkState) -> Unit>()
     private val workInfoObserver = Observer<List<WorkInfo>> { emitState() }
-    private val completedOutcomeObserver = object : FileObserver(
-        File(
+    private val completedOutcomeObserver = fileObserver(
+        directory = File(
             context.noBackupFilesDir,
             "$DESCRIPTION_GENERATION_WORK_DIRECTORY/$DESCRIPTION_GENERATION_COMPLETED_DIRECTORY",
-        ).apply { mkdirs() }.absolutePath,
+        ).apply { mkdirs() },
         FileObserver.CREATE or FileObserver.MOVED_TO or FileObserver.CLOSE_WRITE,
     ) {
-        override fun onEvent(event: Int, path: String?) {
-            mainHandler.post { emitState() }
-        }
+        mainHandler.post { emitState() }
     }
 
     init {
@@ -446,6 +445,21 @@ internal class WorkManagerInventoryDescriptionGenerationWork(
     private fun emitState() {
         val state = workStore.snapshot()
         observers.toList().forEach { observer -> observer(state) }
+    }
+}
+
+private fun fileObserver(
+    directory: File,
+    mask: Int,
+    onEvent: () -> Unit,
+): FileObserver = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+    object : FileObserver(directory, mask) {
+        override fun onEvent(event: Int, path: String?) = onEvent()
+    }
+} else {
+    @Suppress("DEPRECATION")
+    object : FileObserver(directory.absolutePath, mask) {
+        override fun onEvent(event: Int, path: String?) = onEvent()
     }
 }
 

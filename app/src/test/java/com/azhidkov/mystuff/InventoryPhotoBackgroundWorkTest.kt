@@ -201,6 +201,28 @@ class InventoryPhotoBackgroundWorkTest {
     }
 
     @Test
+    fun `delayed successful completion does not erase a failed attachment draft`() {
+        val registry = AttachmentUploadFailureRegistry()
+        val failure = AttachmentUploadFailure(
+            id = "attachment-1",
+            householdId = "household-1",
+            itemId = "item-1",
+            attachmentId = "attachment-1",
+            originatingMemberId = "member-1",
+            displayStoragePath = "display.webp",
+            thumbnailStoragePath = "thumb.webp",
+        )
+        registry.prepare(failure, emptyList()) {}
+        registry.markFailed(failure, IllegalStateException("denied"))
+
+        registry.complete(failure.id)
+
+        val drafts = mutableListOf<List<FailedItemAttachmentDraft>>()
+        registry.observe { drafts += it }.cancel()
+        assertEquals("attachment-1", drafts.last().single().id)
+    }
+
+    @Test
     fun `each attachment upload uses its immutable nested location for both variants`() {
         val queue = RecordingPhotoTransferQueue()
         val store = BackgroundInventoryPhotoStore(

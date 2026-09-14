@@ -60,7 +60,7 @@ class InventoryDescriptionGenerationWorkTest {
     }
 
     @Test
-    fun `replacement workflow saves uploads cleans source then generates from stored revision`() {
+    fun `replacement workflow saves uploads reads cleans source then generates from stored revision`() {
         val events = mutableListOf<String>()
         val request = replacementDescriptionGenerationRequest()
         val workflow = DescriptionGenerationWorkflow(
@@ -76,6 +76,10 @@ class InventoryDescriptionGenerationWorkTest {
             fullPhotoUploader = RecordingDescriptionGenerationPhotoUploader(events),
             uploadedPhotoLedger = RecordingUploadedPhotoLedger(events),
             localPhotoSourceCleaner = RecordingLocalPhotoSourceCleaner(events),
+            scheduleThumbnailUpload = {
+                events += "schedule-thumbnail"
+                DescriptionGenerationStep.Success(Unit)
+            },
         )
 
         val outcome = workflow.run(request)
@@ -87,8 +91,9 @@ class InventoryDescriptionGenerationWorkTest {
                 "upload:households/household-1/items/drill-$REPLACEMENT_REVISION.webp:" +
                     "content://mystuff/new-full.webp",
                 "mark-uploaded",
-                "cleanup:content://mystuff/new-full.webp",
                 "load:${request.item.photoUrl}",
+                "cleanup:content://mystuff/new-full.webp",
+                "schedule-thumbnail",
                 "generate:Member facts:fr-FR",
                 "patch:Generated replacement:member-1:Alex",
             ),
@@ -97,7 +102,7 @@ class InventoryDescriptionGenerationWorkTest {
     }
 
     @Test
-    fun `replacement capture allocates one revision and schedules only its thumbnail independently`() {
+    fun `replacement capture allocates one immutable attachment revision`() {
         val photos = RecordingDescriptionGenerationInventoryPhotoStore()
         val capture = DescriptionGenerationRequestCapture(photos)
         val replacement = ItemPhoto(
@@ -106,7 +111,6 @@ class InventoryDescriptionGenerationWorkTest {
         )
 
         val request = capture.capture(descriptionGenerationRequest(), replacement)
-        capture.uploadThumbnailInBackground(request)
 
         assertEquals(1, photos.allocatedRevisions)
         assertEquals(
@@ -136,12 +140,6 @@ class InventoryDescriptionGenerationWorkTest {
             ),
             request.replacementPhoto,
         )
-        assertEquals(listOf(replacement), photos.thumbnailUploads)
-
-        photos.thumbnailFailure = IllegalStateException("thumbnail scheduler unavailable")
-        capture.uploadThumbnailInBackground(request)
-
-        assertEquals(2, photos.thumbnailAttempts)
     }
 
     @Test
@@ -359,6 +357,69 @@ class InventoryDescriptionGenerationWorkTest {
         assertEquals(DescriptionGenerationOutcome.PermanentPhotoFailure, outcome)
         assertEquals("Member facts", store.currentDescription)
         assertFalse(events.any { it.startsWith("load:") || it.startsWith("patch:") })
+    }
+
+    @Test
+    fun `replacement upload failure cleans its attachment before reporting and never invokes Gemini`() {
+        val cleanup = mutableListOf<AttachmentUploadFailure>()
+        val generator = RecordingDescriptionGenerator(
+            events = mutableListOf(),
+            output = DescriptionGenerationStep.Success("Must not be generated"),
+        )
+        val workflow = DescriptionGenerationWorkflow(
+            itemStore = RecordingDescriptionGenerationItemStore(mutableListOf()),
+            photoLoader = successfulLoader(),
+            generator = generator,
+            fullPhotoUploader = DescriptionGenerationFullPhotoUploader {
+                DescriptionGenerationStep.PermanentFailure
+            },
+            photoFailureHandler = DescriptionGenerationPhotoFailureHandler { cleanup += it },
+        )
+
+        assertEquals(
+            DescriptionGenerationOutcome.PermanentPhotoFailure,
+            workflow.run(replacementDescriptionGenerationRequest()),
+        )
+        assertEquals(
+            replacementDescriptionGenerationRequest().attachmentUploadFailure(),
+            cleanup.single(),
+        )
+        assertTrue(generator.inputs.isEmpty())
+    }
+
+    @Test
+    fun `replacement stored-photo read failure cleans its attachment before reporting`() {
+        val cleanup = mutableListOf<AttachmentUploadFailure>()
+        val events = mutableListOf<String>()
+        val workflow = DescriptionGenerationWorkflow(
+            itemStore = RecordingDescriptionGenerationItemStore(events),
+            photoLoader = SequencedDescriptionGenerationPhotoLoader(
+                events,
+                ArrayDeque(listOf(DescriptionGenerationStep.PermanentFailure)),
+            ),
+            generator = successfulGenerator(),
+            fullPhotoUploader = RecordingDescriptionGenerationPhotoUploader(events),
+            localPhotoSourceCleaner = RecordingLocalPhotoSourceCleaner(events),
+            photoFailureHandler = DescriptionGenerationPhotoFailureHandler { cleanup += it },
+        )
+
+        assertEquals(
+            DescriptionGenerationOutcome.PermanentPhotoFailure,
+            workflow.run(replacementDescriptionGenerationRequest()),
+        )
+        assertEquals(
+            replacementDescriptionGenerationRequest().attachmentUploadFailure(),
+            cleanup.single(),
+        )
+        assertEquals(
+            listOf(
+                "save:Member facts",
+                "upload:households/household-1/items/drill-$REPLACEMENT_REVISION.webp:" +
+                    "content://mystuff/new-full.webp",
+                "load:${replacementDescriptionGenerationRequest().item.photoUrl}",
+            ),
+            events,
+        )
     }
 
     @Test
@@ -612,9 +673,6 @@ private class RecordingLocalPhotoSourceCleaner(
 
 private class RecordingDescriptionGenerationInventoryPhotoStore : InventoryPhotoStore {
     var allocatedRevisions = 0
-    var thumbnailAttempts = 0
-    var thumbnailFailure: RuntimeException? = null
-    val thumbnailUploads = mutableListOf<ItemPhoto>()
 
     override fun newAttachmentId(householdId: String, itemId: String): String = "attachment-1"
 
@@ -640,11 +698,11 @@ private class RecordingDescriptionGenerationInventoryPhotoStore : InventoryPhoto
         failure: AttachmentUploadFailure?,
     ) = Unit
 
-    override fun uploadThumbnailInBackground(revision: ItemPhotoRevision, photo: ItemPhoto) {
-        thumbnailAttempts += 1
-        thumbnailFailure?.let { throw it }
-        thumbnailUploads += photo
-    }
+    override fun uploadThumbnailInBackground(
+        revision: ItemPhotoRevision,
+        photo: ItemPhoto,
+        failure: AttachmentUploadFailure?,
+    ) = Unit
 
     override fun deleteInBackground(locations: StoredItemPhotoLocations) = Unit
 }
@@ -687,6 +745,7 @@ private fun descriptionGenerationRequest() = DescriptionGenerationRequest(
 
 private fun replacementDescriptionGenerationRequest() = descriptionGenerationRequest().copy(
     item = descriptionGenerationRequest().item.copy(
+        photoAttachmentId = "replacement-attachment",
         photoUrl = "gs://mystuff/households/household-1/items/drill-$REPLACEMENT_REVISION.webp",
         photoThumbnailUrl =
             "gs://mystuff/households/household-1/items/drill-$REPLACEMENT_REVISION-thumb.webp",

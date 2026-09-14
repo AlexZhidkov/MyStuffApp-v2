@@ -82,11 +82,12 @@ internal class AttachmentUploadFailureRegistry {
     }
 
     fun complete(id: String) {
-        val (upload, hadFailure) = synchronized(lock) {
-            pending.remove(id) to (failed.remove(id) != null)
+        val upload = synchronized(lock) {
+            // A delayed thumbnail completion must not erase a failed draft
+            // after the full transfer or a stored-photo read already failed.
+            if (failed.containsKey(id)) null else pending.remove(id)
         }
         upload?.sourceUris?.forEach(::forgetSource)
-        if (hadFailure) notifyObservers()
     }
 
     fun retry(id: String) {
@@ -367,8 +368,12 @@ internal class BackgroundInventoryPhotoStore(
         queueUpload(revision.fullStoragePath, photo.uri, failure)
     }
 
-    override fun uploadThumbnailInBackground(revision: ItemPhotoRevision, photo: ItemPhoto) {
-        queueUpload(revision.thumbnailStoragePath, photo.thumbnailUri)
+    override fun uploadThumbnailInBackground(
+        revision: ItemPhotoRevision,
+        photo: ItemPhoto,
+        failure: AttachmentUploadFailure?,
+    ) {
+        queueUpload(revision.thumbnailStoragePath, photo.thumbnailUri, failure)
     }
 
     private fun queueUpload(
@@ -510,9 +515,13 @@ internal class InventoryPhotoTransferWorker(
     }
 }
 
-private class FirebaseAttachmentUploadFailureHandler(
+internal class FirebaseAttachmentUploadFailureHandler(
     private val firestore: FirebaseFirestore = FirebaseFirestore.getInstance(),
-) : PhotoTransferFailureHandler {
+) : PhotoTransferFailureHandler, DescriptionGenerationPhotoFailureHandler {
+    override fun handle(failure: AttachmentUploadFailure) {
+        handle(failure, FirebasePhotoRemoteStore())
+    }
+
     override fun handle(failure: AttachmentUploadFailure, remoteStore: PhotoRemoteStore) {
         listOf(failure.displayStoragePath, failure.thumbnailStoragePath)
             .forEach { path -> runCatching { remoteStore.delete(path) } }

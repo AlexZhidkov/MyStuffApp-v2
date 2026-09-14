@@ -111,17 +111,6 @@ internal class DescriptionGenerationRequestCapture(
         )
     }
 
-    fun uploadThumbnailInBackground(request: DescriptionGenerationRequest) {
-        val replacement = request.replacementPhoto ?: return
-        try {
-            photoStore.uploadThumbnailInBackground(
-                revision = replacement.revision,
-                photo = replacement.source,
-            )
-        } catch (_: RuntimeException) {
-            // Thumbnail transfer remains independent from Description Generation submission.
-        }
-    }
 }
 
 internal interface InventoryDescriptionGenerationWork {
@@ -227,6 +216,15 @@ internal fun interface DescriptionGenerationFullPhotoUploader {
     fun upload(photo: DescriptionGenerationReplacementPhoto): DescriptionGenerationStep<Unit>
 }
 
+internal fun interface DescriptionGenerationPhotoFailureHandler {
+    fun handle(failure: AttachmentUploadFailure)
+}
+
+internal object NoDescriptionGenerationPhotoFailureHandler :
+    DescriptionGenerationPhotoFailureHandler {
+    override fun handle(failure: AttachmentUploadFailure) = Unit
+}
+
 internal interface DescriptionGenerationUploadedPhotoLedger {
     fun isUploaded(): Boolean
     fun markUploaded()
@@ -252,13 +250,20 @@ internal class DescriptionGenerationWorkflow(
         DescriptionGenerationLocalPhotoSourceCleaner {
             DescriptionGenerationStep.Success(Unit)
         },
+    private val photoFailureHandler: DescriptionGenerationPhotoFailureHandler =
+        NoDescriptionGenerationPhotoFailureHandler,
+    private val scheduleThumbnailUpload: (
+        DescriptionGenerationReplacementPhoto,
+    ) -> DescriptionGenerationStep<Unit> = { DescriptionGenerationStep.Success(Unit) },
 ) {
     fun run(request: DescriptionGenerationRequest): DescriptionGenerationOutcome {
         when (itemStore.saveDraft(request)) {
             is DescriptionGenerationStep.Success -> Unit
             is DescriptionGenerationStep.PermanentFailureWithErrorType,
-            DescriptionGenerationStep.PermanentFailure ->
+            DescriptionGenerationStep.PermanentFailure -> {
+                cleanUpFailedReplacement(request)
                 return DescriptionGenerationOutcome.PermanentSaveFailure
+            }
         }
 
         request.replacementPhoto?.let { replacement ->
@@ -268,15 +273,11 @@ internal class DescriptionGenerationWorkflow(
                         uploadedPhotoLedger.markUploaded()
                     }
                     is DescriptionGenerationStep.PermanentFailureWithErrorType,
-                    DescriptionGenerationStep.PermanentFailure ->
+                    DescriptionGenerationStep.PermanentFailure -> {
+                        cleanUpFailedReplacement(request)
                         return DescriptionGenerationOutcome.PermanentPhotoFailure
+                    }
                 }
-            }
-            when (localPhotoSourceCleaner.clean(replacement.source.uri)) {
-                is DescriptionGenerationStep.Success -> Unit
-                is DescriptionGenerationStep.PermanentFailureWithErrorType,
-                DescriptionGenerationStep.PermanentFailure ->
-                    return DescriptionGenerationOutcome.PermanentPhotoFailure
             }
         }
 
@@ -285,8 +286,30 @@ internal class DescriptionGenerationWorkflow(
         ) {
             is DescriptionGenerationStep.Success -> loaded.value
             is DescriptionGenerationStep.PermanentFailureWithErrorType,
-            DescriptionGenerationStep.PermanentFailure ->
+            DescriptionGenerationStep.PermanentFailure -> {
+                cleanUpFailedReplacement(request)
                 return DescriptionGenerationOutcome.PermanentPhotoFailure
+            }
+        }
+        request.replacementPhoto?.let { replacement ->
+            when (localPhotoSourceCleaner.clean(replacement.source.uri)) {
+                is DescriptionGenerationStep.Success -> Unit
+                is DescriptionGenerationStep.PermanentFailureWithErrorType,
+                DescriptionGenerationStep.PermanentFailure -> {
+                    cleanUpFailedReplacement(request)
+                    return DescriptionGenerationOutcome.PermanentPhotoFailure
+                }
+            }
+            when (val scheduled = runCatching {
+                scheduleThumbnailUpload(replacement)
+            }.getOrElse(::classifyDescriptionGenerationFailure)) {
+                is DescriptionGenerationStep.Success -> Unit
+                is DescriptionGenerationStep.PermanentFailureWithErrorType,
+                DescriptionGenerationStep.PermanentFailure -> {
+                    cleanUpFailedReplacement(request)
+                    return DescriptionGenerationOutcome.PermanentPhotoFailure
+                }
+            }
         }
         val generated = when (
             val result = generator.generate(
@@ -334,6 +357,26 @@ internal class DescriptionGenerationWorkflow(
                 DescriptionGenerationOutcome.PermanentGenerationFailure
         }
     }
+
+    private fun cleanUpFailedReplacement(request: DescriptionGenerationRequest) {
+        request.attachmentUploadFailure()?.let { failure ->
+            runCatching { photoFailureHandler.handle(failure) }
+        }
+    }
+}
+
+internal fun DescriptionGenerationRequest.attachmentUploadFailure(): AttachmentUploadFailure? {
+    val replacement = replacementPhoto ?: return null
+    val attachmentId = item.photoAttachmentId ?: return null
+    return AttachmentUploadFailure(
+        id = attachmentId,
+        householdId = householdId,
+        itemId = item.id,
+        attachmentId = attachmentId,
+        originatingMemberId = requestingMember.id,
+        displayStoragePath = replacement.revision.fullStoragePath,
+        thumbnailStoragePath = replacement.revision.thumbnailStoragePath,
+    )
 }
 
 private object EmptyDescriptionGenerationUploadedPhotoLedger :
@@ -367,6 +410,7 @@ internal class WorkManagerInventoryDescriptionGenerationWork(
     private val workStore = DescriptionGenerationWorkStore(context.noBackupFilesDir)
     private val photoStore = firebaseInventoryPhotoStore()
     private val requestCapture = DescriptionGenerationRequestCapture(photoStore)
+    private val uploadFailureRegistry = processAttachmentUploadFailures
     private val observers = mutableSetOf<(DescriptionGenerationWorkState) -> Unit>()
     private val workInfoObserver = Observer<List<WorkInfo>> { emitState() }
     private val completedOutcomeObserver = fileObserver(
@@ -390,6 +434,15 @@ internal class WorkManagerInventoryDescriptionGenerationWork(
         replacementPhoto: ItemPhoto?,
     ): PendingDescriptionGeneration {
         val capturedRequest = requestCapture.capture(request, replacementPhoto)
+        val replacementFailure = capturedRequest.attachmentUploadFailure()
+        replacementFailure?.let { failure ->
+            val replacement = requireNotNull(capturedRequest.replacementPhoto)
+            uploadFailureRegistry.prepare(
+                failure = failure,
+                sourceUris = listOf(replacement.source.uri, replacement.source.thumbnailUri),
+                retry = { retryReplacementPhoto(capturedRequest, failure) },
+            )
+        }
         val id = workStore.enqueue(capturedRequest)
         try {
             val work = OneTimeWorkRequestBuilder<InventoryDescriptionGenerationWorker>()
@@ -422,11 +475,35 @@ internal class WorkManagerInventoryDescriptionGenerationWork(
             }
         } catch (failure: RuntimeException) {
             workStore.discardPending(id)
+            replacementFailure?.let { uploadFailureRegistry.remove(it.id) }
             throw failure
         }
-        requestCapture.uploadThumbnailInBackground(capturedRequest)
         emitState()
         return PendingDescriptionGeneration(id, capturedRequest)
+    }
+
+    private fun retryReplacementPhoto(
+        request: DescriptionGenerationRequest,
+        failure: AttachmentUploadFailure,
+    ) {
+        val replacement = requireNotNull(request.replacementPhoto)
+        runCatching {
+            FirebaseDescriptionGenerationItemStore().republishPhoto(request) { result ->
+                result.onSuccess { projected ->
+                    if (projected) {
+                        runCatching {
+                            photoStore.uploadAttachmentInBackground(
+                                revision = replacement.revision,
+                                photo = replacement.source,
+                                failure = failure,
+                            )
+                        }.onFailure { uploadFailureRegistry.markFailed(failure, it) }
+                    } else {
+                        uploadFailureRegistry.complete(failure.id)
+                    }
+                }.onFailure { uploadFailureRegistry.markFailed(failure, it) }
+            }
+        }.onFailure { uploadFailureRegistry.markFailed(failure, it) }
     }
 
     override fun observe(
@@ -489,8 +566,28 @@ internal class InventoryDescriptionGenerationWorker(
             localPhotoSourceCleaner = AndroidDescriptionGenerationLocalPhotoSourceCleaner(
                 applicationContext,
             ),
+            photoFailureHandler = FirebaseAttachmentUploadFailureHandler(),
+            scheduleThumbnailUpload = { replacement ->
+                runCatching {
+                    firebaseInventoryPhotoStore().uploadThumbnailInBackground(
+                        revision = replacement.revision,
+                        photo = replacement.source,
+                        failure = request.attachmentUploadFailure(),
+                    )
+                    DescriptionGenerationStep.Success(Unit)
+                }.getOrElse(::classifyDescriptionGenerationFailure)
+            },
         )
         val outcome = workflow.run(request)
+        request.attachmentUploadFailure()?.let { failure ->
+            when (outcome) {
+                DescriptionGenerationOutcome.PermanentSaveFailure ->
+                    processAttachmentUploadFailures.complete(failure.id)
+                DescriptionGenerationOutcome.PermanentPhotoFailure ->
+                    processAttachmentUploadFailures.markFailed(failure, null)
+                else -> Unit
+            }
+        }
         workStore.complete(
             id = requestId,
             outcome = outcome,
@@ -509,6 +606,50 @@ internal class InventoryDescriptionGenerationWorker(
 private class FirebaseDescriptionGenerationItemStore(
     private val firestore: FirebaseFirestore = FirebaseFirestore.getInstance(),
 ) : DescriptionGenerationItemStore {
+    fun republishPhoto(
+        request: DescriptionGenerationRequest,
+        onResult: (Result<Boolean>) -> Unit,
+    ) {
+        val attachmentId = request.item.photoAttachmentId
+        if (request.replacementPhoto == null || attachmentId == null) {
+            onResult(Result.failure(IllegalArgumentException("Replacement Photo is missing.")))
+            return
+        }
+        val item = itemDocument(request.householdId, request.item.id)
+        val attachment = attachmentDocument(request.householdId, request.item.id, attachmentId)
+        firestore.runTransaction { transaction ->
+            val itemSnapshot = transaction.get(item)
+            val currentAttachmentId = itemSnapshot.getString(ITEM_PHOTO_ATTACHMENT_ID_FIELD)
+            if (currentAttachmentId != null && currentAttachmentId != attachmentId) {
+                false
+            } else {
+                transaction.set(
+                    attachment,
+                    mapOf(
+                        ITEM_ATTACHMENT_CREATED_AT_FIELD to FieldValue.serverTimestamp(),
+                        ITEM_ATTACHMENT_CONTENT_TYPE_FIELD to
+                            OPTIMIZED_ATTACHMENT_IMAGE_CONTENT_TYPE,
+                        ITEM_ATTACHMENT_DISPLAY_URL_FIELD to requireNotNull(request.item.photoUrl),
+                    ),
+                )
+                transaction.update(
+                    item,
+                    mapOf(
+                        ITEM_PHOTO_ATTACHMENT_ID_FIELD to attachmentId,
+                        ITEM_PHOTO_URL_FIELD to request.item.photoUrl,
+                        ITEM_PHOTO_THUMBNAIL_URL_FIELD to request.item.photoThumbnailUrl,
+                        ITEM_UPDATED_AT_FIELD to FieldValue.serverTimestamp(),
+                        ITEM_UPDATED_BY_ID_FIELD to request.requestingMember.id,
+                        ITEM_UPDATED_BY_DISPLAY_NAME_FIELD to request.requestingMember.displayName,
+                    ),
+                )
+                true
+            }
+        }
+            .addOnSuccessListener { projected -> onResult(Result.success(projected)) }
+            .addOnFailureListener { failure -> onResult(Result.failure(failure)) }
+    }
+
     override fun saveDraft(
         request: DescriptionGenerationRequest,
     ): DescriptionGenerationStep<Unit> = firebaseStep {

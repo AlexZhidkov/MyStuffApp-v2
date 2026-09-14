@@ -991,6 +991,7 @@ private class FakeInventoryPhotoStore(
     override fun uploadThumbnailInBackground(
         revision: ItemPhotoRevision,
         photo: ItemPhoto,
+        failure: AttachmentUploadFailure?,
     ) {
         enqueueFailure?.let { throw it }
         uploads += QueuedPhotoUpload(

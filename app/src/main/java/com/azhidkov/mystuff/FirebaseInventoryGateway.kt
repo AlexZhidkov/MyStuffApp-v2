@@ -1079,6 +1079,7 @@ internal interface InventoryPhotoStore {
     fun uploadThumbnailInBackground(
         revision: ItemPhotoRevision,
         photo: ItemPhoto,
+        failure: AttachmentUploadFailure? = null,
     )
 
     fun generateAttachmentThumbnailInBackground(

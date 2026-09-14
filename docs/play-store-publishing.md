@@ -203,6 +203,11 @@ firebase deploy --only functions,firestore:indexes,firestore:rules,storage
 Before running that command, confirm that `mystuff-ai-app` is the intended target
 project. Deployment changes external production services.
 
+For existing Households, run the Storage access projection backfill in
+[`storage-access-backfill.md`](storage-access-backfill.md) before deploying
+`storage.rules`; otherwise the fail-closed rules will deny their Photo and
+Item Attachment transfers until their projection is populated.
+
 Also complete the repository's integration checklists:
 
 - [Firebase Description Generation integration](firebase-description-generation.md)

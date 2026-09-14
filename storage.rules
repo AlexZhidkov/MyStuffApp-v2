@@ -2,27 +2,21 @@ rules_version = '2';
 
 service firebase.storage {
   match /b/{bucket}/o {
-    function isMember(householdId) {
+    function householdPath(householdId) {
+      return /databases/(default)/documents/households/$(householdId);
+    }
+
+    function itemPath(householdId, itemId) {
+      return /databases/(default)/documents/households/$(householdId)/items/$(itemId);
+    }
+
+    function isActiveStorageMember(householdId) {
+      // Keep this projection in the Household document: Storage rules may read
+      // at most two Firestore documents, including the Item lookup below.
+      let household = firestore.get(householdPath(householdId));
       return request.auth != null
-        && !firestore.exists(
-          /databases/(default)/documents/accountDeletionJobs/$(request.auth.uid)
-        )
-        && !firestore.exists(
-          /databases/(default)/documents/householdDeletionJobs/$(householdId)
-        )
-        && !firestore.exists(
-          /databases/(default)/documents/accountDeletionJobs/$(
-            firestore.get(
-              /databases/(default)/documents/households/$(householdId)
-            ).data.ownerMemberId
-          )
-        )
-        && firestore.exists(
-          /databases/(default)/documents/memberships/$(request.auth.uid)
-        )
-        && firestore.get(
-          /databases/(default)/documents/memberships/$(request.auth.uid)
-        ).data.householdId == householdId;
+        && household.data.get('storageAccessRevoked', true) == false
+        && household.data.get('storageMemberIds', {}).get(request.auth.uid, false) == true;
     }
 
     function isFullItemPhoto(fileName) {
@@ -39,16 +33,10 @@ service firebase.storage {
     }
 
     function isNonRootItemInHousehold(householdId, itemId) {
+      let item = firestore.get(itemPath(householdId, itemId));
       return itemId != householdId
-        && firestore.exists(
-          /databases/(default)/documents/households/$(householdId)/items/$(itemId)
-        )
-        && firestore.get(
-          /databases/(default)/documents/households/$(householdId)/items/$(itemId)
-        ).data.get('householdId', null) == householdId
-        && firestore.get(
-          /databases/(default)/documents/households/$(householdId)/items/$(itemId)
-        ).data.get('parentItemId', null) is string;
+        && item.data.get('householdId', null) == householdId
+        && item.data.get('parentItemId', null) is string;
     }
 
     function isItemAttachmentThumbnail(fileName) {
@@ -65,18 +53,18 @@ service firebase.storage {
     }
 
     match /households/{householdId}/items/{fileName} {
-      allow read, delete: if isMember(householdId) && isItemPhoto(fileName);
+      allow read, delete: if isActiveStorageMember(householdId) && isItemPhoto(fileName);
       // Flat Item Photo objects are legacy data. New clients must write the
       // nested Item Attachment location below, but migrated references remain
       // readable and removable.
     }
 
     match /households/{householdId}/items/{itemId}/attachments/{fileName} {
-      allow read, delete: if isMember(householdId)
+      allow read, delete: if isActiveStorageMember(householdId)
         && isNonRootItemInHousehold(householdId, itemId)
         && isItemAttachmentFile(fileName);
       // Updates keep retries idempotent; the Firestore attachment record is immutable.
-      allow create, update: if isMember(householdId)
+      allow create, update: if isActiveStorageMember(householdId)
         && isNonRootItemInHousehold(householdId, itemId)
         && isItemAttachmentFile(fileName)
         && request.resource.contentType == 'image/webp'

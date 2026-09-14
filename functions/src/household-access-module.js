@@ -41,10 +41,17 @@ export function createHouseholdAccessModule({ database }) {
             `accountDeletionJobs/${household.data().ownerMemberId}`,
           )),
         ]);
-        if (householdDeletion.exists || ownerDeletion.exists) {
+        if (
+          householdDeletion.exists ||
+          ownerDeletion.exists ||
+          household.data()?.storageAccessRevoked === true
+        ) {
           throw new HouseholdDeletionPendingError();
         }
 
+        transaction.update(householdReference, {
+          storageMemberIds: storageMemberIdsWith(household.data(), memberId, true),
+        });
         transaction.create(membershipReference, {
           householdId,
           role: "member",
@@ -104,11 +111,28 @@ export function createHouseholdAccessModule({ database }) {
         transaction.delete(accessReference);
         const claimedMemberId = access.data()?.memberId;
         if (typeof claimedMemberId === "string") {
+          transaction.update(householdReference, {
+            storageMemberIds: storageMemberIdsWith(household.data(), claimedMemberId, false),
+          });
           transaction.delete(database.doc(`memberships/${claimedMemberId}`));
         }
         return { email: normalizedEmail };
       });
     },
+  };
+}
+
+function storageMemberIdsWith(household, memberId, active) {
+  const storageMemberIds = {
+    ...(household?.storageMemberIds ?? {}),
+  };
+  if (!active) {
+    delete storageMemberIds[memberId];
+    return storageMemberIds;
+  }
+  return {
+    ...storageMemberIds,
+    [memberId]: true,
   };
 }
 

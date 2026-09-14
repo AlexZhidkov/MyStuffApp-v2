@@ -68,6 +68,8 @@ async function seedOtherHousehold() {
       ownerMemberId: "member-3",
       ownerEmail: "owner@example.com",
       rootItemId: "household-2",
+      storageMemberIds: { "member-3": true },
+      storageAccessRevoked: false,
       createdAt: serverTimestamp(),
     });
     await setDoc(
@@ -115,6 +117,8 @@ function householdCreationBatch(
     ownerEmail: "owner@example.com",
     rootItemId: "household-1",
     useTags: false,
+    storageMemberIds: { "member-1": true },
+    storageAccessRevoked: false,
     createdAt: serverTimestamp(),
     ...householdOverrides,
   });

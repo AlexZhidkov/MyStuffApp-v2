@@ -29,6 +29,10 @@ test("a verified Google email claims one matching Household Access atomically", 
     useTags: false,
   });
   assert.equal(database.data("households/household-1/access/sam@example.com").memberId, "member-2");
+  assert.deepEqual(database.data("households/household-1").storageMemberIds, {
+    "member-1": true,
+    "member-2": true,
+  });
 });
 
 test("the one Household limit prevents a second access claim", async () => {
@@ -108,6 +112,9 @@ test("only the Household Owner can remove access and removal deletes membership"
   });
   assert.equal(database.data("memberships/member-2"), undefined);
   assert.equal(database.data("households/household-1/access/sam@example.com"), undefined);
+  assert.deepEqual(database.data("households/household-1").storageMemberIds, {
+    "member-1": true,
+  });
   assert.deepEqual(database.data("households/household-1/items/item-1"), {
     householdId: "household-1",
     name: "Drill",
@@ -127,6 +134,8 @@ function household(name, ownerMemberId = "member-1") {
     ownerMemberId,
     ownerEmail: "owner@example.com",
     useTags: false,
+    storageMemberIds: { [ownerMemberId]: true },
+    storageAccessRevoked: false,
   };
 }
 

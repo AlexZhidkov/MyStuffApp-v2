@@ -335,6 +335,8 @@ private fun newHouseholdDocuments(
             OWNER_EMAIL to requireNotNull(normalizeGoogleEmail(owner.email)),
             ROOT_ITEM_ID to householdId,
             USE_TAGS to false,
+            STORAGE_MEMBER_IDS to mapOf(owner.id to true),
+            STORAGE_ACCESS_REVOKED to false,
             CREATED_AT to serverTimestamp,
         ),
         rootItem = mapOf(
@@ -385,6 +387,8 @@ private const val OWNER_MEMBER_ID = "ownerMemberId"
 private const val OWNER_EMAIL = "ownerEmail"
 private const val ROOT_ITEM_ID = "rootItemId"
 private const val USE_TAGS = "useTags"
+private const val STORAGE_MEMBER_IDS = "storageMemberIds"
+private const val STORAGE_ACCESS_REVOKED = "storageAccessRevoked"
 private const val PARENT_ITEM_ID = "parentItemId"
 private const val PHOTO_URL = "photoUrl"
 private const val DESCRIPTION = "description"

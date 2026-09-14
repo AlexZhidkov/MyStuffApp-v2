@@ -68,12 +68,30 @@ export function createDeletionRepository({ database }) {
       const reference = accountJobReference(plan.memberId);
       await database.runTransaction(async (transaction) => {
         const existing = await transaction.get(reference);
-        if (existing.exists) return;
-        transaction.create(reference, {
-          ...plan,
-          status: "pending",
-          requestedAt: FieldValue.serverTimestamp(),
-        });
+        const householdReference = typeof plan.householdId === "string"
+          ? database.doc(`households/${plan.householdId}`)
+          : null;
+        const household = householdReference === null
+          ? null
+          : await transaction.get(householdReference);
+        if (!existing.exists) {
+          transaction.create(reference, {
+            ...plan,
+            status: "pending",
+            requestedAt: FieldValue.serverTimestamp(),
+          });
+        }
+        if (householdReference !== null && household.exists) {
+          transaction.update(householdReference, plan.deletesHousehold
+            ? { storageAccessRevoked: true }
+            : {
+                storageMemberIds: storageMemberIdsWith(
+                  household.data(),
+                  plan.memberId,
+                  false,
+                ),
+              });
+        }
       });
     },
 
@@ -81,12 +99,18 @@ export function createDeletionRepository({ database }) {
       const reference = householdJobReference(plan.householdId);
       await database.runTransaction(async (transaction) => {
         const existing = await transaction.get(reference);
-        if (existing.exists) return;
-        transaction.create(reference, {
-          ...plan,
-          status: "pending",
-          requestedAt: FieldValue.serverTimestamp(),
-        });
+        const householdReference = database.doc(`households/${plan.householdId}`);
+        const household = await transaction.get(householdReference);
+        if (!existing.exists) {
+          transaction.create(reference, {
+            ...plan,
+            status: "pending",
+            requestedAt: FieldValue.serverTimestamp(),
+          });
+        }
+        if (household.exists) {
+          transaction.update(householdReference, { storageAccessRevoked: true });
+        }
       });
     },
 
@@ -144,6 +168,20 @@ export function createDeletionRepository({ database }) {
     async completeHousehold(householdId) {
       await householdJobReference(householdId).delete();
     },
+  };
+}
+
+function storageMemberIdsWith(household, memberId, active) {
+  const storageMemberIds = {
+    ...(household?.storageMemberIds ?? {}),
+  };
+  if (!active) {
+    delete storageMemberIds[memberId];
+    return storageMemberIds;
+  }
+  return {
+    ...storageMemberIds,
+    [memberId]: true,
   };
 }
 

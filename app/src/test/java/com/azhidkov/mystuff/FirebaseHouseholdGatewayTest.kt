@@ -41,6 +41,8 @@ class FirebaseHouseholdGatewayTest {
                 "ownerEmail" to "alex@example.com",
                 "rootItemId" to "household-1",
                 "useTags" to false,
+                "storageMemberIds" to mapOf("member-1" to true),
+                "storageAccessRevoked" to false,
                 "createdAt" to timestamp,
             ),
             store.createdDocuments?.household,

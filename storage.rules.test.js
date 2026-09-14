@@ -5,7 +5,7 @@ const {
   assertSucceeds,
   initializeTestEnvironment,
 } = require("@firebase/rules-unit-testing");
-const { doc, setDoc } = require("firebase/firestore");
+const { doc, setDoc, updateDoc } = require("firebase/firestore");
 const { deleteObject, getBytes, ref, uploadBytes } = require("firebase/storage");
 
 let testEnvironment;
@@ -32,6 +32,8 @@ beforeEach(async () => {
     });
     await setDoc(doc(context.firestore(), "households/household-1"), {
       ownerMemberId: "member-1",
+      storageMemberIds: { "member-1": true },
+      storageAccessRevoked: false,
     });
     await setDoc(doc(context.firestore(), "households/household-1/items/item-1"), {
       householdId: "household-1",
@@ -104,6 +106,9 @@ test("a deletion job immediately revokes Storage access", async () => {
       memberId: "member-1",
       status: "pending",
     });
+    await updateDoc(doc(context.firestore(), "households/household-1"), {
+      storageMemberIds: {},
+    });
   });
 
   await assertFails(getBytes(ref(memberStorage, path)));
@@ -112,6 +117,48 @@ test("a deletion job immediately revokes Storage access", async () => {
     new Uint8Array([2]),
     { contentType: "image/webp" },
   ));
+});
+
+test("a removed Household Member cannot access Storage", async () => {
+  const path = "households/household-1/items/item-1/attachments/attachment-1.webp";
+  const memberStorage = testEnvironment.authenticatedContext("member-1").storage();
+  await assertSucceeds(uploadBytes(
+    ref(memberStorage, path),
+    new Uint8Array([1]),
+    { contentType: "image/webp" },
+  ));
+
+  await testEnvironment.withSecurityRulesDisabled(async (context) => {
+    await updateDoc(doc(context.firestore(), "households/household-1"), {
+      storageMemberIds: {},
+    });
+  });
+
+  await assertFails(getBytes(ref(memberStorage, path)));
+  await assertFails(deleteObject(ref(memberStorage, path)));
+});
+
+test("a Household deletion job immediately revokes every Storage path", async () => {
+  const path = "households/household-1/items/item-1/attachments/attachment-1.webp";
+  const memberStorage = testEnvironment.authenticatedContext("member-1").storage();
+  await assertSucceeds(uploadBytes(
+    ref(memberStorage, path),
+    new Uint8Array([1]),
+    { contentType: "image/webp" },
+  ));
+
+  await testEnvironment.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), "householdDeletionJobs/household-1"), {
+      householdId: "household-1",
+      status: "pending",
+    });
+    await updateDoc(doc(context.firestore(), "households/household-1"), {
+      storageAccessRevoked: true,
+    });
+  });
+
+  await assertFails(getBytes(ref(memberStorage, path)));
+  await assertFails(deleteObject(ref(memberStorage, path)));
 });
 
 test("a Household Member can read and delete legacy Item photo variants but cannot create them", async () => {
@@ -207,6 +254,11 @@ test("Item Attachment storage rejects cross-Household, root Item, and non-WebP l
     await setDoc(doc(context.firestore(), "memberships/member-2"), {
       householdId: "household-2",
       role: "owner",
+    });
+    await setDoc(doc(context.firestore(), "households/household-2"), {
+      ownerMemberId: "member-2",
+      storageMemberIds: { "member-2": true },
+      storageAccessRevoked: false,
     });
     await setDoc(doc(context.firestore(), "households/household-2/items/item-2"), {
       householdId: "household-2",

@@ -1,10 +1,10 @@
 # Publishing MyStuff to Google Play
 
 > External requirements last verified: 12 September 2026. Repository implementation
-> status updated: 12 September 2026. Google Play requirements change regularly;
+> status updated: 15 September 2026. Google Play requirements change regularly;
 > check the linked official documentation before submitting a release.
 
-MyStuff has an active Google Play Internal Testing release, `1.0 (1) - Internal test`,
+MyStuff has an active Google Play Internal Testing release, `1.0 (2) - Internal test`,
 and the release build currently compiles successfully. However, the app is not yet
 ready for a public production release.
 
@@ -231,7 +231,7 @@ Play-installed journey that covers the core protected capabilities:
 
 | Build | Install source | Device | UTC time | Google sign-in | Household | Search | Description Generation | Certificate / App Check evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `1.0 (1) - Internal test` | Internal-testing opt-in |  |  |  |  |  |  |  |
+| `1.0 (2) - Internal test` | Internal-testing opt-in |  |  |  |  |  |  |  |
 
 ## 8. Complete the Play Console forms
 

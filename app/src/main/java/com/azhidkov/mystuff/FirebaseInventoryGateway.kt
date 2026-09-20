@@ -432,9 +432,18 @@ class FirebaseInventoryGateway internal constructor(
             onResult(Result.failure(IllegalArgumentException("The Item order is invalid.")))
             return
         }
+        if (orderedItems.any { it.displayOrder == null }) {
+            onResult(Result.failure(IllegalArgumentException("The Item order is missing a position.")))
+            return
+        }
         store.reorderItems(
             householdId = householdId,
-            orderedItemIds = orderedItems.map(Item::id),
+            orderedItemPositions = orderedItems.map { item ->
+                ItemDisplayOrder(
+                    itemId = item.id,
+                    displayOrder = requireNotNull(item.displayOrder),
+                )
+            },
             updater = updater,
             onResult = onResult,
         )
@@ -1169,11 +1178,16 @@ internal interface InventoryDocumentStore {
 
     fun reorderItems(
         householdId: String,
-        orderedItemIds: List<String>,
+        orderedItemPositions: List<ItemDisplayOrder>,
         updater: AuthenticatedIdentity,
         onResult: (Result<Unit>) -> Unit,
     ) = onResult(Result.failure(UnsupportedOperationException("Item reordering is unavailable.")))
 }
+
+internal data class ItemDisplayOrder(
+    val itemId: String,
+    val displayOrder: Long,
+)
 
 private class FirestoreInventoryDocumentStore(
     private val firestore: FirebaseFirestore = FirebaseFirestore.getInstance(),
@@ -1227,16 +1241,16 @@ private class FirestoreInventoryDocumentStore(
 
     override fun reorderItems(
         householdId: String,
-        orderedItemIds: List<String>,
+        orderedItemPositions: List<ItemDisplayOrder>,
         updater: AuthenticatedIdentity,
         onResult: (Result<Unit>) -> Unit,
     ) {
         val batch = firestore.batch()
-        orderedItemIds.forEachIndexed { index, itemId ->
+        orderedItemPositions.forEach { position ->
             batch.update(
-                items(householdId).document(itemId),
+                items(householdId).document(position.itemId),
                 mapOf(
-                    DISPLAY_ORDER to index.toLong(),
+                    DISPLAY_ORDER to position.displayOrder,
                     UPDATED_AT to serverTimestamp,
                     UPDATED_BY_ID to updater.id,
                     UPDATED_BY_DISPLAY_NAME to updater.attributionDisplayName(),

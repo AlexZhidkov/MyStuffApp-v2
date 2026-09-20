@@ -109,7 +109,13 @@ service cloud.firestore {
             && get(itemAttachmentPath(householdId, itemId, data.photoAttachmentId)).data.displayUrl
               == data.photoUrl
           )
-        );
+      );
+    }
+
+    function photoProjectionIsUnchanged() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+        'photoAttachmentId', 'photoUrl', 'photoThumbnailUrl'
+      ]);
     }
 
     function validNewItemPhotoProjection(data) {
@@ -328,7 +334,10 @@ service cloud.firestore {
         && exists(itemPath(householdId, request.resource.data.parentItemId))
         && get(itemPath(householdId, request.resource.data.parentItemId)).data.householdId
           == householdId
-        && validItemPhotoProjection(householdId, itemId, request.resource.data)
+        && (
+          photoProjectionIsUnchanged()
+          || validItemPhotoProjection(householdId, itemId, request.resource.data)
+        )
         && validDescription(request.resource.data.description)
         && validWebUrl(request.resource.data.get('webUrl', null))
         && validTags(request.resource.data.tags)

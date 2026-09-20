@@ -684,6 +684,88 @@ test("Household Member can atomically reorder shared Child Items", async () => {
   ));
 });
 
+test("order-only Child Item updates do not validate an unchanged Item Photo", async () => {
+  await seedHousehold();
+  await seedHouseholdMember();
+  await testEnvironment.withSecurityRulesDisabled(async (context) => {
+    await setDoc(
+      doc(context.firestore(), "households/household-1/items/item-1"),
+      childItemData("Drill", "household-1", {
+        photoAttachmentId: "missing-attachment",
+        photoUrl: "gs://mystuff/households/household-1/items/item-1/attachments/missing-attachment.webp",
+        photoThumbnailUrl: "gs://mystuff/households/household-1/items/item-1/attachments/missing-attachment-thumb.webp",
+      }),
+    );
+  });
+  const database = testEnvironment.authenticatedContext("member-2").firestore();
+  const reference = doc(database, "households/household-1/items/item-1");
+
+  await assertSucceeds(updateDoc(reference, {
+    displayOrder: 1,
+    updatedAt: serverTimestamp(),
+    updatedById: "member-2",
+    updatedByDisplayName: "Sam",
+  }));
+  await assertFails(updateDoc(reference, {
+    photoUrl: "gs://mystuff/households/household-1/items/item-1/attachments/another.webp",
+    updatedAt: serverTimestamp(),
+    updatedById: "member-2",
+    updatedByDisplayName: "Sam",
+  }));
+});
+
+test("Member can reorder a photo-heavy nine-Child-Item sibling list", async () => {
+  await seedHousehold();
+  await seedHouseholdMember();
+  await testEnvironment.withSecurityRulesDisabled(async (context) => {
+    const database = context.firestore();
+    for (let index = 0; index < 9; index += 1) {
+      const itemId = `item-${index + 1}`;
+      const hasPhoto = index < 8;
+      await setDoc(
+        doc(database, `households/household-1/items/${itemId}`),
+        childItemData(`Item ${index}`, "household-1", {
+          displayOrder: index,
+          ...(hasPhoto ? {
+            photoAttachmentId: `attachment-${index + 1}`,
+            photoUrl: `gs://mystuff/households/household-1/items/${itemId}/attachments/attachment-${index + 1}.webp`,
+            photoThumbnailUrl: `gs://mystuff/households/household-1/items/${itemId}/attachments/attachment-${index + 1}-thumb.webp`,
+          } : {}),
+        }),
+      );
+      if (hasPhoto) {
+        await setDoc(
+          doc(database, `households/household-1/items/${itemId}/attachments/attachment-${index + 1}`),
+          itemAttachmentData({
+            displayUrl: `gs://mystuff/households/household-1/items/${itemId}/attachments/attachment-${index + 1}.webp`,
+          }),
+        );
+      }
+    }
+  });
+  const database = testEnvironment.authenticatedContext("member-2").firestore();
+  const batch = writeBatch(database);
+  for (let index = 0; index < 9; index += 1) {
+    batch.update(
+      doc(database, `households/household-1/items/item-${index + 1}`),
+      {
+        displayOrder: index === 0 ? 1 : index === 1 ? 0 : index,
+        updatedAt: serverTimestamp(),
+        updatedById: "member-2",
+        updatedByDisplayName: "Sam",
+      },
+    );
+  }
+
+  await assertSucceeds(batch.commit());
+  assert.equal((await getDoc(
+    doc(database, "households/household-1/items/item-1"),
+  )).data().displayOrder, 1);
+  assert.equal((await getDoc(
+    doc(database, "households/household-1/items/item-2"),
+  )).data().displayOrder, 0);
+});
+
 test("Household Member can project a newly-created Item Attachment and patch its Description", async () => {
   await seedHousehold();
   await seedHouseholdMember();

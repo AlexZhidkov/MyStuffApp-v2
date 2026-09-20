@@ -61,7 +61,7 @@ class FirebaseInventoryGatewayTest {
     }
 
     @Test
-    fun `reordering Items writes every sibling position and Member attribution atomically`() {
+    fun `reordering Items writes only changed positions and Member attribution atomically`() {
         val documents = FakeInventoryDocumentStore()
         val gateway = FirebaseInventoryGateway(
             documents,
@@ -74,14 +74,20 @@ class FirebaseInventoryGatewayTest {
             householdId = "household-1",
             parentItemId = "household-1",
             orderedItems = listOf(
-                inventoryItem("shed", "Shed", "household-1"),
-                inventoryItem("garage", "Garage", "household-1"),
+                inventoryItem("shed", "Shed", "household-1", displayOrder = 1),
+                inventoryItem("garage", "Garage", "household-1", displayOrder = 0),
             ),
             updater = inventoryIdentity(),
         ) { result = it }
 
         assertTrue(result?.isSuccess == true)
-        assertEquals(listOf("shed", "garage"), documents.reorderedItemIds)
+        assertEquals(
+            listOf(
+                ItemDisplayOrder("shed", 1),
+                ItemDisplayOrder("garage", 0),
+            ),
+            documents.reorderedItemPositions,
+        )
         assertEquals("member-1", documents.reorderUpdater?.id)
     }
 
@@ -1023,7 +1029,7 @@ private class FakeInventoryDocumentStore(
         private set
     var updatedData: Map<String, Any?>? = null
         private set
-    var reorderedItemIds: List<String>? = null
+    var reorderedItemPositions: List<ItemDisplayOrder>? = null
         private set
     var reorderUpdater: AuthenticatedIdentity? = null
         private set
@@ -1061,11 +1067,11 @@ private class FakeInventoryDocumentStore(
 
     override fun reorderItems(
         householdId: String,
-        orderedItemIds: List<String>,
+        orderedItemPositions: List<ItemDisplayOrder>,
         updater: AuthenticatedIdentity,
         onResult: (Result<Unit>) -> Unit,
     ) {
-        reorderedItemIds = orderedItemIds
+        reorderedItemPositions = orderedItemPositions
         reorderUpdater = updater
         onResult(Result.success(Unit))
     }
@@ -1116,6 +1122,7 @@ private fun inventoryItem(
     description: String? = null,
     tags: List<String> = emptyList(),
     webUrl: String? = null,
+    displayOrder: Long? = null,
 ) = Item(
     id = id,
     name = name,
@@ -1126,6 +1133,7 @@ private fun inventoryItem(
     tags = tags,
     webUrl = webUrl,
     photoAttachmentId = photoAttachmentId,
+    displayOrder = displayOrder,
 )
 
 private class FakeItemPhotoAttachmentGateway : ItemAttachmentGateway {

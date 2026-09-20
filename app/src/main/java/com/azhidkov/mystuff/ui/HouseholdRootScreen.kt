@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
@@ -60,6 +61,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -67,7 +69,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -97,7 +98,6 @@ import com.azhidkov.mystuff.R
 import com.azhidkov.mystuff.carouselImages
 import com.azhidkov.mystuff.otherAttachmentCount
 import kotlinx.coroutines.launch
-import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -301,7 +301,10 @@ private fun HouseholdRootContent(
     }
 
     val isHome = inventoryState.selectedItemId == inventoryState.inventory.rootItemId
-    val reorderStepPx = with(LocalDensity.current) { 56.dp.toPx() }
+    val inventoryListState = rememberLazyListState()
+    val currentChildItemIds = rememberUpdatedState(
+        inventoryState.childItems.map(Item::id),
+    )
     val showSearchResults = inventoryState.searchQuery.isNotBlank() &&
         inventoryState.openedSearchResultId == null
     BackHandler(
@@ -387,6 +390,7 @@ private fun HouseholdRootContent(
         },
     ) { padding ->
         LazyColumn(
+            state = inventoryListState,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
@@ -595,13 +599,28 @@ private fun HouseholdRootContent(
                         items = inventoryState.childItems,
                         key = Item::id,
                     ) { item ->
-                        var dragOffsetY by remember(item.id) { mutableStateOf(0f) }
+                        var draggedTopY by remember(item.id) { mutableStateOf<Float?>(null) }
+                        var pendingLayoutOrder by remember(item.id) {
+                            mutableStateOf<List<String>?>(null)
+                        }
                         val reorderDescription = stringResource(R.string.reorder_item, item.name)
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .zIndex(if (dragOffsetY == 0f) 0f else 1f)
-                                .graphicsLayer { translationY = dragOffsetY }
+                                .zIndex(if (draggedTopY == null) 0f else 1f)
+                                .graphicsLayer {
+                                    val currentLayoutTop = inventoryListState.layoutInfo
+                                        .visibleItemsInfo
+                                        .firstOrNull { it.key == item.id }
+                                        ?.offset
+                                    translationY = if (
+                                        draggedTopY != null && currentLayoutTop != null
+                                    ) {
+                                        draggedTopY!! - currentLayoutTop
+                                    } else {
+                                        0f
+                                    }
+                                }
                                 .clickable { inventoryActions.openItem(item.id) },
                         ) {
                             Row(
@@ -617,15 +636,88 @@ private fun HouseholdRootContent(
                                         }
                                         .pointerInput(item.id) {
                                             detectDragGestures(
-                                                onDragEnd = { dragOffsetY = 0f },
-                                                onDragCancel = { dragOffsetY = 0f },
+                                                onDragStart = {
+                                                    draggedTopY = inventoryListState.layoutInfo
+                                                        .visibleItemsInfo
+                                                        .firstOrNull { it.key == item.id }
+                                                        ?.offset
+                                                        ?.toFloat()
+                                                    pendingLayoutOrder = null
+                                                },
+                                                onDragEnd = {
+                                                    draggedTopY = null
+                                                    pendingLayoutOrder = null
+                                                },
+                                                onDragCancel = {
+                                                    draggedTopY = null
+                                                    pendingLayoutOrder = null
+                                                },
                                             ) { change, dragAmount ->
                                                 change.consume()
-                                                dragOffsetY += dragAmount.y
-                                                while (abs(dragOffsetY) >= reorderStepPx) {
-                                                    val offset = if (dragOffsetY > 0f) 1 else -1
+                                                val visibleItems = inventoryListState.layoutInfo
+                                                    .visibleItemsInfo
+                                                val currentLayout = visibleItems
+                                                    .firstOrNull { it.key == item.id }
+                                                    ?: return@detectDragGestures
+                                                val updatedTopY =
+                                                    (draggedTopY ?: currentLayout.offset.toFloat()) +
+                                                        dragAmount.y
+                                                draggedTopY = updatedTopY
+
+                                                val childItemIds = currentChildItemIds.value
+                                                val childItemIdSet = childItemIds.toSet()
+                                                val visibleChildItemIds = visibleItems
+                                                    .sortedBy { it.offset }
+                                                    .mapNotNull { it.key as? String }
+                                                    .filter(childItemIdSet::contains)
+                                                pendingLayoutOrder?.let { expectedOrder ->
+                                                    val visibleItemIdSet =
+                                                        visibleChildItemIds.toSet()
+                                                    val expectedVisibleOrder = expectedOrder.filter(
+                                                        visibleItemIdSet::contains,
+                                                    )
+                                                    if (visibleChildItemIds != expectedVisibleOrder) {
+                                                        return@detectDragGestures
+                                                    }
+                                                    pendingLayoutOrder = null
+                                                }
+
+                                                val visibleChildItemBounds = visibleItems.mapNotNull {
+                                                    layoutItem ->
+                                                    val itemId = layoutItem.key as? String
+                                                    if (itemId == null || itemId !in childItemIdSet) {
+                                                        null
+                                                    } else {
+                                                        childItemBounds(
+                                                            itemId = itemId,
+                                                            topPx = layoutItem.offset,
+                                                            heightPx = layoutItem.size,
+                                                        )
+                                                    }
+                                                }
+                                                val swapOffsets = childItemSwapOffsets(
+                                                    draggedItemId = item.id,
+                                                    draggedTopPx = updatedTopY,
+                                                    draggedHeightPx = currentLayout.size.toFloat(),
+                                                    dragAmountY = dragAmount.y,
+                                                    orderedItemIds = childItemIds,
+                                                    visibleItemBounds = visibleChildItemBounds,
+                                                )
+                                                if (swapOffsets.isNotEmpty()) {
+                                                    pendingLayoutOrder = childItemIds
+                                                        .toMutableList()
+                                                        .apply {
+                                                            swapOffsets.forEach { offset ->
+                                                                val currentIndex = indexOf(item.id)
+                                                                add(
+                                                                    currentIndex + offset,
+                                                                    removeAt(currentIndex),
+                                                                )
+                                                            }
+                                                        }
+                                                }
+                                                swapOffsets.forEach { offset ->
                                                     inventoryActions.reorderItem(item.id, offset)
-                                                    dragOffsetY -= offset * reorderStepPx
                                                 }
                                             }
                                         },

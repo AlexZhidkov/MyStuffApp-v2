@@ -91,7 +91,7 @@ class InventoryControllerTest {
         controller.reorderItem("garage", 1)
 
         assertEquals(listOf("kitchen", "garage", "shed"), controller.state.childItems.map(Item::id))
-        assertEquals(listOf(listOf("kitchen", "garage", "shed")), gateway.reorderRequests)
+        assertEquals(listOf(listOf("kitchen", "garage")), gateway.reorderRequests)
         assertFalse(controller.state.operationInProgress)
 
         controller.reorderItem("garage", 1)
@@ -102,7 +102,7 @@ class InventoryControllerTest {
         gateway.completeReorder()
 
         assertEquals(2, gateway.reorderRequests.size)
-        assertEquals(listOf("kitchen", "shed", "garage"), gateway.reorderRequests.last())
+        assertEquals(listOf("shed", "garage"), gateway.reorderRequests.last())
         assertEquals(listOf("kitchen", "shed", "garage"), controller.state.childItems.map(Item::id))
     }
 
@@ -2085,7 +2085,7 @@ private class FakeInventoryGateway(
         val itemIds = orderedItems.map(Item::id)
         reorderRequests += itemIds
         val complete: () -> Unit = {
-            inventory = inventory.withChildrenInOrder(parentItemId, itemIds)
+            orderedItems.forEach { item -> inventory = inventory.withItem(item) }
             observer?.invoke(Result.success(inventory))
             onResult(Result.success(Unit))
         }

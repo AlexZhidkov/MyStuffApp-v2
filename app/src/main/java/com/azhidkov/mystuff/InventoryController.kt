@@ -63,6 +63,7 @@ interface InventoryGateway {
         onResult: (Result<Unit>) -> Unit,
     ) = onResult(Result.failure(UnsupportedOperationException("Item deletion is unavailable.")))
 
+    /** Saves the supplied Child Items with their desired display positions. */
     fun reorderItems(
         householdId: String,
         parentItemId: String,
@@ -572,12 +573,18 @@ class InventoryController internal constructor(
         val item = runCatching { state.inventory.item(itemId) }.getOrNull() ?: return
         val parentItemId = item.parentItemId ?: return
         if (parentItemId != state.selectedItemId) return
+        val currentItems = state.childItems
+        val currentItemIds = currentItems.map(Item::id)
         val reorderedInventory = state.inventory.reorderItem(itemId, offset)
         val desiredItemIds = reorderedInventory.childrenOf(parentItemId).map(Item::id)
-        if (desiredItemIds == state.childItems.map(Item::id)) return
+        if (desiredItemIds == currentItemIds) return
 
         val pending = pendingChildOrders.getOrPut(parentItemId) {
-            PendingChildOrder(desiredItemIds)
+            PendingChildOrder(
+                desiredItemIds = currentItemIds,
+                persistedItemIds = currentItemIds,
+                persistedDisplayOrders = currentItems.associate { it.id to it.displayOrder },
+            )
         }
         pending.desiredItemIds = desiredItemIds
         updateState(
@@ -1594,23 +1601,59 @@ class InventoryController internal constructor(
             pending.persistedItemIds != pending.desiredItemIds
         } ?: return
         val parentItemId = next.key
-        val itemIds = next.value.desiredItemIds
+        val pendingOrder = next.value
+        val itemIds = pendingOrder.desiredItemIds
+        val persistedItemIds = pendingOrder.persistedItemIds
         val orderedItems = itemIds.mapNotNull { itemId ->
             state.inventory.takeIf { it.contains(itemId) }?.item(itemId)
         }
         if (orderedItems.size != itemIds.size) return
+        val persistedDisplayOrderValues = persistedItemIds.map {
+            pendingOrder.persistedDisplayOrders[it]
+        }
+        val canPreservePersistedDisplayOrders = persistedDisplayOrderValues.all {
+            it != null && it >= 0
+        } && persistedDisplayOrderValues.distinct().size == persistedDisplayOrderValues.size
+        val desiredDisplayOrders = itemIds.mapIndexed { index, _ ->
+            if (!canPreservePersistedDisplayOrders) {
+                index.toLong()
+            } else {
+                pendingOrder.persistedDisplayOrders[persistedItemIds[index]]
+                    ?: index.toLong()
+            }
+        }
+        val changedItems = orderedItems.mapIndexedNotNull { index, item ->
+            val desiredDisplayOrder = desiredDisplayOrders[index]
+            if (
+                persistedItemIds[index] != item.id ||
+                pendingOrder.persistedDisplayOrders[item.id] != desiredDisplayOrder
+            ) {
+                item.copy(displayOrder = desiredDisplayOrder)
+            } else {
+                null
+            }
+        }
+        if (changedItems.isEmpty()) {
+            pendingOrder.persistedItemIds = itemIds
+            pendingOrder.persistedDisplayOrders = itemIds.zip(desiredDisplayOrders).toMap()
+            persistNextChildOrder()
+            return
+        }
 
         childOrderWriteInProgress = true
         gateway.reorderItems(
             householdId = household.id,
             parentItemId = parentItemId,
-            orderedItems = orderedItems,
+            orderedItems = changedItems,
             updater = identity,
         ) { result ->
             childOrderWriteInProgress = false
             val pending = pendingChildOrders[parentItemId]
             result.onSuccess {
-                if (pending != null) pending.persistedItemIds = itemIds
+                if (pending != null) {
+                    pending.persistedItemIds = itemIds
+                    pending.persistedDisplayOrders = itemIds.zip(desiredDisplayOrders).toMap()
+                }
             }.onFailure { failure ->
                 if (pending?.desiredItemIds == itemIds) {
                     pendingChildOrders.remove(parentItemId)
@@ -1752,7 +1795,8 @@ class InventoryController internal constructor(
 
 private data class PendingChildOrder(
     var desiredItemIds: List<String>,
-    var persistedItemIds: List<String>? = null,
+    var persistedItemIds: List<String>,
+    var persistedDisplayOrders: Map<String, Long?>,
 )
 
 private fun CompletedDescriptionGeneration.deferredError(): DeferredInventoryError? {

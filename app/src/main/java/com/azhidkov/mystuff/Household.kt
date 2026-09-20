@@ -13,6 +13,8 @@ data class Item(
     val photoAttachmentId: String? = null,
     /** The shared position of this Item among the Child Items of its Parent Item. */
     val displayOrder: Long? = null,
+    /** A device-local preview while a newly captured Photo is being uploaded. */
+    val localPhoto: ItemPhoto? = null,
 )
 
 data class Household(

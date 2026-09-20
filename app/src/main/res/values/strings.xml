@@ -95,6 +95,7 @@
     <string name="save_item">Save</string>
     <string name="saving_item">Saving Item…</string>
     <string name="save_and_generate_description">AI description</string>
+    <string name="description_generation_in_progress">AI description is being generated...</string>
     <string name="opening_camera">Opening camera…</string>
     <string name="opening_camera_body">Take an Item photo, or cancel the camera to continue without one.</string>
     <string name="retake_photo">Retake</string>

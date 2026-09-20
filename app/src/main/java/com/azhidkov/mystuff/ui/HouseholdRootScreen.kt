@@ -447,10 +447,11 @@ private fun HouseholdRootContent(
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                storedPhotoLocation(
-                                    result.item,
-                                    ItemPhotoPresentation.Compact,
-                                )?.let {
+                                if (hasDisplayablePhoto(
+                                        result.item,
+                                        ItemPhotoPresentation.Compact,
+                                    )
+                                ) {
                                     StoredItemPhoto(
                                         item = result.item,
                                         presentation = ItemPhotoPresentation.Compact,
@@ -474,10 +475,11 @@ private fun HouseholdRootContent(
                     }
                 }
             } else {
-                storedPhotoLocation(
-                    inventoryState.selectedItem,
-                    ItemPhotoPresentation.Detail,
-                )?.let {
+                if (hasDisplayablePhoto(
+                        inventoryState.selectedItem,
+                        ItemPhotoPresentation.Detail,
+                    )
+                ) {
                     item {
                         ItemPhotoWithAttachmentBadge(
                             item = inventoryState.selectedItem,
@@ -571,6 +573,14 @@ private fun HouseholdRootContent(
                         )
                     }
                 }
+                if (inventoryState.isSelectedItemDescriptionGenerationInProgress) {
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(stringResource(R.string.description_generation_in_progress))
+                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        }
+                    }
+                }
                 if (inventoryState.useTags && inventoryState.selectedItem.tags.isNotEmpty()) {
                     item {
                         Text(
@@ -628,10 +638,7 @@ private fun HouseholdRootContent(
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
-                                storedPhotoLocation(
-                                    item,
-                                    ItemPhotoPresentation.Compact,
-                                )?.let {
+                                if (hasDisplayablePhoto(item, ItemPhotoPresentation.Compact)) {
                                     StoredItemPhoto(
                                         item = item,
                                         presentation = ItemPhotoPresentation.Compact,

@@ -72,19 +72,23 @@ internal fun StoredItemPhoto(
     presentation: ItemPhotoPresentation,
     modifier: Modifier = Modifier,
 ) {
-    val location = requireNotNull(storedPhotoLocation(item, presentation))
-    val previewLocation = item.photoThumbnailUrl.takeIf {
-        presentation == ItemPhotoPresentation.Detail
+    item.localPhoto?.let { localPhoto ->
+        LocalItemPhoto(localPhoto, modifier)
+    } ?: run {
+        val location = requireNotNull(storedPhotoLocation(item, presentation))
+        val previewLocation = item.photoThumbnailUrl.takeIf {
+            presentation == ItemPhotoPresentation.Detail
+        }
+        val state by rememberStoredPhotoBitmap(location, previewLocation, presentation)
+        PhotoBitmap(
+            state = state,
+            modifier = modifier,
+            placeholderSize = when (presentation) {
+                ItemPhotoPresentation.Detail -> 64.dp
+                ItemPhotoPresentation.Compact -> 32.dp
+            },
+        )
     }
-    val state by rememberStoredPhotoBitmap(location, previewLocation, presentation)
-    PhotoBitmap(
-        state = state,
-        modifier = modifier,
-        placeholderSize = when (presentation) {
-            ItemPhotoPresentation.Detail -> 64.dp
-            ItemPhotoPresentation.Compact -> 32.dp
-        },
-    )
 }
 
 @Composable

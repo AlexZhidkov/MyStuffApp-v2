@@ -243,6 +243,7 @@ data class InventoryUiState(
     val itemMove: ItemMoveState? = null,
     val loading: Boolean = false,
     val operationInProgress: Boolean = false,
+    val descriptionGenerationInProgressItemIds: Set<String> = emptySet(),
     val errorMessage: String? = null,
     val successMessage: String? = null,
     val deferredError: DeferredInventoryError? = null,
@@ -250,6 +251,9 @@ data class InventoryUiState(
     val itemAttachments: ItemAttachmentState? = null,
     val itemAttachmentCarousel: ItemAttachmentState? = null,
 ) {
+    val isSelectedItemDescriptionGenerationInProgress: Boolean
+        get() = selectedItemId in descriptionGenerationInProgressItemIds
+
     val moveParentItems: List<Item>
         get() {
             val move = itemMove ?: return emptyList()
@@ -457,6 +461,9 @@ class InventoryController internal constructor(
         pendingDescriptionGenerations = workState.pending
             .filter { it.request.householdId == household.id }
             .associate { it.id to it.request }
+        val pendingItemIds = pendingDescriptionGenerations.values.mapTo(mutableSetOf()) {
+            it.item.id
+        }
         workState.completed
             .filter { it.householdId == household.id }
             .filter { it.outcome == DescriptionGenerationOutcome.Success }
@@ -464,6 +471,7 @@ class InventoryController internal constructor(
         updateState(
             state.copy(
                 inventory = observedInventory.withDescriptionGenerationOverlays(),
+                descriptionGenerationInProgressItemIds = pendingItemIds,
                 deferredError = workState.completed
                     .asSequence()
                     .filter { it.householdId == household.id }
@@ -1282,6 +1290,7 @@ class InventoryController internal constructor(
                 description = details.description,
                 tags = details.tags,
                 webUrl = details.webUrl,
+                localPhoto = draft.photo,
             )
         } else {
             state.inventory.item(editingItemId).copy(
@@ -1289,6 +1298,7 @@ class InventoryController internal constructor(
                 description = details.description,
                 tags = details.tags,
                 webUrl = details.webUrl,
+                localPhoto = draft.photo,
             )
         }
         val submission = descriptionGenerationWork.submit(
@@ -1555,7 +1565,9 @@ class InventoryController internal constructor(
 
     private fun Inventory.withDescriptionGenerationOverlays(): Inventory {
         return pendingDescriptionGenerations.values.fold(this) { inventory, request ->
-            val item = request.item
+            val item = request.item.copy(
+                localPhoto = request.replacementPhoto?.source ?: request.item.localPhoto,
+            )
             val canAddPendingCreate = request.saveMode == DescriptionGenerationSaveMode.Create &&
                 item.parentItemId?.let(inventory::contains) == true
             if (inventory.contains(item.id) || canAddPendingCreate) {

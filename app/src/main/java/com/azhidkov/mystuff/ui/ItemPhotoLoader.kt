@@ -55,6 +55,9 @@ internal fun storedPhotoLocation(item: Item, presentation: ItemPhotoPresentation
         ItemPhotoPresentation.Compact -> item.photoThumbnailUrl
     }
 
+internal fun hasDisplayablePhoto(item: Item, presentation: ItemPhotoPresentation): Boolean =
+    item.localPhoto != null || storedPhotoLocation(item, presentation) != null
+
 private fun <T> detailStateWithPreview(
     current: PhotoLoadState<T>,
     preview: T,

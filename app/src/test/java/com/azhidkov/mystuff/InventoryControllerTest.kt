@@ -1039,6 +1039,43 @@ class InventoryControllerTest {
     }
 
     @Test
+    fun `new Description Generation keeps the local Photo visible and reports progress`() {
+        val household = household()
+        val gateway = FakeInventoryGateway(inventory())
+        val work = RecordingDescriptionGenerationWork()
+        val controller = InventoryController(
+            household = household,
+            identity = identity(),
+            gateway = gateway,
+            rootChildItemCache = NoRootChildItemCache,
+            descriptionGenerationWork = work,
+        )
+        val photo = ItemPhoto("content://new.webp", "content://new-thumb.webp")
+        controller.beginAddItem()
+        controller.resolveCameraPermission(granted = true)
+        controller.photoCaptured(ItemPhoto("content://captured.jpg"))
+        controller.useCroppedPhoto(photo)
+        controller.changeItemName("Drill")
+
+        controller.saveAndGenerateDescription()
+
+        val submission = work.pending.single()
+        assertEquals(photo, controller.state.selectedItem.localPhoto)
+        assertTrue(controller.state.isSelectedItemDescriptionGenerationInProgress)
+
+        gateway.emit(
+            Inventory.from(
+                household,
+                listOf(household.rootItem, submission.request.item.copy(localPhoto = null)),
+            ),
+        )
+        work.complete(submission.id, DescriptionGenerationOutcome.Success)
+
+        assertNull(controller.state.selectedItem.localPhoto)
+        assertFalse(controller.state.isSelectedItemDescriptionGenerationInProgress)
+    }
+
+    @Test
     fun `pending new Item stays overlaid until its background create is observed`() {
         val household = household()
         val gateway = FakeInventoryGateway(inventory())

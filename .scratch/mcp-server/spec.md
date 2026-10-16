@@ -1,7 +1,8 @@
 # MyStuff MCP access
 
 Design confirmed after review; ready for implementation.
-Implementation and live-client verification have not started.
+Issue 01's HTTP MCP server is deployed and its backend tests pass. Real-client
+OAuth and Item-details acceptance remain pending; the other issues have not been implemented.
 
 ## Purpose and scope
 

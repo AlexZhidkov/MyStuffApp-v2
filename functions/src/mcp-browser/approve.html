@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Connect to MyStuff</title>
+    <link rel="stylesheet" href="/oauth/style.css">
+    <script type="module" src="/oauth/approve.js"></script>
+  </head>
+  <body>
+    <main>
+      <p>MyStuff</p>
+      <h1>Connect an application</h1>
+      <p>Sign in with the Google Account you already use for MyStuff.</p>
+      <button id="sign-in">Sign in with Google</button>
+      <section id="consent" hidden>
+        <h2>Read-only access to <span id="household"></span></h2>
+        <p><strong id="client"></strong> will be able to read synced Item names,
+          complete Item Paths, and Descriptions in this Household, even when your
+          phone is offline. It cannot change your Inventory. Tags, web links,
+          Photos, and other Item Attachments are not shared.</p>
+        <p>The application may keep information it has already received.</p>
+        <button id="approve">Approve read-only access</button>
+      </section>
+      <button id="cancel">Cancel</button>
+      <p id="status" role="status"></p>
+      <a href="https://azhidkov.github.io/MyStuffApp-v2/">Privacy policy</a>
+    </main>
+  </body>
+</html>

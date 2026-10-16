@@ -4,7 +4,7 @@ import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 import { logger } from "firebase-functions";
-import { defineSecret } from "firebase-functions/params";
+import { defineSecret, defineString } from "firebase-functions/params";
 import { onDocumentCreated, onDocumentWritten } from "firebase-functions/v2/firestore";
 import { onCall, onRequest } from "firebase-functions/v2/https";
 import { createDeterministicEmbedder } from "./deterministic-embedder.js";
@@ -21,11 +21,15 @@ import { createItemDeletionModule } from "./item-deletion-module.js";
 import { createDeletionRepository } from "./deletion-repository.js";
 import { createDeletionModule } from "./deletion-module.js";
 import { createDeletionHandlers } from "./deletion-handlers.js";
+import { createMcpApp } from "./mcp-app.js";
 
 if (getApps().length === 0) initializeApp();
 
 const REGION = "australia-southeast1";
 const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
+const MCP_ORIGIN = defineString("MCP_ORIGIN", { default: "https://mystuff-ai-app.web.app" });
+const MCP_FIREBASE_API_KEY = defineString("MCP_FIREBASE_API_KEY", { default: "" });
+const MCP_FIREBASE_APP_ID = defineString("MCP_FIREBASE_APP_ID", { default: "" });
 const emulator = process.env.FUNCTIONS_EMULATOR === "true";
 const runtimeOptions = {
   region: REGION,
@@ -40,6 +44,20 @@ let itemMoveHandlers;
 let householdAccessHandlers;
 let itemDeletionHandlers;
 let deletionHandlers;
+let mcpApp;
+
+export const mcp = onRequest({ ...runtimeOptions, invoker: "public" }, (request, response) => {
+  mcpApp ??= createMcpApp({
+    database: getFirestore(), authentication: getAuth(), origin: MCP_ORIGIN.value(),
+    firebaseConfig: {
+      apiKey: MCP_FIREBASE_API_KEY.value(), appId: MCP_FIREBASE_APP_ID.value(),
+      projectId: process.env.GCLOUD_PROJECT,
+      authDomain: `${process.env.GCLOUD_PROJECT}.firebaseapp.com`,
+    },
+    logger,
+  });
+  return mcpApp(request, response);
+});
 
 function getHandlers() {
   if (handlers !== undefined) return handlers;

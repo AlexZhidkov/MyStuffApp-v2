@@ -10,6 +10,18 @@
   "storage": {
     "rules": "storage.rules"
   },
+  "hosting": {
+    "public": "mcp-hosting",
+    "rewrites": [
+      { "source": "/mcp", "function": { "functionId": "mcp", "region": "australia-southeast1" } },
+      { "source": "/.well-known/oauth-protected-resource/mcp", "function": { "functionId": "mcp", "region": "australia-southeast1" } },
+      { "source": "/.well-known/oauth-authorization-server", "function": { "functionId": "mcp", "region": "australia-southeast1" } },
+      { "source": "/authorize", "function": { "functionId": "mcp", "region": "australia-southeast1" } },
+      { "source": "/register", "function": { "functionId": "mcp", "region": "australia-southeast1" } },
+      { "source": "/token", "function": { "functionId": "mcp", "region": "australia-southeast1" } },
+      { "source": "/oauth/**", "function": { "functionId": "mcp", "region": "australia-southeast1" } }
+    ]
+  },
   "emulators": {
     "firestore": {
       "host": "127.0.0.1",

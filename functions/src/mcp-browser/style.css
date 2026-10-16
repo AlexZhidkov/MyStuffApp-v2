@@ -1,0 +1,6 @@
+:root { font: 18px/1.5 system-ui, sans-serif; color-scheme: light dark; }
+body { margin: 0; padding: 2rem 1rem; }
+main { max-width: 38rem; margin: auto; }
+button { font: inherit; padding: .65rem 1rem; margin: .5rem .5rem .5rem 0; cursor: pointer; }
+section { border: 1px solid #888; border-radius: .5rem; margin-block: 1.5rem; padding: 1rem; }
+#status { color: light-dark(#a11, #faa); }

@@ -28,6 +28,10 @@ _Avoid_: Invitation, invite, access link
 The non-identifying **Former member** label retained on an Item when its creating or last-updating Member deletes their MyStuff Account.
 _Avoid_: Deleted Member, original Member name
 
+**App Connection**:
+A Member's separately revocable authorization for an external application to read one approved Household's Inventory data. It depends on Household Access and requires fresh approval to read a different Household.
+_Avoid_: Household Access, sign-in session
+
 **Household Owner**:
 The Member responsible for Household Access and ownership.
 _Avoid_: Administrator, superuser

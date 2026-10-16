@@ -1,8 +1,9 @@
 # MyStuff MCP access
 
 Design confirmed after review; ready for implementation.
-Issue 01's HTTP MCP server is deployed and its backend tests pass. Real-client
-OAuth and Item-details acceptance remain pending; the other issues have not been implemented.
+Issue 01 is implemented: the HTTP MCP server is deployed, backend tests pass,
+and real Gemini CLI OAuth and Item details work with the Member's phone offline.
+The other issues have not been implemented.
 
 ## Purpose and scope
 

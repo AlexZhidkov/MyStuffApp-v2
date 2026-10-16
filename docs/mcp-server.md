@@ -49,7 +49,11 @@ publishing workflow remains a separate deployment.
 
 ## Connect Gemini CLI
 
-Gemini CLI 0.50.0 is installed on the implementation machine. Use the shared URL:
+Gemini CLI 0.64.0 completed the connection check. Authenticate Gemini CLI itself
+before connecting MyStuff. If its Google/Code Assist login is unavailable, select
+**Use Gemini API key** in `/auth` and enter a Google AI Studio key locally.
+MyStuff then uses its own browser Google sign-in and Household approval.
+Use the shared URL:
 
 ```bash
 gemini mcp add --transport http mystuff https://mystuff-ai-app.web.app/mcp
@@ -135,21 +139,28 @@ an Admin SDK storage fake and a Firebase identity verifier fake. Android unit te
 passed, and all 50 Firestore/Storage rules tests passed. No JavaScript type-checking task exists; syntax/import checks passed on
 Node 22.
 
-**Real Gemini CLI acceptance is still pending.** Gemini CLI 0.50.0 was launched
-with a temporary project containing only the shared server URL. The Member
-completed Google's browser sign-in, but the CLI's own Gemini Code Assist login
-then returned: “This client is no longer supported for Gemini Code Assist for
-individuals.” It did not reach MyStuff's approval flow. `gemini mcp list` shows the
-server as disconnected. This is not a successful MCP connection or Item read.
-Gemini CLI also supports [API-key authentication](https://geminicli.com/docs/get-started/authentication/);
-that can be configured locally to resume the check without pasting a key into chat.
+**Real Gemini CLI acceptance passed on 16 October 2026.** Gemini CLI 0.64.0 ran
+with a temporary project containing only the shared server URL and locally
+configured API-key authentication for its model. `/mcp auth mystuff` completed
+OAuth discovery, dynamic client registration, browser Google/Firebase sign-in,
+named-Household read-only approval, localhost callback, and token exchange.
+The CLI reported successful authentication and tool reload; `/mcp` showed
+`mystuff - Ready (1 tool) (OAuth)` with `mcp_mystuff_get_item`.
 
-To complete issue 01, record the deployed URL, CLI version, approval result, and
-Item ID used in a successful check. Repeat with MyStuff closed and the Member's
-phone offline after confirming the Item has synced. Check a second Household's
-Item ID and a malformed ID, cancellation, an identity without active Household
-Access, expired/invalid credentials, and current deletion/access-removal states.
-Never record credentials or full private Inventory in the verification log.
+After the Member explicitly confirmed that MyStuff was closed and their phone
+was offline, the CLI successfully called `get_item` for synced Item
+`0EIdCsUofAOEy4r5xgar`. The response contained `id`, `path`, `name`, and
+`description`, with five names in the complete Item Path. No private Item text
+or credentials are included in this record. This completes issue 01's real-client
+check; Gemini web/Android and the remaining capabilities belong to later issues.
+
+An earlier attempt with Gemini CLI 0.50.0 stopped at the CLI's own Code Assist
+model login, before MyStuff approval. Its sign-in rejection was resolved for
+this check by using Gemini CLI's supported
+[API-key authentication](https://geminicli.com/docs/get-started/authentication/).
+Foreign-Household/malformed IDs, cancellation, ineligible identities, invalid or
+expired credentials, and current deletion/access-removal states are covered by
+the automated HTTP suite; those were not simulated against the Member's live data.
 
 Protocol references:
 

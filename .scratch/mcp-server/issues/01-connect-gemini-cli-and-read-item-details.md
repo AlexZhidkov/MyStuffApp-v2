@@ -4,16 +4,16 @@
 
 **Blocked by:** None (can start immediately).
 
-**Status:** ready-for-agent
+**Status:** implemented
 
 - [x] Validate the existing Firebase HTTP-function deployment path in the existing Firebase/Google Cloud project; use a separate Cloud Run service only if the integration needs it. Allow cold starts and require no always-on instances.
-- [ ] Gemini CLI completes OAuth discovery, client registration as needed, browser Google/Firebase sign-in, named-Household read-only approval, and callback/token exchange using the shared HTTPS server URL. Record a successful real-client Item-details check and reproducible connection instructions.
+- [x] Gemini CLI completes OAuth discovery, client registration as needed, browser Google/Firebase sign-in, named-Household read-only approval, and callback/token exchange using the shared HTTPS server URL. Record a successful real-client Item-details check and reproducible connection instructions.
 - [x] Connecting requires an existing MyStuff Account and active Household Access. It neither creates a Household nor claims or grants Household Access; cancellation and ineligible identities produce no usable App Connection.
 - [x] Each App Connection belongs to the authenticated Member and the explicitly approved Household. Unauthenticated, expired, invalid, or unapproved credentials cannot read Inventory, and a client-supplied Household identifier cannot redirect access.
 - [x] Every Item-details request reuses the existing active-membership authorization checks and rejects current Account Deletion, Household deletion, and Household Owner deletion states rather than trusting approval-time membership alone.
 - [x] Item details return stable Item ID, complete Item Path from Household root through the Item, name, and Description. Sibling Items with duplicate names remain distinguishable by ID. Tags, web URLs, Photos, other Item Attachments, and unrelated Item fields are not returned.
 - [x] Foreign-Household Item IDs and malformed identifiers cannot expose Inventory outside the approved Household. Missing or unavailable Item/Inventory data produces an error rather than fabricated or incomplete successful content.
-- [ ] Automated tests exercise authorization, approval binding, duplicate names, complete Item Paths, response-field restrictions, and failure behavior. A real CLI read works with MyStuff closed and the Member's phone offline, using only synced data.
+- [x] Automated tests exercise authorization, approval binding, duplicate names, complete Item Paths, response-field restrictions, and failure behavior. A real CLI read works with MyStuff closed and the Member's phone offline, using only synced data.
 - [x] The service exposes no Inventory mutation capability and adds no application rate limits, per-Member daily quotas, or application spending caps. Existing Android Search behavior and operational limits remain unchanged.
 
 ## Comments
@@ -36,11 +36,26 @@ transactions. All 50 Firestore/Storage rules tests and Android unit tests passed
 Hosting-specific cookie requirement (`__session`); Standards has no remaining
 actionable findings. Renewal/permanent membership-loss invalidation remain issue 03.
 
-The real-client requirements remain unchecked. Google browser sign-in completed,
+At this initial check, the real-client requirements remained unchecked. Google browser sign-in completed,
 but Gemini CLI 0.50.0 rejected its own Code Assist model login as no longer
 supported for individuals, before reaching MyStuff approval. API-key authentication
-or another working Gemini CLI model login is needed to finish the real read with
-the phone offline. The issue is not yet complete.
+or another working Gemini CLI model login was needed to finish the real read with
+the phone offline. At that point, the issue was not yet complete.
 
 Connection/deployment instructions and the verification record are in
 [`docs/mcp-server.md`](../../../docs/mcp-server.md).
+
+### 16 October 2026 — real-client acceptance completed
+
+Gemini CLI 0.64.0, with locally configured API-key model authentication,
+successfully completed `/mcp auth mystuff` against the shared HTTPS URL.
+The Member signed in with Google, approved read-only access to the named
+Household, and received the successful browser callback. The CLI confirmed
+successful authentication, reloaded its tools, and showed the server as
+`Ready (1 tool) (OAuth)`.
+
+The Member then explicitly confirmed that MyStuff was closed and their phone
+was offline. The real CLI successfully called `mcp_mystuff_get_item` for synced
+Item `0EIdCsUofAOEy4r5xgar`, returning only `id`, `path`, `name`, and
+`description`, with five names in the Item Path. No private Item text or
+credentials are recorded here. All issue 01 acceptance criteria are complete.

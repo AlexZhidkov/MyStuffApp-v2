@@ -50,3 +50,19 @@ confirmed it came from opening the server URL directly in the browser address
 bar. That is the expected unauthenticated response, not a failed Custom app
 connection. Requested the result of entering the URL in Gemini's actual dialog;
 that attempt is still pending.
+
+### 17 October 2026 — actual Custom app discovery and Gemini web read
+
+The Member supplied a screenshot of Gemini's **Save your custom app** dialog,
+with the application named `Mystuff` and `get_item` listed as an available action.
+A subsequent screenshot shows a web chat addressed to `@Mystuff` successfully
+reading synced Item `0EIdCsUofAOEy4r5xgar`. Gemini displayed its stable ID,
+five-level Item Path, name, and empty Description. No private Item text is
+recorded here. The existing deployed server served this read without changes.
+
+Requested the same read in the real Gemini Android app, confirmation of Google
+sign-in and read-only approval naming the Household, and client versions where
+available. Actual additional setup fields have not yet been confirmed. The
+screenshots establish real Custom app discovery and a web read, but do not show
+individual OAuth requests or prove the Android result. Keep the combined
+acceptance criteria unchecked and this issue open pending the remaining evidence.

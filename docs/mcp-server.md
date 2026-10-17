@@ -78,8 +78,9 @@ callback. Registered loopback callbacks permit an ephemeral port.
 ## Connect Gemini Custom apps (verification pending)
 
 Issue 02 requires a real connection and Item read in both Gemini web and Android.
-The steps below are the verification procedure; they have not yet passed in
-either client. CLI success does not establish Custom app compatibility.
+The Member has supplied screenshots of Custom app tool discovery and a successful
+Gemini web Item read. Android verification and explicit confirmation of the
+sign-in/Household approval steps remain pending.
 
 [Google's Custom app guide](https://support.google.com/gemini/answer/17209137)
 currently describes setup on Gemini web and subsequent use on web and mobile.
@@ -123,10 +124,17 @@ On 17 October 2026, live HTTPS checks confirmed authorization-server metadata an
 protected-resource metadata returned 200, and an unauthenticated MCP initialize
 returned 401 with the resource metadata URL and `inventory:read` challenge.
 The browser automation endpoint at `127.0.0.1:9223` was unavailable, and no
-connected Android client was available to the agent. Custom app registration,
-browser callbacks, token exchange, and Item reads remain unverified in the real
-Gemini web and Android clients; actual additional setup requirements are unknown.
-No server compatibility changes or new deployment were made during this check.
+connected Android client was available to the agent. The Member subsequently
+supplied screenshots from the actual Gemini flow: **Save your custom app** listed
+`Mystuff` with `get_item` as its available action, and a web chat addressed to
+`@Mystuff` returned Item `0EIdCsUofAOEy4r5xgar`, a five-level Item Path, its name,
+and an empty Description. No private Item text is copied here.
+
+This establishes tool discovery and the real web read. Browser/version,
+Android client details and read outcome, explicit confirmation of Google
+sign-in and named-Household approval, and any additional setup fields still
+need recording. The screenshots do not expose the individual OAuth requests.
+No server compatibility changes or new deployment were needed for the web read.
 
 ## Authorization and storage
 

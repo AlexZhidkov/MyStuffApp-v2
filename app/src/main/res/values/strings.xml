@@ -45,6 +45,8 @@
     <string name="retry">Retry</string>
     <string name="household_root_label">Household Inventory</string>
     <string name="item_details">Item details</string>
+    <string name="item_path">Item Path</string>
+    <string name="view_item_path">View Item Path</string>
     <string name="empty_household_body">This is your Household’s root Item. Child Items will appear here.</string>
     <string name="add_item">Add item</string>
     <string name="edit_item">Edit</string>

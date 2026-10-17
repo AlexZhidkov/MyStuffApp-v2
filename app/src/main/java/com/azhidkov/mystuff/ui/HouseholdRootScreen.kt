@@ -8,6 +8,8 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -304,6 +306,10 @@ private fun HouseholdRootContent(
     }
 
     val isHome = inventoryState.selectedItemId == inventoryState.inventory.rootItemId
+    var showItemPath by remember(
+        inventoryState.inventory.householdId,
+        inventoryState.selectedItemId,
+    ) { mutableStateOf(false) }
     val inventoryListState = rememberLazyListState()
     val currentChildItemIds = rememberUpdatedState(
         inventoryState.childItems.map(Item::id),
@@ -319,6 +325,25 @@ private fun HouseholdRootContent(
         } else {
             inventoryActions.openParentItem()
         }
+    }
+    if (showItemPath) {
+        AlertDialog(
+            onDismissRequest = { showItemPath = false },
+            title = { Text(stringResource(R.string.item_path)) },
+            text = {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    Text(
+                        inventoryState.inventory.pathTo(inventoryState.selectedItemId)
+                            .joinToString(" → ", transform = Item::name),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showItemPath = false }) {
+                    Text(stringResource(R.string.close))
+                }
+            },
+        )
     }
     Scaffold(
         contentWindowInsets = WindowInsets.safeDrawing,
@@ -519,6 +544,13 @@ private fun HouseholdRootContent(
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.primary,
                             )
+                        }
+                    }
+                }
+                if (!isHome) {
+                    item {
+                        TextButton(onClick = { showItemPath = true }) {
+                            Text(stringResource(R.string.view_item_path))
                         }
                     }
                 }

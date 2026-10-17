@@ -22,6 +22,7 @@ import com.azhidkov.mystuff.R
 internal fun AppBarOverflowMenu(
     enabled: Boolean,
     onMembers: (() -> Unit)? = null,
+    onConnectedApps: (() -> Unit)? = null,
     onDeleteHousehold: (() -> Unit)? = null,
     onPrivacyPolicy: () -> Unit,
     onDeleteAccount: () -> Unit,
@@ -59,6 +60,13 @@ internal fun AppBarOverflowMenu(
                 },
                 enabled = enabled,
             )
+            onConnectedApps?.let { openConnectedApps ->
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.connected_apps)) },
+                    onClick = { expanded = false; openConnectedApps() },
+                    enabled = enabled,
+                )
+            }
             onMembers?.let {
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.members)) },

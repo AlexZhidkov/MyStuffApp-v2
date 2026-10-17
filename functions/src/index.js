@@ -21,6 +21,7 @@ import { createItemDeletionModule } from "./item-deletion-module.js";
 import { createDeletionRepository } from "./deletion-repository.js";
 import { createDeletionModule } from "./deletion-module.js";
 import { createDeletionHandlers } from "./deletion-handlers.js";
+import { createAppConnectionHandlers } from "./app-connections.js";
 import { createMcpApp } from "./mcp-app.js";
 
 if (getApps().length === 0) initializeApp();
@@ -200,4 +201,13 @@ export const manuallyDeleteAccount = onRequest(
     timeoutSeconds: 540,
   },
   (request, response) => getDeletionHandlers().manuallyDeleteAccount(request, response),
+);
+
+const appConnectionHandlers = createAppConnectionHandlers({ database: getFirestore(), logger });
+export const listAppConnections = onCall(runtimeOptions, (request) =>
+  appConnectionHandlers.listAppConnections(request),
+);
+
+export const revokeAppConnection = onCall(runtimeOptions, (request) =>
+  appConnectionHandlers.revokeAppConnection(request),
 );

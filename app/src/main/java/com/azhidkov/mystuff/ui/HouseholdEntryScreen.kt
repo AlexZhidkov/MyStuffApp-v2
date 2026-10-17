@@ -45,6 +45,7 @@ fun HouseholdEntryScreen(
     onCreateHousehold: (String) -> Unit,
     onSignOut: () -> Unit,
     onPrivacyPolicy: () -> Unit,
+    onConnectedApps: () -> Unit,
     onDeleteAccount: () -> Unit,
 ) {
     var householdName by remember { mutableStateOf("") }
@@ -64,6 +65,7 @@ fun HouseholdEntryScreen(
                         enabled = operation == null,
                         onSignOut = onSignOut,
                         onPrivacyPolicy = onPrivacyPolicy,
+                        onConnectedApps = onConnectedApps,
                         onDeleteAccount = onDeleteAccount,
                     )
                 },

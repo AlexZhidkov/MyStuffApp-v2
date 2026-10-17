@@ -128,4 +128,19 @@
     <string name="remove">Remove</string>
     <string name="remove_household_access_title">Remove Household Access?</string>
     <string name="remove_household_access_body">Remove %1$s? Their connected access will stop, but Household Items and attribution will remain.</string>
+    <string name="connected_apps">Connected apps</string>
+    <string name="connected_apps_refresh">Refresh</string>
+    <string name="connected_apps_scope">Each App Connection lets an external application read synced Item names, Item Paths, and Descriptions from its approved Household. It cannot change your Inventory. Tags, web links, Photos, and other Item Attachments are not shared.</string>
+    <string name="connected_apps_revocation_limits">Revoking stops future access for that connection. Other App Connections and your MyStuff sign-in keep working. Content already returned cannot be recalled from the external application.</string>
+    <string name="connected_apps_empty">No App Connections to show. Applications you approve will appear here.</string>
+    <string name="connected_apps_household">Approved Household: %1$s</string>
+    <string name="connected_apps_identifier">Connection ending in %1$s</string>
+    <string name="connected_apps_approved">Approved: %1$s</string>
+    <string name="connected_apps_used">Last used: %1$s</string>
+    <string name="connected_apps_read_only">Read-only access</string>
+    <string name="connected_apps_revoked">Revoked</string>
+    <string name="connected_apps_revoking">Revoking…</string>
+    <string name="connected_apps_revoke">Revoke access</string>
+    <string name="connected_apps_revoke_title">Revoke %1$s access?</string>
+    <string name="connected_apps_revoke_confirmation">Stop this App Connection from reading %1$s. Content already returned cannot be recalled. Your other App Connections and MyStuff sign-in keep working.</string>
 </resources>

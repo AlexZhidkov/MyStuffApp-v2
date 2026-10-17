@@ -232,11 +232,13 @@ export function createMcpOAuth({ database, authentication, origin, now = Date.no
         if (await activeHouseholdIdForMember(reader, identity.memberId) !== identity.householdId) {
           throw new InvalidTokenError("Household Access is unavailable.");
         }
+        const household = (await transaction.get(database.doc(`households/${identity.householdId}`))).data();
+        if (typeof household?.name !== "string") throw new InvalidRequestError("Household data is unavailable.");
         const generations = await readConnectionGenerations(
           database, transaction, identity.memberId, identity.householdId,
         );
         transaction.create(database.doc(`appConnections/${connectionId}`), {
-          ...identity, ...generations, clientId: pending.clientId, clientName: pending.clientName,
+          ...identity, ...generations, householdName: household.name, clientId: pending.clientId, clientName: pending.clientName,
           scope: INVENTORY_READ_SCOPE, createdAt: now(), lastUsedAt: now(), revokedAt: null,
         });
         transaction.create(reference("mcpCodes", code), {

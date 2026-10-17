@@ -18,6 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.ViewModelProvider
+import com.azhidkov.mystuff.ui.ConnectedAppsRoute
 import com.azhidkov.mystuff.ui.HouseholdEntryScreen
 import com.azhidkov.mystuff.ui.HouseholdRootScreen
 import com.azhidkov.mystuff.ui.ItemPhotoLoader
@@ -42,6 +43,7 @@ class MainActivity : ComponentActivity() {
         val sessionController = sessionViewModel.controller
         val itemPhotoLoader = sessionViewModel.itemPhotoLoader
         val householdAccessGateway = sessionViewModel.householdAccessGateway
+        val appConnectionsGateway = FirebaseAppConnectionsGateway()
         val inventoryGateway = FirebaseInventoryGateway()
         val itemAttachmentGateway = FirebaseItemAttachmentGateway()
         val searchGateway = FirebaseSearchGateway()
@@ -74,6 +76,7 @@ class MainActivity : ComponentActivity() {
                     onCreateHousehold = sessionController::createHousehold,
                     onRetryOpeningHousehold = sessionController::retryOpeningHousehold,
                     householdAccessGateway = householdAccessGateway,
+                    appConnectionsGateway = appConnectionsGateway,
                     inventoryGateway = inventoryGateway,
                     itemAttachmentGateway = itemAttachmentGateway,
                     searchGateway = searchGateway,
@@ -103,6 +106,7 @@ private fun MyStuffApp(
     onCreateHousehold: (String) -> Unit,
     onRetryOpeningHousehold: () -> Unit,
     householdAccessGateway: HouseholdAccessGateway,
+    appConnectionsGateway: AppConnectionsGateway,
     inventoryGateway: InventoryGateway,
     itemAttachmentGateway: ItemAttachmentGateway,
     searchGateway: SearchGateway,
@@ -110,6 +114,8 @@ private fun MyStuffApp(
     descriptionGenerationWork: InventoryDescriptionGenerationWork,
     itemPhotoLoader: ItemPhotoLoader<Bitmap>,
 ) {
+    var showConnectedApps by remember(state.identity?.id) { mutableStateOf(false) }
+    val onConnectedApps = { showConnectedApps = true }
     androidx.compose.foundation.layout.Box(modifier = Modifier.fillMaxSize()) {
         Surface(
             modifier = Modifier.fillMaxSize(),
@@ -126,6 +132,7 @@ private fun MyStuffApp(
                     opening = state.operation == SessionOperation.OpeningHousehold,
                     errorMessage = state.errorMessage,
                     onRetry = onRetryOpeningHousehold,
+                    onConnectedApps = onConnectedApps,
                     onSignOut = onSignOut,
                     onPrivacyPolicy = onPrivacyPolicy,
                     onDeleteAccount = onBeginAccountDeletion,
@@ -138,6 +145,7 @@ private fun MyStuffApp(
                     errorMessage = state.errorMessage,
                     noticeMessage = state.noticeMessage,
                     onCreateHousehold = onCreateHousehold,
+                    onConnectedApps = onConnectedApps,
                     onSignOut = onSignOut,
                     onPrivacyPolicy = onPrivacyPolicy,
                     onDeleteAccount = onBeginAccountDeletion,
@@ -192,6 +200,7 @@ private fun MyStuffApp(
                         onAddHouseholdAccess = householdAccessController::add,
                         onRemoveHouseholdAccess = householdAccessController::remove,
                         inventoryActions = inventoryController,
+                        onConnectedApps = onConnectedApps,
                         onSignOut = onSignOut,
                         onPrivacyPolicy = onPrivacyPolicy,
                         onDeleteAccount = onBeginAccountDeletion,
@@ -203,6 +212,14 @@ private fun MyStuffApp(
                     )
                 }
             }
+        }
+        if (showConnectedApps && state.identity != null) {
+            ConnectedAppsRoute(
+                memberId = state.identity.id,
+                gateway = appConnectionsGateway,
+                onClose = { showConnectedApps = false },
+                onPrivacyPolicy = onPrivacyPolicy,
+            )
         }
         state.deletionPreview?.let { preview ->
             com.azhidkov.mystuff.ui.DeletionConfirmationDialog(

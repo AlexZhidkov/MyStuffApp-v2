@@ -1,13 +1,8 @@
+import { isolatedGeminiCli } from "../test-support/gemini-cli.js";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { execFile } from "node:child_process";
 import { once } from "node:events";
 import { createServer } from "node:http";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { promisify } from "node:util";
-import { pathToFileURL } from "node:url";
 import { test } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { initializeApp } from "firebase-admin/app";
@@ -144,19 +139,11 @@ test("an active App Connection renews expired access tokens without browser appr
 test("the installed Gemini CLI transport automatically renews and reads an Item", {
   skip: process.env.GEMINI_CLI_BUNDLE === undefined,
 }, async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), "mystuff-gemini-renewal-"));
-  const previousHome = process.env.GEMINI_CLI_HOME;
-  process.env.GEMINI_CLI_HOME = directory;
-  t.after(async () => {
-    if (previousHome === undefined) delete process.env.GEMINI_CLI_HOME;
-    else process.env.GEMINI_CLI_HOME = previousHome;
-    await rm(directory, { recursive: true, force: true });
-  });
-  const { MCPOAuthTokenStorage, createTransport } = await import(pathToFileURL(process.env.GEMINI_CLI_BUNDLE));
+  const gemini = await isolatedGeminiCli(t);
+  const { storage, createTransport } = gemini;
   const api = await fixture(t);
   const flow = await api.begin();
   const credentials = await api.credentials(flow);
-  const storage = new MCPOAuthTokenStorage();
   await storage.saveToken("mystuff-renewal", {
     accessToken: credentials.access_token, refreshToken: credentials.refresh_token,
     tokenType: "Bearer", scope: "inventory:read", expiresAt: Date.now() - 1,
@@ -181,16 +168,8 @@ test("the installed Gemini CLI transport automatically renews and reads an Item"
   await client.close();
   await storage.saveToken("mystuff-renewal", { ...saved.token, expiresAt: Date.now() - 1 },
     flow.clientId, `${api.origin}/token`, `${api.origin}/mcp`);
-  await writeFile(join(directory, ".gemini/settings.json"), JSON.stringify({
-    mcpServers: { "mystuff-renewal": { httpUrl: `${api.origin}/mcp` } },
-  }));
-  await writeFile(join(directory, ".gemini/trustedFolders.json"), JSON.stringify({
-    [directory]: "TRUST_FOLDER",
-  }));
-  const cli = await promisify(execFile)(process.execPath,
-    [join(dirname(process.env.GEMINI_CLI_BUNDLE), "gemini.js"), "mcp", "list"],
-    { cwd: directory, env: process.env, timeout: 30_000 });
-  assert.match(cli.stdout + cli.stderr, /Connected/);
+  await gemini.configure({ "mystuff-renewal": { httpUrl: `${api.origin}/mcp` } });
+  assert.match(await gemini.list(), /Connected/);
   const cliSaved = await storage.getCredentials("mystuff-renewal");
   assert.notEqual(cliSaved.token.accessToken, saved.token.accessToken);
   assert.notEqual(cliSaved.token.refreshToken, saved.token.refreshToken);

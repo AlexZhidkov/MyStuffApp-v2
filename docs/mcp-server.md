@@ -187,9 +187,28 @@ New approval records the current generations and the explicitly named Household;
 old credentials cannot follow a Member into a different Household. Connections
 created before generation fields existed represent only the original generation.
 
-Issue 04 adds Member-facing connection management.
-Until then, an operator can revoke one connection by setting its `revokedAt` to a
-non-null timestamp; this stops subsequent requests without signing anyone out.
+### Connected apps
+
+Every signed-in Member can open **Connected apps** from MyStuff's menu, including
+Members without current Household Access. Each row identifies the external
+application, approved Household, approval and last-use times, and a connection
+identifier suffix to distinguish repeated approvals. Revoked approvals are marked
+as revoked when the list is refreshed. New approvals store the Household's name;
+older approvals fall back to the current Household name or an unavailable label.
+
+The `listAppConnections` and `revokeAppConnection` Firebase callables use the
+Member's Firebase identity, independently of external OAuth credentials. Listing
+queries only that Member's records; revocation checks ownership and writes
+`revokedAt` in a transaction. Missing and foreign IDs return the same not-found
+response. Repeating a successful revocation is safe. Storage errors fail visibly
+rather than returning an empty list or a successful disconnection.
+
+Every subsequent MCP request, Inventory read, code exchange, and token renewal
+checks the revoked record, including requests using previously issued credentials.
+Independent App Connections and MyStuff sign-in remain usable. Revocation cannot
+recall content already returned to an external application. The approval page,
+Connected apps screen, and public privacy policy explain this limit and the
+read-only approved-Household scope.
 
 ### Deploy the lifecycle change
 
@@ -201,11 +220,52 @@ firebase deploy --project mystuff-ai-app --only functions:removeHouseholdAccess,
 ```
 
 Deploy the four removal/deletion functions before enabling the new `mcp` function
-if deploying in separate steps. No rules, Hosting, Android, or schema backfill is
-needed. Existing access-only credentials cannot acquire a refresh token; those
-clients need one fresh approval to obtain renewal credentials.
+if deploying in separate steps. The lifecycle change needs no rules, Hosting,
+Android, or schema backfill.
+Issue 04 additionally requires the Android update and these two callables:
+
+```bash
+firebase deploy --project mystuff-ai-app --only functions:listAppConnections,functions:revokeAppConnection
+```
+
+Deploy `functions:mcp` for the approval-page copy and stored Household name.
+Publish `site/index.html` through the existing GitHub Pages workflow for the
+privacy update. No new Hosting route, Firestore index, or rules change is needed.
+Existing access-only credentials cannot acquire a refresh token; those clients
+need one fresh approval to obtain renewal credentials.
 
 ## Verification record
+
+### 17 October 2026 — individual connection management
+
+The actual installed Gemini CLI 0.64.0 executable (`gemini mcp list`) connected
+two independent approvals against the local Functions emulator. After revoking
+one through the authenticated `revokeAppConnection` callable, the CLI reported
+that connection disconnected while the second remained connected. Both used
+the same Member and approved Household. The HTTP checks additionally proved
+that the revoked connection's existing access and refresh credentials fail,
+while the second connection still reads and renews and the Member remains
+signed in. This used synthetic data and isolated temporary CLI configuration;
+no production deployment or live Member revocation was performed.
+
+The CLI check is enabled by `GEMINI_CLI_BUNDLE`, using the same installed bundle
+as the renewal check below. With the Firebase emulators running:
+
+```bash
+FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099 \
+  node --test --test-name-pattern='Connected apps|revoking one App Connection|unavailable connection storage' functions/test/functions-emulator.test.js
+```
+
+The new HTTP tests also cover identity-scoped listing, legacy approvals, revoked
+status, unauthenticated access, foreign and malformed connection IDs, idempotent
+revocation, and storage outages. Android controller tests cover loading, failed
+listing and retry, successful empty listing, failed revocation and retry, and
+preserving independent connections. The test seams were confirmed for issue 04.
+
+All 75 backend tests passed with the full emulators and both installed Gemini CLI
+checks enabled. All 210 Android unit tests, Android lint, and all 50
+Firestore/Storage rules tests passed. Kotlin compilation and JavaScript syntax
+checks passed; no JavaScript type-checking task is configured.
 
 ### 17 October 2026 — renewal and permanent invalidation
 

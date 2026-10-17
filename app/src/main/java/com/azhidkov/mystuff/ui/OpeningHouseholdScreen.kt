@@ -34,6 +34,7 @@ fun OpeningHouseholdScreen(
     onRetry: () -> Unit,
     onSignOut: () -> Unit,
     onPrivacyPolicy: () -> Unit,
+    onConnectedApps: () -> Unit,
     onDeleteAccount: () -> Unit,
 ) {
     Scaffold(
@@ -51,6 +52,7 @@ fun OpeningHouseholdScreen(
                         enabled = !opening,
                         onSignOut = onSignOut,
                         onPrivacyPolicy = onPrivacyPolicy,
+                        onConnectedApps = onConnectedApps,
                         onDeleteAccount = onDeleteAccount,
                     )
                 },

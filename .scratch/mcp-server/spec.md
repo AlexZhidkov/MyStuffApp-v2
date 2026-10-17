@@ -7,7 +7,9 @@ Issue 02 is implemented: the Member completed the actual Gemini Custom app
 connection and verified Item details on Gemini web and Android with the existing
 deployed server. Issue 03 is implemented and verified locally, including renewal
 with the real installed Gemini CLI; its lifecycle changes have not been deployed.
-Issues 04–08 have not been implemented.
+Issue 04 adds Connected apps management and has passed the local real Gemini CLI
+revocation check; its changes have not been deployed. Issues 05–08 have not been
+implemented.
 
 ## Purpose and scope
 

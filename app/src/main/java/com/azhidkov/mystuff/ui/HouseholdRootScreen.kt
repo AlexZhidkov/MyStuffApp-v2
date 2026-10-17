@@ -112,6 +112,7 @@ fun HouseholdRootScreen(
     inventoryActions: InventoryActions,
     onSignOut: () -> Unit,
     onPrivacyPolicy: () -> Unit,
+    onConnectedApps: () -> Unit,
     onDeleteAccount: () -> Unit,
     onDeleteHousehold: (() -> Unit)?,
 ) {
@@ -140,6 +141,7 @@ fun HouseholdRootScreen(
             inventoryActions = inventoryActions,
             onSignOut = onSignOut,
             onPrivacyPolicy = onPrivacyPolicy,
+            onConnectedApps = onConnectedApps,
             onDeleteAccount = onDeleteAccount,
             onDeleteHousehold = onDeleteHousehold,
         )
@@ -176,6 +178,7 @@ private fun HouseholdRootContent(
     inventoryActions: InventoryActions,
     onSignOut: () -> Unit,
     onPrivacyPolicy: () -> Unit,
+    onConnectedApps: () -> Unit,
     onDeleteAccount: () -> Unit,
     onDeleteHousehold: (() -> Unit)?,
 ) {
@@ -379,6 +382,7 @@ private fun HouseholdRootContent(
                         },
                         onSignOut = onSignOut,
                         onPrivacyPolicy = onPrivacyPolicy,
+            onConnectedApps = onConnectedApps,
                         onDeleteAccount = onDeleteAccount,
                         onDeleteHousehold = onDeleteHousehold,
                     )

@@ -148,11 +148,17 @@ Admin-only Firestore collections:
 - `mcpApprovals`: browser-bound approval requests, valid for ten minutes.
 - `mcpCodes`: single-use approved codes, valid for one minute.
 - `mcpAccessTokens`: SHA-256 keyed opaque tokens, valid for one hour.
+- `mcpRefreshTokens`: SHA-256 keyed rotating renewal credentials, bound to one
+  App Connection and this resource. Used records are retained to detect replay.
 - `appConnections`: separately identifiable Member/Household approvals, with
-  client identity, timestamps, read scope, and `revokedAt`.
+  client identity, timestamps, read scope, authorization generations, and `revokedAt`.
+- `mcpMemberEpochs`, `mcpHouseholdEpochs`: permanent authorization generations.
+  Access removal changes the affected Member's generation; Account Deletion
+  changes the Member's generation, and Household/Owner deletion changes the
+  Household's generation. These records survive membership and deletion-job cleanup.
 
 Existing Firestore rules deny access to these unmatched collections. Raw access
-tokens, authorization codes, and approval cookie secrets are not stored.
+tokens, refresh tokens, authorization codes, and approval cookie secrets are not stored.
 Expired records are rejected regardless of whether Firestore has removed them.
 
 Every MCP request checks the current App Connection and the existing shared
@@ -163,13 +169,81 @@ Malformed IDs, cycles, missing ancestors, foreign Items, pending Item deletion,
 and unavailable Inventory fail closed. Responses contain only the four fields
 listed above, with no Tags, web URLs, Photos, or other Item Attachments.
 
-Issue 03 adds refresh tokens, 90-day inactivity, and permanent invalidation after
-membership removal/restoration. This issue issues no refresh token and advertises
-only authorization-code grants. Issue 04 adds Member-facing connection management.
+Authorization-code exchange now issues access and refresh tokens, and discovery
+advertises both grant types. Renewal checks current authorization in the same
+transaction as credential rotation. A used refresh token cannot renew again;
+replaying it invalidates its App Connection, including newly issued credentials,
+following [OAuth security guidance](https://www.rfc-editor.org/rfc/rfc9700.html#section-4.14.2).
+Other App Connections and MyStuff sign-in sessions are unaffected.
+
+At exactly 90 days without an authenticated MCP request, both reads and renewal
+require fresh browser approval. Renewal alone does not count as use. Every MCP
+request, including requests with continuation markers, uses shared authorization;
+Item ancestry reads repeat the same lifecycle check inside their transaction.
+Access removal and deletion invalidate approval atomically when they begin, even
+if membership returns or deletion jobs disappear before the next MCP request.
+Generation records must not be removed by cleanup or given an expiry policy.
+New approval records the current generations and the explicitly named Household;
+old credentials cannot follow a Member into a different Household. Connections
+created before generation fields existed represent only the original generation.
+
+Issue 04 adds Member-facing connection management.
 Until then, an operator can revoke one connection by setting its `revokedAt` to a
 non-null timestamp; this stops subsequent requests without signing anyone out.
 
+### Deploy the lifecycle change
+
+Deploy the invalidation writers together with renewal support. Deploying only
+`mcp` leaves access removal and deletion unable to invalidate former approval:
+
+```bash
+firebase deploy --project mystuff-ai-app --only functions:removeHouseholdAccess,functions:requestAccountDeletion,functions:requestHouseholdDeletion,functions:manuallyDeleteAccount,functions:mcp
+```
+
+Deploy the four removal/deletion functions before enabling the new `mcp` function
+if deploying in separate steps. No rules, Hosting, Android, or schema backfill is
+needed. Existing access-only credentials cannot acquire a refresh token; those
+clients need one fresh approval to obtain renewal credentials.
+
 ## Verification record
+
+### 17 October 2026 — renewal and permanent invalidation
+
+Gemini CLI 0.64.0 automatically renewed expired credentials against the local
+HTTP server. Its installed OAuth provider and Streamable HTTP transport
+initialized the MCP connection, listed `get_item`, and read the fixture Item.
+The actual `gemini mcp list` executable then renewed again and reported the
+server connected. Both checks verified rotated access and refresh credentials
+were saved without opening another approval page.
+
+This check used synthetic Firebase identity and Inventory data, a controlled
+server clock, and an isolated temporary Gemini configuration and token store.
+It did not use the Member's credentials, deploy changes, or establish renewal
+in Gemini's hosted Custom app. The earlier real Google sign-in and hosted
+Gemini checks below still describe the issue 01/02 deployment.
+
+The compatibility test is opt-in because Gemini CLI is not a project dependency.
+Set `GEMINI_CLI_BUNDLE` to the installed CLI bundle exporting `createTransport`
+and `MCPOAuthTokenStorage` (alongside `gemini.js`), then run:
+
+```bash
+node --test --test-name-pattern='installed Gemini CLI' functions/test/mcp-http.test.js
+```
+
+The HTTP lifecycle suite also covers controlled-clock active use and exact
+90-day inactivity, named approval for a different Household, restoration before
+the next request, pending-code invalidation, legacy issue 01 approvals, all three
+deletion states and cleanup, refresh replay, unrelated Members, and independent
+connections. A Firestore-emulator case checks real transactional code exchange,
+renewal, removal/restoration, deletion cleanup, and concurrent refresh replay.
+That transaction fixture uses a named emulator database so default-database
+deletion workers cannot race with its controlled cleanup/restoration sequence.
+
+All 72 backend tests passed under Node 22 with Auth, Firestore, Storage, and
+Functions emulators and the optional installed Gemini CLI check enabled. All 50
+Firestore/Storage rules tests and Android unit tests passed. No JavaScript type-checking task exists; source syntax checks
+passed. Standards and Spec reviews have no remaining findings; the Standards
+review's redundant membership-read finding was fixed before final validation.
 
 On 16 October 2026 the scoped `functions:mcp,hosting` deployment succeeded in
 `mystuff-ai-app`. The live Hosting channel had no previous release. An initial

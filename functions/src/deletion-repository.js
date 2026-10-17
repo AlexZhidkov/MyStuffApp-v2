@@ -1,4 +1,5 @@
 import { FieldValue } from "firebase-admin/firestore";
+import { invalidateHouseholdConnections, invalidateMemberConnections } from "./mcp-connections.js";
 
 const FORMER_MEMBER_ID = "former-member";
 const FORMER_MEMBER_DISPLAY_NAME = "Former member";
@@ -75,6 +76,10 @@ export function createDeletionRepository({ database }) {
           ? null
           : await transaction.get(householdReference);
         if (!existing.exists) {
+          invalidateMemberConnections(database, transaction, plan.memberId);
+          if (plan.deletesHousehold && typeof plan.householdId === "string") {
+            invalidateHouseholdConnections(database, transaction, plan.householdId);
+          }
           transaction.create(reference, {
             ...plan,
             status: "pending",
@@ -102,6 +107,7 @@ export function createDeletionRepository({ database }) {
         const householdReference = database.doc(`households/${plan.householdId}`);
         const household = await transaction.get(householdReference);
         if (!existing.exists) {
+          invalidateHouseholdConnections(database, transaction, plan.householdId);
           transaction.create(reference, {
             ...plan,
             status: "pending",

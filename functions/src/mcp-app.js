@@ -24,13 +24,11 @@ export function createMcpApp({ database, authentication, origin, firebaseConfig,
       "Content-Security-Policy": "frame-ancestors 'none'; base-uri 'none'; form-action 'self'" });
     next();
   });
-  // Publish the capabilities implemented by this issue; refresh grants arrive
-  // together with the connection lifecycle in issue 03.
   app.get("/.well-known/oauth-authorization-server", (_request, response) => {
     response.json({
       issuer: `${origin}/`, authorization_endpoint: `${origin}/authorize`,
       token_endpoint: `${origin}/token`, registration_endpoint: `${origin}/register`,
-      response_types_supported: ["code"], grant_types_supported: ["authorization_code"],
+      response_types_supported: ["code"], grant_types_supported: ["authorization_code", "refresh_token"],
       token_endpoint_auth_methods_supported: ["none", "client_secret_post"],
       code_challenge_methods_supported: ["S256"], scopes_supported: [INVENTORY_READ_SCOPE],
       authorization_response_iss_parameter_supported: true,
@@ -85,8 +83,7 @@ export function createMcpApp({ database, authentication, origin, firebaseConfig,
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     }, async ({ itemId }) => {
       try {
-        const { memberId, householdId } = request.auth.extra;
-        const item = await readMcpItem(database, memberId, householdId, itemId);
+        const item = await readMcpItem(database, request.auth.extra.connectionId, itemId, now);
         return { content: [{ type: "text", text: JSON.stringify(item) }], structuredContent: item };
       } catch {
         return { isError: true, content: [{ type: "text", text: "Item or Inventory data is unavailable. Check the Item ID and current Household Access." }] };

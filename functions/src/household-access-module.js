@@ -1,4 +1,5 @@
 import { FieldValue } from "firebase-admin/firestore";
+import { invalidateMemberConnections } from "./mcp-connections.js";
 
 export function createHouseholdAccessModule({ database }) {
   return {
@@ -111,6 +112,7 @@ export function createHouseholdAccessModule({ database }) {
         transaction.delete(accessReference);
         const claimedMemberId = access.data()?.memberId;
         if (typeof claimedMemberId === "string") {
+          invalidateMemberConnections(database, transaction, claimedMemberId);
           transaction.update(householdReference, {
             storageMemberIds: storageMemberIdsWith(household.data(), claimedMemberId, false),
           });

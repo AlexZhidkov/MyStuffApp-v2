@@ -1,4 +1,4 @@
-import { isActiveHouseholdMember } from "./member-authorization.js";
+import { readMcpConnection } from "./mcp-connections.js";
 
 export function isDocumentId(value) {
   return typeof value === "string" && value.length > 0 &&
@@ -9,13 +9,12 @@ export function isDocumentId(value) {
 
 // Read the whole ancestry at one Firestore snapshot, so a concurrent Move cannot
 // produce an Item Path assembled from two different versions of the Inventory.
-export async function readMcpItem(database, memberId, householdId, itemId) {
+export async function readMcpItem(database, connectionId, itemId, now = Date.now) {
   if (!isDocumentId(itemId)) throw new Error("Invalid Item ID.");
   return database.runTransaction(async (transaction) => {
-    const reader = { doc: (path) => ({ get: () => transaction.get(database.doc(path)) }) };
-    if (!await isActiveHouseholdMember(reader, memberId, householdId)) {
-      throw new Error("Household Access is unavailable.");
-    }
+    const connection = await readMcpConnection(database, transaction, connectionId, now());
+    if (!connection) throw new Error("App Connection is unavailable.");
+    const { householdId } = connection;
     const visited = new Set();
     const path = [];
     let currentId = itemId;

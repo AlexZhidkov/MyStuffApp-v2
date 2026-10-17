@@ -1,11 +1,20 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
 import { once } from "node:events";
 import { createServer } from "node:http";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { promisify } from "node:util";
+import { pathToFileURL } from "node:url";
 import { test } from "node:test";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { initializeApp } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import { createMcpApp } from "../src/mcp-app.js";
+import { createHouseholdAccessModule } from "../src/household-access-module.js";
+import { createDeletionRepository } from "../src/deletion-repository.js";
 
 const verifier = "a".repeat(64);
 const challenge = createHash("sha256").update(verifier).digest("base64url");
@@ -47,7 +56,7 @@ test("OAuth discovery offers read-only PKCE authorization at the shared server",
   const metadata = await api.request("/.well-known/oauth-authorization-server");
   assert.deepEqual(metadata.body.scopes_supported, ["inventory:read"]);
   assert.deepEqual(metadata.body.code_challenge_methods_supported, ["S256"]);
-  assert.deepEqual(metadata.body.grant_types_supported, ["authorization_code"]);
+  assert.deepEqual(metadata.body.grant_types_supported, ["authorization_code", "refresh_token"]);
   assert.equal(metadata.body.authorization_response_iss_parameter_supported, true);
   const token = await api.connect();
   const initialized = await api.call("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "Gemini CLI", version: "test" } }, token);
@@ -115,6 +124,207 @@ test("authorization codes enforce PKCE, client, callback, resource, expiry, and 
   assert.equal((await api.exchange(expiring, new URL(grant.body.redirect).searchParams.get("code"))).status, 400);
 });
 
+test("an active App Connection renews expired access tokens without browser approval", async (t) => {
+  const api = await fixture(t);
+  const flow = await api.begin();
+  const credentials = await api.credentials(flow);
+  assert.equal(typeof credentials.refresh_token, "string");
+  api.advance(3600 * 1000);
+  assert.equal((await api.item("drill-1", credentials.access_token)).status, 401);
+  const renewed = await api.refresh(flow, credentials.refresh_token);
+  assert.equal(renewed.status, 200);
+  assert.notEqual(renewed.body.access_token, credentials.access_token);
+  assert.notEqual(renewed.body.refresh_token, credentials.refresh_token);
+  assert.equal(renewed.body.expires_in, 3600);
+  assert.equal((await api.item("drill-1", renewed.body.access_token)).body.result.structuredContent.id, "drill-1");
+});
+
+// Optional compatibility check against an installed Gemini CLI bundle. All
+// identities and Inventory are local fixtures; no Member credentials are read.
+test("the installed Gemini CLI transport automatically renews and reads an Item", {
+  skip: process.env.GEMINI_CLI_BUNDLE === undefined,
+}, async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "mystuff-gemini-renewal-"));
+  const previousHome = process.env.GEMINI_CLI_HOME;
+  process.env.GEMINI_CLI_HOME = directory;
+  t.after(async () => {
+    if (previousHome === undefined) delete process.env.GEMINI_CLI_HOME;
+    else process.env.GEMINI_CLI_HOME = previousHome;
+    await rm(directory, { recursive: true, force: true });
+  });
+  const { MCPOAuthTokenStorage, createTransport } = await import(pathToFileURL(process.env.GEMINI_CLI_BUNDLE));
+  const api = await fixture(t);
+  const flow = await api.begin();
+  const credentials = await api.credentials(flow);
+  const storage = new MCPOAuthTokenStorage();
+  await storage.saveToken("mystuff-renewal", {
+    accessToken: credentials.access_token, refreshToken: credentials.refresh_token,
+    tokenType: "Bearer", scope: "inventory:read", expiresAt: Date.now() - 1,
+  }, flow.clientId, `${api.origin}/token`, `${api.origin}/mcp`);
+  api.advance(3600 * 1000);
+  assert.equal((await api.item("drill-1", credentials.access_token)).status, 401);
+  const transport = await createTransport("mystuff-renewal", { httpUrl: `${api.origin}/mcp` }, false, {
+    emitMcpDiagnostic() {}, sanitizationConfig: {},
+  });
+  const client = new Client({ name: "mystuff-renewal-verification", version: "1.0.0" });
+  t.after(() => client.close());
+  await client.connect(transport);
+  const tools = await client.listTools();
+  assert.deepEqual(tools.tools.map((tool) => tool.name), ["get_item"]);
+  const item = await client.callTool({ name: "get_item", arguments: { itemId: "drill-1" } });
+  assert.equal(item.structuredContent.id, "drill-1");
+  const saved = await storage.getCredentials("mystuff-renewal");
+  assert.notEqual(saved.token.accessToken, credentials.access_token);
+  assert.notEqual(saved.token.refreshToken, credentials.refresh_token);
+  // Exercise the actual CLI executable as well, forcing its stored token to
+  // expire so `mcp list` has to renew before it can report a connected server.
+  await client.close();
+  await storage.saveToken("mystuff-renewal", { ...saved.token, expiresAt: Date.now() - 1 },
+    flow.clientId, `${api.origin}/token`, `${api.origin}/mcp`);
+  await writeFile(join(directory, ".gemini/settings.json"), JSON.stringify({
+    mcpServers: { "mystuff-renewal": { httpUrl: `${api.origin}/mcp` } },
+  }));
+  await writeFile(join(directory, ".gemini/trustedFolders.json"), JSON.stringify({
+    [directory]: "TRUST_FOLDER",
+  }));
+  const cli = await promisify(execFile)(process.execPath,
+    [join(dirname(process.env.GEMINI_CLI_BUNDLE), "gemini.js"), "mcp", "list"],
+    { cwd: directory, env: process.env, timeout: 30_000 });
+  assert.match(cli.stdout + cli.stderr, /Connected/);
+  const cliSaved = await storage.getCredentials("mystuff-renewal");
+  assert.notEqual(cliSaved.token.accessToken, saved.token.accessToken);
+  assert.notEqual(cliSaved.token.refreshToken, saved.token.refreshToken);
+});
+
+test("refresh credentials enforce client, resource, scope, rotation, and replay invalidation", async (t) => {
+  const api = await fixture(t);
+  const flow = await api.begin();
+  const credentials = await api.credentials(flow);
+  const otherFlow = await api.begin();
+  const independent = await api.credentials(otherFlow);
+  for (const changes of [{ client_id: otherFlow.clientId }, { resource: "https://foreign.example/mcp" },
+    { scope: "inventory:write" }]) {
+    assert.equal((await api.refresh(flow, credentials.refresh_token, changes)).status, 400);
+  }
+  const renewed = await api.refresh(flow, credentials.refresh_token, { scope: "inventory:read" });
+  assert.equal(renewed.status, 200);
+  assert.equal((await api.item("drill-1", renewed.body.access_token)).status, 200);
+  assert.equal((await api.refresh(flow, credentials.refresh_token)).body.error, "invalid_grant");
+  // A replay may indicate theft. Neither the superseded nor the new credentials
+  // may survive, and another App Connection must remain usable.
+  assert.equal((await api.item("drill-1", credentials.access_token)).status, 401);
+  assert.equal((await api.item("drill-1", renewed.body.access_token)).status, 401);
+  assert.equal((await api.refresh(flow, renewed.body.refresh_token)).body.error, "invalid_grant");
+  assert.equal((await api.item("drill-1", independent.access_token)).status, 200);
+});
+
+test("a different Household requires approval naming it and never redirects former credentials", async (t) => {
+  const api = await fixture(t);
+  const flow = await api.begin();
+  const credentials = await api.credentials(flow);
+  api.documents.set("memberships/member", { householdId: "foreign" });
+  assert.equal((await api.item("private", credentials.access_token)).status, 401);
+  assert.equal((await api.item("drill-1", credentials.access_token)).status, 401);
+  assert.equal((await api.refresh(flow, credentials.refresh_token)).body.error, "invalid_grant");
+  const newFlow = await api.begin();
+  const preview = await api.approval("preview", newFlow);
+  assert.equal(preview.body.householdName, "Other Home");
+  assert.equal((await api.approval("approve", newFlow)).status, 400);
+  const current = await api.credentials(newFlow, "member", "foreign");
+  assert.equal((await api.item("private", current.access_token)).body.result.structuredContent.id, "private");
+  assert.equal((await api.item("drill-1", current.access_token)).body.result.isError, true);
+  assert.equal((await api.item("private", credentials.access_token)).status, 401);
+});
+
+test("90 days without MCP use requires fresh approval, while reads keep a connection active", async (t) => {
+  const api = await fixture(t);
+  const idleFlow = await api.begin();
+  const idle = await api.credentials(idleFlow);
+  const activeFlow = await api.begin();
+  let active = await api.credentials(activeFlow);
+  const day = 24 * 3600 * 1000;
+  api.advance(89 * day);
+  // Token renewal alone must not disguise an unused App Connection as active.
+  const idleRenewal = await api.refresh(idleFlow, idle.refresh_token);
+  assert.equal(idleRenewal.status, 200);
+  active = (await api.refresh(activeFlow, active.refresh_token)).body;
+  assert.equal((await api.item("drill-1", active.access_token)).status, 200);
+  api.advance(day - 1);
+  const boundaryToken = await api.refresh(idleFlow, idleRenewal.body.refresh_token);
+  assert.equal(boundaryToken.status, 200);
+  api.advance(1);
+  assert.equal((await api.item("drill-1", boundaryToken.body.access_token)).status, 401);
+  assert.equal((await api.call("tools/list", { cursor: "continuation" }, boundaryToken.body.access_token)).status, 401);
+  assert.equal((await api.refresh(idleFlow, boundaryToken.body.refresh_token)).body.error, "invalid_grant");
+  active = (await api.refresh(activeFlow, active.refresh_token)).body;
+  assert.equal((await api.item("drill-1", active.access_token)).body.result.structuredContent.id, "drill-1");
+  assert.equal((await api.item("drill-1", await api.connect())).status, 200);
+});
+
+test("access removed and restored before the next request still requires fresh approval", async (t) => {
+  const api = await fixture(t);
+  const flow = await api.begin();
+  const credentials = await api.credentials(flow);
+  // Issue 01 connections did not store generation fields. They remain usable
+  // until an invalidating event, and must then obey the same lifecycle.
+  for (const [path, connection] of api.documents) {
+    if (path.startsWith("appConnections/")) {
+      const { memberGeneration: _member, householdGeneration: _household, ...legacy } = connection;
+      api.documents.set(path, legacy);
+    }
+  }
+  assert.equal((await api.item("drill-1", credentials.access_token)).status, 200);
+  const pendingFlow = await api.begin();
+  await api.approval("preview", pendingFlow);
+  const pendingApproval = await api.approval("approve", pendingFlow);
+  const pendingCode = new URL(pendingApproval.body.redirect).searchParams.get("code");
+  const otherFlow = await api.begin();
+  const other = await api.credentials(otherFlow, "other", "foreign");
+  const owner = await api.credentials(await api.begin(), "owner", "home");
+  const membership = api.documents.get("memberships/member");
+  const access = createHouseholdAccessModule({ database: api.database });
+  await access.removeAccess({ memberId: "owner", householdId: "home", email: "member@example.com" });
+  // Simulate the Owner restoring access and the same identity joining again,
+  // with no intervening MCP read or renewal to observe the removal.
+  api.documents.set("memberships/member", membership);
+  assert.equal((await api.item("drill-1", credentials.access_token)).status, 401);
+  assert.equal((await api.refresh(flow, credentials.refresh_token)).body.error, "invalid_grant");
+  assert.equal((await api.exchange(pendingFlow, pendingCode)).body.error, "invalid_grant");
+  assert.equal((await api.item("private", other.access_token)).body.result.structuredContent.id, "private");
+  assert.equal((await api.item("drill-1", owner.access_token)).body.result.structuredContent.id, "drill-1");
+  assert.equal((await api.item("drill-1", await api.connect())).status, 200);
+  assert.equal((await api.item("drill-1", credentials.access_token)).status, 401);
+});
+
+test("deletion and completed cleanup cannot revive former approval after later sign-in", async (t) => {
+  for (const kind of ["account", "owner", "household"]) {
+    await t.test(kind, async (t) => {
+      const api = await fixture(t);
+      const flow = await api.begin();
+      const credentials = await api.credentials(flow);
+      const deletion = createDeletionRepository({ database: api.database });
+      if (kind === "household") {
+        await deletion.enqueueHousehold({ householdId: "home" });
+      } else {
+        await deletion.enqueueAccount({ memberId: kind === "owner" ? "owner" : "member",
+          householdId: "home", deletesHousehold: kind === "owner" });
+      }
+      assert.equal((await api.item("drill-1", credentials.access_token)).status, 401);
+      assert.equal((await api.refresh(flow, credentials.refresh_token)).body.error, "invalid_grant");
+      // Jobs and membership may disappear during cleanup, then be recreated by
+      // a later sign-in. No MCP request observes the intermediate missing data.
+      api.documents.delete("accountDeletionJobs/member");
+      api.documents.delete("accountDeletionJobs/owner");
+      api.documents.delete("householdDeletionJobs/home");
+      api.documents.set("households/home", { name: "Our Home", ownerMemberId: "owner" });
+      api.documents.set("memberships/member", { householdId: "home" });
+      assert.equal((await api.item("drill-1", credentials.access_token)).status, 401);
+      assert.equal((await api.refresh(flow, credentials.refresh_token)).body.error, "invalid_grant");
+      assert.equal((await api.item("drill-1", await api.connect())).status, 200);
+    });
+  }
+});
+
 test("each read rejects revoked connections, expired tokens, access removal, and current deletion states", async (t) => {
   const api = await fixture(t);
   const token = await api.connect();
@@ -169,7 +379,7 @@ test("foreign and malformed IDs, missing data, corrupt ancestry, and storage fai
   api.documents.set(itemPath, item);
   const originalTransaction = api.database.runTransaction;
   api.database.runTransaction = async () => { throw new Error("Storage unavailable"); };
-  assert.equal((await api.item("drill-1", token)).body.result.isError, true);
+  assert.equal((await api.item("drill-1", token)).status, 500);
   api.database.runTransaction = originalTransaction;
   assert.equal((await api.item("home", token)).body.result.structuredContent.path[0], "Our Home");
 });
@@ -177,9 +387,12 @@ test("foreign and malformed IDs, missing data, corrupt ancestry, and storage fai
 test("HTTP approval, code exchange, and complete Item Paths work with Firestore transactions", {
   skip: process.env.FIRESTORE_EMULATOR_HOST === undefined,
 }, async (t) => {
-  const database = getFirestore(initializeApp({ projectId: "demo-mystuff-search" }, "mcp-http"));
+  // Repository transactions own cleanup timing here. Keep the fixture separate
+  // from default-database background workers in the full Functions suite.
+  const database = getFirestore(initializeApp({ projectId: "demo-mystuff-search" }, "mcp-http"), "mcp-lifecycle-tests");
   t.after(async () => {
-    for (const collection of ["mcpClients", "mcpApprovals", "mcpCodes", "mcpAccessTokens", "appConnections"]) {
+    for (const collection of ["mcpClients", "mcpApprovals", "mcpCodes", "mcpAccessTokens", "mcpRefreshTokens",
+      "appConnections", "mcpMemberEpochs", "mcpHouseholdEpochs"]) {
       await database.recursiveDelete(database.collection(collection));
     }
   });
@@ -190,19 +403,47 @@ test("HTTP approval, code exchange, and complete Item Paths work with Firestore 
   const code = new URL(approved.body.redirect).searchParams.get("code");
   const exchanged = await Promise.all([api.exchange(flow, code), api.exchange(flow, code)]);
   assert.deepEqual(exchanged.map((result) => result.status).sort(), [200, 400]);
-  const token = exchanged.find((result) => result.status === 200).body.access_token;
+  const credentials = exchanged.find((result) => result.status === 200).body;
+  const token = credentials.access_token;
   assert.deepEqual((await api.item("drill-1", token)).body.result.structuredContent, {
     id: "drill-1", path: ["Our Home", "Garage", "Cabinet", "Drill"],
     name: "Drill", description: "Cordless drill",
   });
+  const renewal = await api.refresh(flow, credentials.refresh_token);
+  assert.equal(renewal.status, 200);
+  assert.equal((await api.item("drill-1", renewal.body.access_token)).status, 200);
+  const access = createHouseholdAccessModule({ database });
+  await access.removeAccess({ memberId: "owner", householdId: "home", email: "member@example.com" });
+  await database.doc("memberships/member").set({ householdId: "home" });
+  assert.equal((await api.item("drill-1", renewal.body.access_token)).status, 401);
+  assert.equal((await api.refresh(flow, renewal.body.refresh_token)).body.error, "invalid_grant");
+  const restoredFlow = await api.begin();
+  const restored = await api.credentials(restoredFlow);
+  assert.equal((await api.item("drill-1", restored.access_token)).status, 200);
+  const deletion = createDeletionRepository({ database });
+  await deletion.enqueueHousehold({ householdId: "home" });
+  await deletion.completeHousehold("home");
+  await database.doc("households/home").set({ name: "Our Home", ownerMemberId: "owner" });
+  assert.equal((await api.item("drill-1", restored.access_token)).status, 401);
+  assert.equal((await api.refresh(restoredFlow, restored.refresh_token)).body.error, "invalid_grant");
+  const currentFlow = await api.begin();
+  const current = await api.credentials(currentFlow);
+  const concurrent = await Promise.all([
+    api.refresh(currentFlow, current.refresh_token), api.refresh(currentFlow, current.refresh_token),
+  ]);
+  assert.deepEqual(concurrent.map((result) => result.status).sort(), [200, 400]);
+  assert.equal((await api.item("drill-1", concurrent.find((result) => result.status === 200).body.access_token)).status, 401);
 });
 
 async function fixture(t, firestore) {
   const documents = new Map(Object.entries({
     "memberships/member": { householdId: "home" },
+    "memberships/owner": { householdId: "home" },
     "memberships/other": { householdId: "foreign" },
     "households/home": { name: "Our Home", ownerMemberId: "owner" },
+    "households/home/access/member@example.com": { householdId: "home", memberId: "member" },
     "households/foreign": { name: "Other Home", ownerMemberId: "other" },
+    "households/foreign/items/foreign": { householdId: "foreign", name: "Other Home", parentItemId: null, description: null },
     "households/home/items/home": { householdId: "home", name: "Our Home", parentItemId: null, description: null },
     "households/home/items/garage": { householdId: "home", name: "Garage", parentItemId: "home", description: null },
     "households/home/items/cabinet": { householdId: "home", name: "Cabinet", parentItemId: "garage", description: null },
@@ -230,7 +471,7 @@ async function fixture(t, firestore) {
     database, origin, firebaseConfig: {}, now: () => time,
     authentication: {
       async verifyIdToken(token) {
-        if (!["member", "other", "outsider"].includes(token)) throw new Error("Invalid identity");
+        if (!["member", "owner", "other", "outsider"].includes(token)) throw new Error("Invalid identity");
         return { uid: token, email_verified: true, firebase: { sign_in_provider: "google.com" } };
       },
     },
@@ -251,7 +492,7 @@ async function fixture(t, firestore) {
     const registration = await request("/register", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ client_name: "Gemini CLI", redirect_uris: [callback],
-        token_endpoint_auth_method: "none", grant_types: ["authorization_code"] }),
+        token_endpoint_auth_method: "none", grant_types: ["authorization_code", "refresh_token"] }),
     });
     const params = new URLSearchParams({
       client_id: registration.body.client_id, redirect_uri: callback, response_type: "code",
@@ -277,17 +518,24 @@ async function fixture(t, firestore) {
         code_verifier: verifier, redirect_uri: callback, resource: `${origin}/mcp`, ...changes }),
     });
   }
-  async function connect(flow = undefined) {
+  async function credentials(flow = undefined, identity = "member", householdId = "home") {
     flow ??= await begin();
-    assert.equal((await approval("preview", flow)).status, 200);
-    const approved = await approval("approve", flow);
+    assert.equal((await approval("preview", flow, { identity, householdId })).status, 200);
+    const approved = await approval("approve", flow, { identity, householdId });
     assert.equal(approved.status, 200);
     const redirect = new URL(approved.body.redirect);
     assert.equal(redirect.searchParams.get("state"), "client-state");
     assert.equal(redirect.searchParams.get("iss"), `${origin}/`);
     const response = await exchange(flow, redirect.searchParams.get("code"));
     assert.equal(response.status, 200);
-    return response.body.access_token;
+    return response.body;
+  }
+  async function connect(flow) { return (await credentials(flow)).access_token; }
+  async function refresh(flow, token, changes = {}) {
+    return request("/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: token,
+        client_id: flow.clientId, resource: `${origin}/mcp`, ...changes }),
+    });
   }
   async function call(method, params = {}, token) {
     return request("/mcp", { method: "POST",
@@ -296,7 +544,7 @@ async function fixture(t, firestore) {
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
     });
   }
-  return { request, begin, approval, exchange, connect, call,
+  return { request, begin, approval, exchange, connect, credentials, refresh, call,
     item: (itemId, token, extra = {}) => call("tools/call", { name: "get_item", arguments: { itemId, ...extra } }, token),
     documents, advance: (milliseconds) => { time += milliseconds; }, database, origin };
 }
@@ -329,6 +577,11 @@ function fakeFirestore(documents) {
             documents.set(ref.path, structuredClone(value));
           }),
           delete: (ref) => writes.push(() => documents.delete(ref.path)),
+          update: (ref, value) => writes.push(() => {
+            if (!documents.has(ref.path)) throw new Error("Not found");
+            documents.set(ref.path, { ...documents.get(ref.path), ...structuredClone(value) });
+          }),
+          set: (ref, value) => writes.push(() => documents.set(ref.path, structuredClone(value))),
         });
         writes.forEach((write) => write());
         return result;

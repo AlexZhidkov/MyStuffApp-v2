@@ -1,10 +1,11 @@
 import { createHash, randomBytes } from "node:crypto";
 import {
   InvalidClientMetadataError, InvalidGrantError, InvalidRequestError,
-  InvalidScopeError, InvalidTokenError, UnsupportedGrantTypeError,
+  InvalidScopeError, InvalidTokenError,
 } from "@modelcontextprotocol/sdk/server/auth/errors.js";
-import { activeHouseholdIdForMember, isActiveHouseholdMember } from "./member-authorization.js";
+import { activeHouseholdIdForMember } from "./member-authorization.js";
 import { isDocumentId } from "./mcp-inventory.js";
+import { readConnectionGenerations, readMcpConnection } from "./mcp-connections.js";
 
 export const INVENTORY_READ_SCOPE = "inventory:read";
 const APPROVAL_LIFETIME_MS = 10 * 60 * 1000;
@@ -18,11 +19,21 @@ export function createMcpOAuth({ database, authentication, origin, now = Date.no
   const reference = (collection, secret) => database.doc(`${collection}/${digest(secret)}`);
   const pendingReference = (secret) => reference("mcpApprovals", secret);
 
-  async function currentConnection(connectionId) {
+  function issueTokens(transaction, connectionId) {
+    const token = opaque();
+    const refreshToken = opaque();
+    transaction.create(reference("mcpAccessTokens", token), {
+      connectionId, expiresAt: now() + ACCESS_LIFETIME_SECONDS * 1000, resource,
+    });
+    transaction.create(reference("mcpRefreshTokens", refreshToken), { connectionId, resource, usedAt: null });
+    return { access_token: token, refresh_token: refreshToken, token_type: "Bearer",
+      expires_in: ACCESS_LIFETIME_SECONDS, scope: INVENTORY_READ_SCOPE };
+  }
+
+  async function currentConnection(transaction, connectionId) {
     if (!isDocumentId(connectionId)) throw new InvalidTokenError("Invalid App Connection.");
-    const connection = (await database.doc(`appConnections/${connectionId}`).get()).data();
-    if (!connection || connection.revokedAt !== null ||
-        !await isActiveHouseholdMember(database, connection.memberId, connection.householdId)) {
+    const connection = await readMcpConnection(database, transaction, connectionId, now());
+    if (!connection) {
       throw new InvalidTokenError("App Connection or Household Access is unavailable.");
     }
     return connection;
@@ -136,7 +147,6 @@ export function createMcpOAuth({ database, authentication, origin, now = Date.no
     },
     async exchangeAuthorizationCode(client, code, _verifier, redirectUri, requestedResource) {
       validateResource(requestedResource);
-      const token = opaque();
       return database.runTransaction(async (transaction) => {
         const ref = reference("mcpCodes", code);
         const grant = (await transaction.get(ref)).data();
@@ -145,34 +155,53 @@ export function createMcpOAuth({ database, authentication, origin, now = Date.no
           throw new InvalidGrantError("Invalid or expired authorization code.");
         }
         // Recheck access at token exchange as well as approval and every read.
-        await currentConnection(grant.connectionId);
-        const expiresAt = now() + ACCESS_LIFETIME_SECONDS * 1000;
+        if (!await readMcpConnection(database, transaction, grant.connectionId, now())) {
+          throw new InvalidGrantError("Fresh approval is required.");
+        }
         transaction.delete(ref);
-        transaction.create(reference("mcpAccessTokens", token), {
-          connectionId: grant.connectionId, expiresAt, resource,
-        });
-        return { access_token: token, token_type: "Bearer",
-          expires_in: ACCESS_LIFETIME_SECONDS, scope: INVENTORY_READ_SCOPE };
+        return issueTokens(transaction, grant.connectionId);
       });
     },
-    async exchangeRefreshToken() {
-      // Automatic renewal is implemented in issue 03, with inactivity and
-      // permanent membership-loss invalidation as one lifecycle change.
-      throw new UnsupportedGrantTypeError("Fresh approval is required.");
+    async exchangeRefreshToken(client, refreshToken, scopes, requestedResource) {
+      validateResource(requestedResource);
+      if (scopes?.some((scope) => scope !== INVENTORY_READ_SCOPE)) {
+        throw new InvalidScopeError("Only read-only Inventory access is supported.");
+      }
+      if (!/^[\w-]{43}$/.test(refreshToken)) throw new InvalidGrantError("Invalid refresh token.");
+      const tokens = await database.runTransaction(async (transaction) => {
+        const ref = reference("mcpRefreshTokens", refreshToken);
+        const grant = (await transaction.get(ref)).data();
+        if (!grant || grant.resource !== resource) throw new InvalidGrantError("Invalid refresh token.");
+        const connection = await readMcpConnection(database, transaction, grant.connectionId, now());
+        if (!connection) throw new InvalidGrantError("Fresh approval is required.");
+        if (connection.clientId !== client.client_id) throw new InvalidGrantError("Invalid refresh token.");
+        if (grant.usedAt !== null) {
+          transaction.update(database.doc(`appConnections/${grant.connectionId}`), { revokedAt: now() });
+          return null;
+        }
+        transaction.update(ref, { usedAt: now() });
+        return issueTokens(transaction, grant.connectionId);
+      });
+      // Throw after commit so replay invalidation is not rolled back.
+      if (!tokens) throw new InvalidGrantError("Refresh token was reused. Fresh approval is required.");
+      return tokens;
     },
     async verifyAccessToken(token) {
       if (!/^[\w-]{43}$/.test(token)) throw new InvalidTokenError("Invalid access token.");
-      const record = (await reference("mcpAccessTokens", token).get()).data();
-      if (!record || record.expiresAt <= now() || record.resource !== resource) {
-        throw new InvalidTokenError("Invalid or expired access token.");
-      }
-      const connection = await currentConnection(record.connectionId);
-      return {
-        token, clientId: connection.clientId, scopes: [INVENTORY_READ_SCOPE],
-        expiresAt: record.expiresAt / 1000, resource: new URL(resource),
-        extra: { connectionId: record.connectionId, memberId: connection.memberId,
-          householdId: connection.householdId },
-      };
+      return database.runTransaction(async (transaction) => {
+        const record = (await transaction.get(reference("mcpAccessTokens", token))).data();
+        if (!record || record.expiresAt <= now() || record.resource !== resource) {
+          throw new InvalidTokenError("Invalid or expired access token.");
+        }
+        const connection = await currentConnection(transaction, record.connectionId);
+        transaction.update(database.doc(`appConnections/${record.connectionId}`), { lastUsedAt: now() });
+        return {
+          token, clientId: connection.clientId, scopes: [INVENTORY_READ_SCOPE],
+          expiresAt: record.expiresAt / 1000, resource: new URL(resource),
+          extra: { connectionId: record.connectionId, memberId: connection.memberId,
+            householdId: connection.householdId },
+        };
+      });
     },
   };
 
@@ -199,8 +228,15 @@ export function createMcpOAuth({ database, authentication, origin, now = Date.no
             request.body.householdId !== pending.householdId) {
           throw new InvalidRequestError("Review and approve the named Household first.");
         }
+        const reader = { doc: (path) => ({ get: () => transaction.get(database.doc(path)) }) };
+        if (await activeHouseholdIdForMember(reader, identity.memberId) !== identity.householdId) {
+          throw new InvalidTokenError("Household Access is unavailable.");
+        }
+        const generations = await readConnectionGenerations(
+          database, transaction, identity.memberId, identity.householdId,
+        );
         transaction.create(database.doc(`appConnections/${connectionId}`), {
-          ...identity, clientId: pending.clientId, clientName: pending.clientName,
+          ...identity, ...generations, clientId: pending.clientId, clientName: pending.clientName,
           scope: INVENTORY_READ_SCOPE, createdAt: now(), lastUsedAt: now(), revokedAt: null,
         });
         transaction.create(reference("mcpCodes", code), {

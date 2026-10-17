@@ -186,6 +186,7 @@ function fakeDatabase(initialDocuments) {
         create(reference, data) { writes.push(() => documents.set(reference.path, data)); },
         update(reference, data) { writes.push(() => documents.set(reference.path, { ...documents.get(reference.path), ...data })); },
         delete(reference) { writes.push(() => documents.delete(reference.path)); },
+        set(reference, data) { writes.push(() => documents.set(reference.path, data)); },
       };
       const result = await work(transaction);
       writes.forEach((write) => write());

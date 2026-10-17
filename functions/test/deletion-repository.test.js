@@ -54,6 +54,9 @@ function fakeDatabase(initialDocuments) {
         create(reference, data) {
           writes.push(() => documents.set(reference.path, data));
         },
+        set(reference, data) {
+          writes.push(() => documents.set(reference.path, data));
+        },
         update(reference, data) {
           writes.push(() => documents.set(reference.path, {
             ...documents.get(reference.path),

@@ -8,7 +8,9 @@ connection and verified Item details on Gemini web and Android with the existing
 deployed server. Issue 03 is implemented and verified locally, including renewal
 with the real installed Gemini CLI; its lifecycle changes have not been deployed.
 Issue 04 adds Connected apps management and has passed the local real Gemini CLI
-revocation check; its changes have not been deployed. Issues 05–08 have not been
+revocation check; its changes have not been deployed. Issue 05 adds root-based
+Child Item browsing and has passed local Firestore and real installed Gemini CLI
+pagination checks; its changes have not been deployed. Issues 06–08 have not been
 implemented.
 
 ## Purpose and scope

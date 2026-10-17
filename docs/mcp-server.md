@@ -1,11 +1,39 @@
-# MyStuff MCP: Item details
+# MyStuff MCP: Inventory reads
 
 The shared server URL is `https://mystuff-ai-app.web.app/mcp`.
+Issue 05's browsing changes and the issue 03/04 lifecycle changes have passed
+local verification and require deployment. The live-client acceptance records
+below describe the earlier issue 01/02 deployment.
 It serves synced Firestore Inventory independently of Android. Unsynced phone
-changes are unavailable. The only tool in issue 01 is `get_item`, with the input
+changes are unavailable. The `get_item` tool takes the input
 `{"itemId":"<stable Item ID>"}`. It returns `id`, `path` (the ordered names from
 Household root through the Item), `name`, and `description`. A deliberately empty
 Description is `null`; missing or corrupt Item/ancestor data is a tool error.
+
+The `list_children` tool starts at the approved Household root with `{}`. It
+returns `parentItemId`, `items` (each containing only `id` and `name`), and
+`nextCursor` (a continuation marker or `null` when complete). To explore the next
+level, pass `{"parentItemId":"<returned Child Item ID>"}`. Each call returns
+direct Child Items only, with at most 20 Items. Continue with the same
+`parentItemId` and `{"cursor":"<nextCursor>"}`; root requests can keep omitting
+`parentItemId` on subsequent pages.
+
+Order matches Android's `Inventory.childrenOf`: siblings start in Firestore's
+[default ascending document-ID order](https://firebase.google.com/docs/firestore/query-data/order-limit-data),
+then sort by `displayOrder`, substituting the sibling's original index for a
+missing/null position and breaking ties by that index. The server reads all
+direct siblings to preserve this fallback behavior, then returns one page.
+Pagination guarantees a complete listing for a fixed Inventory; restart from the
+first page if Items are added, deleted, moved, or reordered during browsing.
+
+Continuation markers are random opaque values. Their SHA-256-keyed records in
+`mcpChildCursors` hold the server-controlled offset and bind it to one App
+Connection, approved Household, and Parent Item. Client-supplied page sizes and
+offsets cannot change the 20-Item limit. Every page rechecks current connection
+and Household authorization and reads the Parent Item's ancestry and returned
+Items' deletion states in the same Firestore transaction. Invalid markers,
+missing Items, and unavailable Inventory return errors; a valid empty list
+succeeds. Listings exclude Descriptions, Tags, URLs, Photos, and Attachments.
 
 ## Hosting and configuration
 
@@ -235,6 +263,40 @@ Existing access-only credentials cannot acquire a refresh token; those clients
 need one fresh approval to obtain renewal credentials.
 
 ## Verification record
+
+### 17 October 2026 — root browsing and Child Item pagination
+
+The installed Gemini CLI 0.64.0 discovered `get_item` and `list_children` against
+an isolated local HTTP server using real Firestore-emulator transactions. Its
+actual `gemini mcp list` command reported the connection connected. Its installed
+OAuth provider and Streamable HTTP transport then read all 41 synced direct
+Child Items at the root in pages of **20, 20, and 1**, preserving stable IDs and
+shared order, and followed a returned ID into nested Child Items. Removing
+Household Access stopped the next continuation request.
+
+This check used synthetic Inventory stored in the emulator, isolated temporary
+CLI settings, and synthetic approvals. It did not deploy issue 05 or use live
+Member Inventory. The HTTP suite also verifies duplicate names, mixed missing/
+null/tied ordering, 0/1/19/20/21/40/41 boundaries, marker tampering, foreign
+Households and connections, mismatched Parents, revocation, all relevant
+deletion states, and corrupt/unavailable data. All 45 targeted HTTP tests passed.
+
+Reproduce with Node 22 and the installed bundle described below:
+
+```bash
+GEMINI_CLI_BUNDLE=/path/to/gemini-cli/bundle/chunk-exporting-createTransport.js \
+  firebase emulators:exec --only firestore --project demo-mystuff-search \
+  'node --test functions/test/mcp-http.test.js'
+```
+
+JavaScript has no configured type-checking task; the changed source and test
+files pass Node's syntax checks. Final validation passed all **102 backend
+tests** with all emulators and installed CLI checks enabled (no skips), all
+**50 Firestore/Storage rules tests**, and the **210 Android unit tests** and
+Kotlin compilation (`./gradlew test`, up-to-date). Standards and Spec reviews
+against starting commit `24dca877760b7bd0ae4df20a90298b7445fd5daa` found no
+actionable issues on either axis.
+
 
 ### 17 October 2026 — individual connection management
 

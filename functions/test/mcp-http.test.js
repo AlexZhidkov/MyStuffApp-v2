@@ -15,6 +15,163 @@ const verifier = "a".repeat(64);
 const challenge = createHash("sha256").update(verifier).digest("base64url");
 const callback = "http://localhost:32145/oauth/callback";
 
+test("clients browse from the approved Household root into direct Child Items with stable IDs", async (t) => {
+  const api = await fixture(t);
+  const token = await api.connect();
+  const tools = (await api.call("tools/list", {}, token)).body.result.tools;
+  assert.equal(tools.find((tool) => tool.name === "list_children")?.annotations.readOnlyHint, true);
+  const root = await api.children({}, token);
+  assert.deepEqual(root.body.result.structuredContent, {
+    parentItemId: "home", items: [{ id: "garage", name: "Garage" }], nextCursor: null,
+  });
+  const nested = await api.children({ parentItemId: "garage" }, token);
+  assert.deepEqual(nested.body.result.structuredContent, {
+    parentItemId: "garage", items: [{ id: "cabinet", name: "Cabinet" }], nextCursor: null,
+  });
+  const duplicates = await api.children({ parentItemId: "cabinet" }, token);
+  assert.deepEqual(duplicates.body.result.structuredContent, {
+    parentItemId: "cabinet", items: [{ id: "drill-2", name: "Drill" }, { id: "drill-1", name: "Drill" }], nextCursor: null,
+  });
+  assert.deepEqual(JSON.parse(duplicates.body.result.content[0].text), duplicates.body.result.structuredContent);
+  assert.deepEqual((await api.children({ parentItemId: "drill-1" }, token)).body.result.structuredContent, {
+    parentItemId: "drill-1", items: [], nextCursor: null,
+  });
+});
+
+test("a fixed Inventory lists every Child Item once across pages of at most 20", async (t) => {
+  const api = await fixture(t);
+  const token = await api.connect();
+  // Reverse insertion ensures paging follows the shared order, not insertion.
+  await seedChildren(api, 41);
+  const ids = [];
+  const sizes = [];
+  let cursor;
+  do {
+    const response = await api.children({ parentItemId: "drill-1", ...(cursor ? { cursor } : {}) }, token);
+    assert.equal(response.body.result.isError, undefined);
+    const page = response.body.result.structuredContent;
+    assert.equal(page.parentItemId, "drill-1");
+    sizes.push(page.items.length);
+    ids.push(...page.items.map((item) => item.id));
+    cursor = page.nextCursor;
+    if (cursor !== null) assert.equal(typeof cursor, "string");
+    assert.ok(sizes.length <= 3, "listing must terminate");
+  } while (cursor !== null);
+  assert.deepEqual(sizes, [20, 20, 1]);
+  assert.deepEqual(ids, Array.from({ length: 41 }, (_, index) => `child-${index}`));
+});
+
+test("Child Item order matches Android's missing-position and tied-position rules", async (t) => {
+  const api = await fixture(t);
+  const token = await api.connect();
+  for (const [id, order] of [["f", undefined], ["e", 1], ["d", -1], ["c", 0], ["b", null], ["a", undefined]]) {
+    await api.seed(`households/home/items/${id}`, {
+      householdId: "home", parentItemId: "drill-1", name: "Same name",
+      ...(order !== undefined ? { displayOrder: order } : {}),
+    });
+  }
+  const page = (await api.children({ parentItemId: "drill-1" }, token)).body.result.structuredContent;
+  // Android: missing order = sibling index in the ID-ordered snapshot; ties = that index.
+  assert.deepEqual(page.items.map((item) => item.id), ["d", "a", "c", "b", "e", "f"]);
+});
+
+test("Child Item page boundaries give a marker only when more Items remain", async (t) => {
+  for (const count of [0, 1, 19, 20, 21, 40]) {
+    await t.test(`${count} children`, async (t) => {
+      const api = await fixture(t);
+      await seedChildren(api, count);
+      const token = await api.connect();
+      const first = (await api.children({ parentItemId: "drill-1" }, token)).body.result.structuredContent;
+      assert.equal(first.items.length, Math.min(count, 20));
+      assert.equal(first.nextCursor === null, count <= 20);
+      if (count > 20) {
+        const second = (await api.children({ parentItemId: "drill-1", cursor: first.nextCursor }, token)).body.result.structuredContent;
+        assert.equal(second.items.length, count - 20);
+        assert.equal(second.nextCursor, null);
+      }
+    });
+  }
+});
+
+test("continuation markers cannot change Parent Item, connection, Household, or page limit", async (t) => {
+  const api = await fixture(t);
+  await seedChildren(api, 41, "home");
+  await seedChildren(api, 21, "foreign", "foreign");
+  const token = await api.connect();
+  const otherConnection = await api.connect();
+  const foreignToken = (await api.credentials(undefined, "other", "foreign")).access_token;
+  const first = (await api.children({}, token)).body.result.structuredContent;
+  const cursor = first.nextCursor;
+  assert.equal(first.items.length, 20);
+  const foreign = (await api.children({}, foreignToken)).body.result.structuredContent;
+  assert.equal(foreign.parentItemId, "foreign");
+  const altered = `${cursor[0] === "a" ? "b" : "a"}${cursor.slice(1)}`;
+  for (const [arguments_, credential] of [
+    [{ cursor: altered }, token], [{ cursor: "" }, token], [{ cursor: "../foreign" }, token],
+    [{ cursor, parentItemId: "garage" }, token], [{ cursor }, otherConnection], [{ cursor }, foreignToken],
+    [{ cursor: foreign.nextCursor }, token], [{ parentItemId: "private" }, token],
+    [{ parentItemId: "foreign" }, token], [{ parentItemId: "../foreign" }, token],
+  ]) {
+    const response = await api.children(arguments_, credential);
+    assert.equal(response.body.result.isError, true);
+    assert.equal(response.body.result.structuredContent, undefined);
+    assert.doesNotMatch(JSON.stringify(response.body), /Private Item|Other Home/);
+  }
+  const continued = (await api.children({ cursor, parentItemId: "home", householdId: "foreign",
+    pageSize: 1000, limit: 1000, offset: 0 }, token)).body.result.structuredContent;
+  assert.equal(continued.parentItemId, "home");
+  assert.equal(continued.items.length, 20);
+  assert.equal(continued.items[0].id, "child-20");
+  const replay = (await api.children({ cursor }, token)).body.result.structuredContent;
+  assert.deepEqual(replay.items, continued.items);
+});
+
+test("each continuation rechecks App Connection, Household Access, and deletion states", async (t) => {
+  for (const change of ["revocation", "access", "account deletion", "owner deletion", "Household deletion"]) {
+    await t.test(change, async (t) => {
+      const api = await fixture(t);
+      await seedChildren(api, 21);
+      const token = await api.connect();
+      const first = (await api.children({ parentItemId: "drill-1" }, token)).body.result.structuredContent;
+      if (change === "revocation") {
+        const connection = [...api.documents].find(([path]) => path.startsWith("appConnections/"))[1];
+        connection.revokedAt = Date.now();
+      } else if (change === "access") api.documents.delete("memberships/member");
+      else {
+        const path = { "account deletion": "accountDeletionJobs/member", "owner deletion": "accountDeletionJobs/owner",
+          "Household deletion": "householdDeletionJobs/home" }[change];
+        api.documents.set(path, { status: "pending" });
+      }
+      const response = await api.children({ parentItemId: "drill-1", cursor: first.nextCursor }, token);
+      assert.equal(response.status, 401);
+      assert.equal(response.body.result, undefined);
+    });
+  }
+});
+
+test("missing, deleted, corrupt, and unavailable Inventory returns listing errors", async (t) => {
+  for (const change of ["missing Parent", "missing ancestor", "deleted Parent", "deleted ancestor", "deleted Child",
+    "corrupt Child", "corrupt order", "storage failure"]) {
+    await t.test(change, async (t) => {
+      const api = await fixture(t);
+      await seedChildren(api, 21);
+      const token = await api.connect();
+      const first = (await api.children({ parentItemId: "drill-1" }, token)).body.result.structuredContent;
+      if (change === "missing Parent") api.documents.delete("households/home/items/drill-1");
+      if (change === "missing ancestor") api.documents.delete("households/home/items/cabinet");
+      if (change === "deleted Parent") api.documents.set("households/home/itemDeletionJobs/drill-1", {});
+      if (change === "deleted ancestor") api.documents.set("households/home/itemDeletionJobs/garage", {});
+      if (change === "deleted Child") api.documents.set("households/home/itemDeletionJobs/child-20", {});
+      if (change === "corrupt Child") api.documents.get("households/home/items/child-20").householdId = "foreign";
+      if (change === "corrupt order") api.documents.get("households/home/items/child-20").displayOrder = "20";
+      if (change === "storage failure") api.database.collection = () => { throw new Error("Storage unavailable"); };
+      const response = await api.children({ parentItemId: "drill-1", cursor: first.nextCursor }, token);
+      assert.equal(response.body.result.isError, true);
+      assert.equal(response.body.result.structuredContent, undefined);
+    });
+  }
+});
+
 test("a Member approves one named Household and reads only its synced Item fields", async (t) => {
   const api = await fixture(t);
   const flow = await api.begin();
@@ -27,7 +184,7 @@ test("a Member approves one named Household and reads only its synced Item field
   });
   const token = await api.connect(flow);
   const tools = await api.call("tools/list", {}, token);
-  assert.deepEqual(tools.body.result.tools.map((tool) => tool.name), ["get_item"]);
+  assert.deepEqual(tools.body.result.tools.map((tool) => tool.name), ["get_item", "list_children"]);
   assert.equal(tools.body.result.tools[0].annotations.readOnlyHint, true);
   const item = await api.item("drill-1", token);
   assert.deepEqual(item.body.result.structuredContent, {
@@ -157,7 +314,7 @@ test("the installed Gemini CLI transport automatically renews and reads an Item"
   t.after(() => client.close());
   await client.connect(transport);
   const tools = await client.listTools();
-  assert.deepEqual(tools.tools.map((tool) => tool.name), ["get_item"]);
+  assert.deepEqual(tools.tools.map((tool) => tool.name), ["get_item", "list_children"]);
   const item = await client.callTool({ name: "get_item", arguments: { itemId: "drill-1" } });
   assert.equal(item.structuredContent.id, "drill-1");
   const saved = await storage.getCredentials("mystuff-renewal");
@@ -414,6 +571,62 @@ test("HTTP approval, code exchange, and complete Item Paths work with Firestore 
   assert.equal((await api.item("drill-1", concurrent.find((result) => result.status === 200).body.access_token)).status, 401);
 });
 
+test("the installed Gemini CLI browses all 41 synced root children through Firestore-backed pages", {
+  skip: process.env.FIRESTORE_EMULATOR_HOST === undefined || process.env.GEMINI_CLI_BUNDLE === undefined,
+}, async (t) => {
+  const database = getFirestore(initializeApp({ projectId: "demo-mystuff-search" }, "mcp-browse"), "mcp-browse-tests");
+  t.after(async () => {
+    for (const collection of ["mcpClients", "mcpApprovals", "mcpCodes", "mcpAccessTokens", "mcpRefreshTokens",
+      "appConnections", "mcpChildCursors"]) {
+      await database.recursiveDelete(database.collection(collection));
+    }
+  });
+  const api = await fixture(t, database);
+  await seedChildren(api, 40, "home");
+  // The existing Garage is the 41st direct Child Item, with a missing order.
+  const flow = await api.begin();
+  const credentials = await api.credentials(flow);
+  const gemini = await isolatedGeminiCli(t);
+  await gemini.storage.saveToken("mystuff-browse", {
+    accessToken: credentials.access_token, refreshToken: credentials.refresh_token,
+    tokenType: "Bearer", scope: "inventory:read", expiresAt: Date.now() + 3600000,
+  }, flow.clientId, `${api.origin}/token`, `${api.origin}/mcp`);
+  await gemini.configure({ "mystuff-browse": { httpUrl: `${api.origin}/mcp` } });
+  assert.match(await gemini.list(), /mystuff-browse[^\n]*Connected/);
+  const transport = await gemini.createTransport("mystuff-browse", { httpUrl: `${api.origin}/mcp` }, false, {
+    emitMcpDiagnostic() {}, sanitizationConfig: {},
+  });
+  const client = new Client({ name: "mystuff-browse-verification", version: "1.0.0" });
+  t.after(() => client.close());
+  await client.connect(transport);
+  assert.ok((await client.listTools()).tools.some((tool) => tool.name === "list_children"));
+  const ids = [];
+  const sizes = [];
+  let cursor;
+  do {
+    const result = await client.callTool({ name: "list_children", arguments: cursor ? { cursor } : {} });
+    assert.equal(result.isError, undefined);
+    const page = result.structuredContent;
+    assert.deepEqual(JSON.parse(result.content[0].text), page);
+    assert.equal(page.parentItemId, "home");
+    assert.ok(page.items.every((item) => Object.keys(item).sort().join(",") === "id,name"));
+    sizes.push(page.items.length);
+    ids.push(...page.items.map((item) => item.id));
+    cursor = page.nextCursor;
+    assert.ok(sizes.length <= 3);
+  } while (cursor !== null);
+  assert.deepEqual(sizes, [20, 20, 1]);
+  assert.deepEqual(ids, [...Array.from({ length: 40 }, (_, index) => `child-${index}`), "garage"]);
+  const nested = await client.callTool({ name: "list_children", arguments: { parentItemId: ids.at(-1) } });
+  assert.deepEqual(nested.structuredContent, {
+    parentItemId: "garage", items: [{ id: "cabinet", name: "Cabinet" }], nextCursor: null,
+  });
+  const first = await client.callTool({ name: "list_children", arguments: {} });
+  await database.doc("memberships/member").delete();
+  await assert.rejects(client.callTool({ name: "list_children", arguments: { cursor: first.structuredContent.nextCursor } }));
+  t.diagnostic("Gemini CLI discovered list_children and read 41 synced root children in pages of 20, 20, 1; nested browsing and access-loss rejection passed.");
+});
+
 async function fixture(t, firestore) {
   const documents = new Map(Object.entries({
     "memberships/member": { householdId: "home" },
@@ -524,16 +737,36 @@ async function fixture(t, firestore) {
     });
   }
   return { request, begin, approval, exchange, connect, credentials, refresh, call,
+    seed: async (path, data) => {
+      documents.set(path, data);
+      if (firestore) await firestore.doc(path).set(data);
+    },
+    children: (arguments_, token) => call("tools/call", { name: "list_children", arguments: arguments_ }, token),
     item: (itemId, token, extra = {}) => call("tools/call", { name: "get_item", arguments: { itemId, ...extra } }, token),
     documents, advance: (milliseconds) => { time += milliseconds; }, database, origin };
+}
+
+async function seedChildren(api, count, parentItemId = "drill-1", householdId = "home") {
+  for (let index = count - 1; index >= 0; index--) {
+    await api.seed(`households/${householdId}/items/child-${index}`, {
+      householdId, parentItemId, name: "Duplicate", description: null, displayOrder: index,
+    });
+  }
 }
 
 // Firebase Admin SDK is the external boundary. No MCP or authorization module
 // is mocked: every request traverses Express, OAuth handlers, and the MCP SDK.
 function fakeFirestore(documents) {
   let queue = Promise.resolve();
-  const snapshot = (path) => ({ exists: documents.has(path), data: () => structuredClone(documents.get(path)) });
+  const snapshot = (path) => ({ id: path.split("/").at(-1), exists: documents.has(path),
+    data: () => structuredClone(documents.get(path)) });
   const database = {
+    collection(path) {
+      return { path, where: (field, operator, value) => {
+        assert.equal(operator, "==");
+        return { path, field, value };
+      } };
+    },
     doc(path) {
       return { path, get: async () => snapshot(path),
         create: async (data) => {
@@ -550,7 +783,11 @@ function fakeFirestore(documents) {
       const next = queue.then(async () => {
         const writes = [];
         const result = await operation({
-          get: async (ref) => snapshot(ref.path),
+          get: async (ref) => ref.field ? {
+            docs: [...documents.keys()].filter((path) => path.startsWith(`${ref.path}/`) &&
+              !path.slice(ref.path.length + 1).includes("/") && documents.get(path)[ref.field] === ref.value)
+              .sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b))).map(snapshot),
+          } : snapshot(ref.path),
           create: (ref, value) => writes.push(() => {
             if (documents.has(ref.path)) throw new Error("Already exists");
             documents.set(ref.path, structuredClone(value));

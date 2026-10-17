@@ -6,7 +6,7 @@ import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middlew
 import { OAuthError, ServerError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import { z } from "zod";
 import { createMcpOAuth, INVENTORY_READ_SCOPE } from "./mcp-oauth.js";
-import { readMcpItem } from "./mcp-inventory.js";
+import { listMcpChildren, readMcpItem } from "./mcp-inventory.js";
 
 export function createMcpApp({ database, authentication, origin, firebaseConfig, now, logger = console }) {
   const canonicalOrigin = new URL(origin);
@@ -87,6 +87,19 @@ export function createMcpApp({ database, authentication, origin, firebaseConfig,
         return { content: [{ type: "text", text: JSON.stringify(item) }], structuredContent: item };
       } catch {
         return { isError: true, content: [{ type: "text", text: "Item or Inventory data is unavailable. Check the Item ID and current Household Access." }] };
+      }
+    });
+    server.registerTool("list_children", {
+      title: "List Child Items",
+      description: "List up to 20 direct Child Item names and stable IDs in shared order. Omit parentItemId to start at the approved Household root. Pass nextCursor as cursor with the same parentItemId to continue; null means complete. Follow Child Item IDs to browse deeper.",
+      inputSchema: { parentItemId: z.string().optional(), cursor: z.string().optional() },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    }, async (arguments_) => {
+      try {
+        const page = await listMcpChildren(database, request.auth.extra.connectionId, arguments_, now);
+        return { content: [{ type: "text", text: JSON.stringify(page) }], structuredContent: page };
+      } catch {
+        return { isError: true, content: [{ type: "text", text: "Child Items or Inventory data is unavailable. Check the Parent Item ID, continuation marker, and current Household Access." }] };
       }
     });
     // Stateless JSON responses work across cold starts and instances, and fit

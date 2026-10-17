@@ -75,12 +75,12 @@ registration supply the remaining setup; no Member token or client secret needs
 to be copied by hand. The CLI must be able to receive the localhost browser
 callback. Registered loopback callbacks permit an ephemeral port.
 
-## Connect Gemini Custom apps (verification pending)
+## Connect Gemini Custom apps
 
-Issue 02 requires a real connection and Item read in both Gemini web and Android.
-The Member has supplied screenshots of Custom app tool discovery and a successful
-Gemini web Item read. Android verification and explicit confirmation of the
-sign-in/Household approval steps remain pending.
+**Real Gemini web and Android acceptance passed on 17 October 2026.** The Member
+supplied screenshots of Custom app tool discovery and a successful Gemini web
+Item read, then confirmed the same read worked in the real Gemini Android app
+and that setup showed Google sign-in and read-only approval naming the Household.
 
 [Google's Custom app guide](https://support.google.com/gemini/answer/17209137)
 currently describes setup on Gemini web and subsequent use on web and mobile.
@@ -92,33 +92,21 @@ MyStuff Account and active Household Access.
 
 1. On Gemini web, open Settings → Connected Apps (possibly under Personal
    Intelligence), then Custom apps → Add a custom app.
-2. Enter `https://mystuff-ai-app.web.app/mcp` and select Next. Start with only the
-   URL: MyStuff advertises dynamic client registration. Record any additional
-   fields Gemini actually requires and any error before changing server behavior.
+2. Enter `https://mystuff-ai-app.web.app/mcp` and select Next. MyStuff advertises
+   dynamic client registration; no additional credentials were reported as needed
+   in the successful setup.
    Enter the URL in Gemini's dialog, rather than the browser address bar. Opening
    it directly returns `invalid_token` / `Missing Authorization header`, because
    the MCP endpoint requires a token obtained through the connection flow.
 3. Complete browser Google sign-in with the identity already used for MyStuff.
    Review the application and named Household, then approve read-only access.
-   Record whether the browser callback returns successfully to Gemini.
-4. In a new web chat, select the custom app with `@` and ask it to use `get_item`
+   Save the custom app when Gemini lists `get_item`, then select **Connect**.
+4. In a new web chat, select `@Mystuff` (or the name chosen during setup) and use `get_item`
    for a known synced stable Item ID. Verify the actual tool result contains only
    `id`, `path`, `name`, and `description`, including the complete Item Path.
 5. In the real Gemini Android app, using the same Google Account, select the
    connected custom app and repeat the read for the same ID. Confirm the same
    four fields and complete Item Path. Browser mobile emulation is insufficient.
-6. In separate setup attempts, cancel MyStuff approval and try an identity
-   without an existing MyStuff Account/active Household Access. Neither may
-   obtain usable Inventory access. Do not remove live Household Access for this
-   check. Repeat the CLI read after any server compatibility changes.
-
-Record the date, browser/version, Android Gemini version and device/OS, actual
-setup fields, approval/callback outcome, and each client's tool-read outcome in
-issue 02. Keep credentials, authorization codes, callback query strings, and
-private Item text out of the record. Log any failure by stage (discovery,
-registration, sign-in, approval, callback, exchange, initialization, or tool call)
-and add regression coverage at the existing public HTTP seam for reproducible
-server fixes.
 
 On 17 October 2026, live HTTPS checks confirmed authorization-server metadata and
 protected-resource metadata returned 200, and an unauthenticated MCP initialize
@@ -130,11 +118,18 @@ supplied screenshots from the actual Gemini flow: **Save your custom app** liste
 `@Mystuff` returned Item `0EIdCsUofAOEy4r5xgar`, a five-level Item Path, its name,
 and an empty Description. No private Item text is copied here.
 
-This establishes tool discovery and the real web read. Browser/version,
-Android client details and read outcome, explicit confirmation of Google
-sign-in and named-Household approval, and any additional setup fields still
-need recording. The screenshots do not expose the individual OAuth requests.
-No server compatibility changes or new deployment were needed for the web read.
+The Android read and sign-in/Household approval are verified by the Member's
+explicit confirmation. Exact browser, Gemini Android version, device, and OS
+were not supplied. Individual OAuth requests were not captured, and no additional
+setup requirements were reported.
+
+The existing public HTTP suite covers denied approval, ineligible identities,
+and the approved-Household boundary; the full backend emulator suite passed in
+this session. These negative cases were not repeated in the live Gemini clients.
+No server compatibility changes or new deployment were needed. The successful
+Gemini CLI check from 16 October used this same deployed implementation; no fresh
+CLI read was performed during issue 02. No compatibility-fix regression tests
+were needed because the server implementation did not change.
 
 ## Authorization and storage
 
@@ -213,7 +208,8 @@ was offline, the CLI successfully called `get_item` for synced Item
 `0EIdCsUofAOEy4r5xgar`. The response contained `id`, `path`, `name`, and
 `description`, with five names in the complete Item Path. No private Item text
 or credentials are included in this record. This completes issue 01's real-client
-check; Gemini web/Android and the remaining capabilities belong to later issues.
+check. Issue 02's Gemini web/Android acceptance is recorded above; the remaining
+capabilities belong to issues 03–08.
 
 An earlier attempt with Gemini CLI 0.50.0 stopped at the CLI's own Code Assist
 model login, before MyStuff approval. Its sign-in rejection was resolved for

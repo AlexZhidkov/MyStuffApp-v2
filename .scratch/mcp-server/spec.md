@@ -3,7 +3,9 @@
 Design confirmed after review; ready for implementation.
 Issue 01 is implemented: the HTTP MCP server is deployed, backend tests pass,
 and real Gemini CLI OAuth and Item details work with the Member's phone offline.
-The other issues have not been implemented.
+Issue 02 is implemented: the Member completed the actual Gemini Custom app
+connection and verified Item details on Gemini web and Android with the existing
+deployed server. Issues 03–08 have not been implemented.
 
 ## Purpose and scope
 

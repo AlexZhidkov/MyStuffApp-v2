@@ -47,7 +47,7 @@ let itemDeletionHandlers;
 let deletionHandlers;
 let mcpApp;
 
-export const mcp = onRequest({ ...runtimeOptions, invoker: "public" }, (request, response) => {
+export const mcp = onRequest({ ...geminiRuntimeOptions, invoker: "public" }, (request, response) => {
   mcpApp ??= createMcpApp({
     database: getFirestore(), authentication: getAuth(), origin: MCP_ORIGIN.value(),
     firebaseConfig: {
@@ -55,19 +55,23 @@ export const mcp = onRequest({ ...runtimeOptions, invoker: "public" }, (request,
       projectId: process.env.GCLOUD_PROJECT,
       authDomain: `${process.env.GCLOUD_PROJECT}.firebaseapp.com`,
     },
+    embedder: { embedQuery: (text) => getSearchEmbedder().embedQuery(text) },
     logger,
   });
   return mcpApp(request, response);
 });
 
-function getHandlers() {
-  if (handlers !== undefined) return handlers;
-  const embedder = emulator
+function getSearchEmbedder() {
+  return emulator
     ? createDeterministicEmbedder()
     : createGeminiEmbedder(new GoogleGenAI({ apiKey: GEMINI_API_KEY.value() }));
+}
+
+function getHandlers() {
+  if (handlers !== undefined) return handlers;
   const searchModule = createSearchModule({
     repository: createFirestoreSearchRepository(getFirestore()),
-    embedder,
+    embedder: getSearchEmbedder(),
   });
   handlers = createSearchHandlers({ searchModule, logger });
   return handlers;

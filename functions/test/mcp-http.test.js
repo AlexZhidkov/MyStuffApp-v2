@@ -7,7 +7,9 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { initializeApp } from "firebase-admin/app";
-import { getFirestore } from "firebase-admin/firestore";
+import { FieldValue, getFirestore } from "firebase-admin/firestore";
+import { GoogleGenAI } from "@google/genai";
+import { createGeminiEmbedder } from "../src/gemini-embedder.js";
 import { createMcpApp } from "../src/mcp-app.js";
 import { createHouseholdAccessModule } from "../src/household-access-module.js";
 import { createDeletionRepository } from "../src/deletion-repository.js";
@@ -15,6 +17,149 @@ import { createDeletionRepository } from "../src/deletion-repository.js";
 const verifier = "a".repeat(64);
 const challenge = createHash("sha256").update(verifier).digest("base64url");
 const callback = "http://localhost:32145/oauth/callback";
+
+test("conceptual Search finds Clock for watch through authenticated MCP HTTP", async (t) => {
+  const api = await fixture(t, undefined, { async embedQuery(text) {
+    assert.equal(text, "task: search result | query: watch");
+    return [1, 0];
+  } });
+  api.database.candidates = ["clock"];
+  await api.seed("households/home/items/clock", {
+    householdId: "home", parentItemId: "cabinet", name: "Clock", tags: [], description: "Tells time",
+  });
+  const token = await api.connect();
+  assert.deepEqual((await api.search({ query: " \u001cwatch\u001f " }, token)).body.result.structuredContent, {
+    literalOnlyFallback: false,
+    items: [{ id: "clock", name: "Clock", description: "Tells time", path: ["Our Home", "Garage", "Cabinet", "Clock"] }],
+    nextCursor: null,
+  });
+});
+
+test("conceptual Search agrees with shared Android eligibility, merging, empty-success, fallback, and pagination fixtures", async (t) => {
+  const rows = (await readFile(new URL("../../app/src/test/resources/conceptual-search-queries.tsv", import.meta.url), "utf8"))
+    .trimEnd().split("\n").slice(1).map((line) => line.split("\t"));
+  for (const [name, query, eligible, outcome, candidates, expectedIds] of rows) {
+    await t.test(name, async (t) => {
+      let requests = 0;
+      const api = await fixture(t, undefined, { async embedQuery() {
+        requests++;
+        if (outcome === "failure") throw new Error("Controlled provider failure");
+        return [1, 0];
+      } });
+      for (const path of [...api.documents.keys()]) {
+        if (path.startsWith("households/home/items/")) api.documents.delete(path);
+      }
+      const items = (await readFile(new URL("../../app/src/test/resources/literal-search-items.tsv", import.meta.url), "utf8"))
+        .trimEnd().split("\n").slice(1).map((line) => line.split("\t"));
+      for (const [id, parentItemId, name, tags, description] of items) {
+        await api.seed(`households/home/items/${id}`, {
+          householdId: "home", parentItemId: parentItemId === "-" ? null : parentItemId, name,
+          tags: tags === "-" ? [] : tags.split("|"), description: description === "-" ? null : description,
+        });
+      }
+      api.database.candidates = candidates === "-" ? [] : candidates.split(",");
+      const token = await api.connect();
+      const ids = [];
+      let cursor;
+      do {
+        const response = await api.search({ query, ...(cursor ? { cursor } : {}) }, token);
+        assert.equal(response.body.result.isError, undefined);
+        const page = response.body.result.structuredContent;
+        assert.equal(page.literalOnlyFallback, eligible !== "true" || outcome === "failure");
+        assert.ok(page.items.length <= 20);
+        assert.ok(page.items.every((item) => Object.keys(item).sort().join(",") === "description,id,name,path" &&
+          item.path[0] === "HouseholdOnly" && item.path.at(-1) === item.name));
+        ids.push(...page.items.map((item) => item.id));
+        cursor = page.nextCursor;
+        assert.ok(ids.length <= 40);
+      } while (cursor !== null);
+      assert.deepEqual(ids, expectedIds === "-" ? [] : expectedIds.split(","));
+      assert.equal(requests, eligible === "true" ? 1 : 0);
+    });
+  }
+});
+
+test("combined Search freezes one ten-candidate batch across pages and keeps foreign content out", async (t) => {
+  let requests = 0;
+  const api = await fixture(t, undefined, { async embedQuery() { requests++; return [1, 0]; } });
+  await seedChildren(api, 41);
+  for (let index = 0; index < 15; index++) {
+    await api.seed(`households/home/items/concept-${index}`, {
+      householdId: "home", parentItemId: "cabinet", name: `Concept ${index}`, tags: [], description: null,
+    });
+  }
+  api.database.candidates = ["private", "home", "missing", "child-0", ...Array.from({ length: 15 }, (_, i) => `concept-${i}`)];
+  const token = await api.connect();
+  const first = (await api.search({ query: "duplicate" }, token)).body.result.structuredContent;
+  api.database.candidates = ["concept-14"];
+  const other = await api.connect();
+  const foreign = (await api.credentials(undefined, "other", "foreign")).access_token;
+  for (const [query, credential] of [["drill", token], ["duplicate", other], ["duplicate", foreign]]) {
+    assert.equal((await api.search({ query, cursor: first.nextCursor }, credential)).body.result.isError, true);
+  }
+  const ids = first.items.map((item) => item.id);
+  const sizes = [first.items.length];
+  let cursor = first.nextCursor;
+  do {
+    const page = (await api.search({ query: "duplicate", cursor }, token)).body.result.structuredContent;
+    assert.equal(page.literalOnlyFallback, false);
+    ids.push(...page.items.map((item) => item.id));
+    sizes.push(page.items.length);
+    cursor = page.nextCursor;
+    assert.ok(sizes.length <= 3);
+  } while (cursor !== null);
+  assert.deepEqual(sizes, [20, 20, 7]);
+  assert.deepEqual(ids, [...Array.from({ length: 41 }, (_, i) => `child-${i}`).sort(),
+    "concept-0", "concept-1", "concept-2", "concept-3", "concept-4", "concept-5"]);
+  assert.equal(requests, 1);
+  api.documents.delete("memberships/member");
+  assert.equal((await api.search({ query: "duplicate", cursor: first.nextCursor }, token)).status, 401);
+});
+
+test("conceptual-index unavailability keeps broader literal fallback across every page", async (t) => {
+  let requests = 0;
+  const api = await fixture(t, undefined, { async embedQuery() { requests++; return [1, 0]; } });
+  await seedChildren(api, 41);
+  api.database.indexUnavailable = true;
+  const token = await api.connect();
+  const ids = [];
+  const sizes = [];
+  let cursor;
+  do {
+    const page = (await api.search({ query: "duplicate", ...(cursor ? { cursor } : {}) }, token)).body.result.structuredContent;
+    assert.equal(page.literalOnlyFallback, true);
+    ids.push(...page.items.map((item) => item.id));
+    sizes.push(page.items.length);
+    cursor = page.nextCursor;
+    api.database.indexUnavailable = false;
+    assert.ok(sizes.length <= 3);
+  } while (cursor !== null);
+  assert.deepEqual(sizes, [20, 20, 1]);
+  assert.deepEqual(ids, Array.from({ length: 41 }, (_, i) => `child-${i}`).sort());
+  assert.equal(requests, 1);
+});
+
+test("access loss or unavailable Inventory during inference remains an error on conceptual success and failure", async (t) => {
+  for (const change of ["access", "root", "ancestor", "deletion"]) {
+    for (const fails of [false, true]) {
+      await t.test(`${change}, provider fails: ${fails}`, async (t) => {
+        const api = await fixture(t, undefined, { async embedQuery() {
+          if (change === "access") api.documents.delete("memberships/member");
+          if (change === "root") api.documents.delete("households/home/items/home");
+          if (change === "ancestor") api.documents.delete("households/home/items/cabinet");
+          if (change === "deletion") api.documents.set("households/home/itemDeletionJobs/drill-1", { status: "pending" });
+          if (fails) throw new Error("Controlled provider failure");
+          return [1, 0];
+        } });
+        api.database.candidates = ["drill-1"];
+        const token = await api.connect();
+        const response = await api.search({ query: "drill" }, token);
+        assert.equal(response.body.result.isError, true);
+        assert.equal(response.body.result.structuredContent, undefined);
+      });
+    }
+  }
+});
 
 test("literal Search returns Android's broad fallback with complete Item Paths and content fields only", async (t) => {
   const api = await fixture(t);
@@ -855,7 +1000,90 @@ test("the installed Gemini CLI searches all 41 synced literal matches through Fi
   t.diagnostic("Gemini CLI discovered search_inventory and read all 41 synced literal matches in pages of 20, 20, 1 with fallback marked; query/connection/Household isolation, unavailable Inventory, and access-loss rejection passed.");
 });
 
-async function fixture(t, firestore) {
+test("the installed Gemini CLI finds Clock conceptually and demonstrates controlled literal fallback", {
+  skip: process.env.FIRESTORE_EMULATOR_HOST === undefined || process.env.GEMINI_CLI_BUNDLE === undefined,
+}, async (t) => {
+  const database = getFirestore(initializeApp({ projectId: "demo-mystuff-search" }, "mcp-conceptual"), "mcp-conceptual-tests");
+  t.after(async () => {
+    for (const collection of ["mcpClients", "mcpApprovals", "mcpCodes", "mcpAccessTokens", "mcpRefreshTokens",
+      "appConnections", "mcpSearchCursors"]) {
+      await database.recursiveDelete(database.collection(collection));
+    }
+  });
+  const vector = [1, ...Array(767).fill(0)];
+  const live = process.env.MCP_SEARCH_LIVE_SMOKE === "1";
+  const provider = live ? createGeminiEmbedder(new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })) : {
+    async embedItem() { return vector; }, async embedQuery() { return vector; },
+  };
+  let fail = false;
+  let requests = 0;
+  const api = await fixture(t, database, { async embedQuery(text) {
+    requests++;
+    if (fail) throw new Error("Controlled conceptual-provider outage");
+    return provider.embedQuery(text);
+  } });
+  await seedChildren(api, 41);
+  await api.seed("households/home/items/clock", {
+    householdId: "home", parentItemId: "cabinet", name: "Clock", tags: [], description: "Tells time",
+  });
+  const embedding = await provider.embedItem("title: Clock | text: tags:  | description: Tells time");
+  await api.seed("households/home/searchIndex/clock", { searchEmbedding: FieldValue.vector(embedding) });
+  // A same-ID candidate in another Household must never supply returned content.
+  await api.seed("households/foreign/items/clock", {
+    householdId: "foreign", parentItemId: "foreign", name: "Private Clock", tags: [], description: "Secret",
+  });
+  await api.seed("households/foreign/searchIndex/clock", { searchEmbedding: FieldValue.vector(embedding) });
+  const flow = await api.begin();
+  const credentials = await api.credentials(flow);
+  const gemini = await isolatedGeminiCli(t);
+  await gemini.storage.saveToken("mystuff-conceptual", {
+    accessToken: credentials.access_token, refreshToken: credentials.refresh_token,
+    tokenType: "Bearer", scope: "inventory:read", expiresAt: Date.now() + 3600000,
+  }, flow.clientId, `${api.origin}/token`, `${api.origin}/mcp`);
+  await gemini.configure({ "mystuff-conceptual": { httpUrl: `${api.origin}/mcp` } });
+  assert.match(await gemini.list(), /mystuff-conceptual[^\n]*Connected/);
+  const client = new Client({ name: "mystuff-conceptual-verification", version: "1.0.0" });
+  t.after(() => client.close());
+  await client.connect(await gemini.createTransport("mystuff-conceptual", { httpUrl: `${api.origin}/mcp` }, false, {
+    emitMcpDiagnostic() {}, sanitizationConfig: {},
+  }));
+  const search = async (query, cursor) => {
+    const result = await client.callTool({ name: "search_inventory", arguments: { query, ...(cursor ? { cursor } : {}) } });
+    assert.equal(result.isError, undefined);
+    assert.deepEqual(JSON.parse(result.content[0].text), result.structuredContent);
+    return result.structuredContent;
+  };
+  const conceptual = await search("watch");
+  assert.deepEqual(conceptual, {
+    literalOnlyFallback: false,
+    items: [{ id: "clock", name: "Clock", description: "Tells time", path: ["Our Home", "Garage", "Cabinet", "Clock"] }],
+    nextCursor: null,
+  });
+  for (const fallback of [false, true]) {
+    fail = fallback;
+    const ids = [];
+    const sizes = [];
+    let cursor;
+    const before = requests;
+    do {
+      const page = await search("duplicate", cursor);
+      assert.equal(page.literalOnlyFallback, fallback);
+      ids.push(...page.items.map((item) => item.id));
+      sizes.push(page.items.length);
+      cursor = page.nextCursor;
+      assert.ok(sizes.length <= 3);
+    } while (cursor !== null);
+    assert.deepEqual(sizes, [20, 20, fallback ? 1 : 2]);
+    assert.deepEqual(ids, [...Array.from({ length: 41 }, (_, i) => `child-${i}`).sort(), ...(fallback ? [] : ["clock"])]);
+    assert.equal(requests - before, 1);
+  }
+  const first = await search("duplicate");
+  await database.doc("memberships/member").delete();
+  await assert.rejects(search("duplicate", first.nextCursor));
+  t.diagnostic(`Installed Gemini CLI: watch found Clock using ${live ? "live Gemini embeddings" : "a deterministic provider fake"} and real Firestore vector retrieval; combined pages 20/20/2 and controlled fallback 20/20/1 passed; access loss denied.`);
+});
+
+async function fixture(t, firestore, embedder) {
   const documents = new Map(Object.entries({
     "memberships/member": { householdId: "home" },
     "memberships/owner": { householdId: "home" },
@@ -891,7 +1119,7 @@ async function fixture(t, firestore) {
   await once(server, "listening");
   const origin = `http://127.0.0.1:${server.address().port}`;
   const app = createMcpApp({
-    database, origin, firebaseConfig: {}, now: () => time,
+    database, origin, firebaseConfig: {}, now: () => time, embedder,
     authentication: {
       async verifyIdToken(token) {
         if (!["member", "owner", "other", "outsider"].includes(token)) throw new Error("Invalid identity");
@@ -995,7 +1223,14 @@ function fakeFirestore(documents) {
     data: () => structuredClone(documents.get(path)) });
   const database = {
     collection(path) {
-      return { path, where: (field, operator, value) => {
+      return { path, findNearest: (_field, _vector, { limit, distanceMeasure }) => {
+        assert.equal(distanceMeasure, "COSINE");
+        assert.equal(limit, 10);
+        return { get: async () => {
+          if (database.indexUnavailable) throw new Error("Controlled index failure");
+          return { docs: (database.candidates ?? []).slice(0, limit).map((id) => ({ id })) };
+        } };
+      }, where: (field, operator, value) => {
         assert.equal(operator, "==");
         return { path, field, value };
       } };

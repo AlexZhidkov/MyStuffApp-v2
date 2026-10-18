@@ -1,7 +1,8 @@
 # MyStuff MCP: Inventory reads
 
 The shared server URL is `https://mystuff-ai-app.web.app/mcp`.
-Issue 06's literal Search, issue 05's browsing, and the issue 03/04 lifecycle changes have passed
+Issue 07's conceptual Search, issue 06's literal Search, issue 05's browsing,
+and the issue 03/04 lifecycle changes have passed
 local verification and require deployment. The live-client acceptance records
 below describe the earlier issue 01/02 deployment.
 It serves synced Firestore Inventory independently of Android. Unsynced phone
@@ -10,35 +11,53 @@ changes are unavailable. The `get_item` tool takes the input
 Household root through the Item), `name`, and `description`. A deliberately empty
 Description is `null`; missing or corrupt Item/ancestor data is a tool error.
 
-The `search_inventory` tool takes `{"query":"<literal text>"}`. It searches
-synced Item names, Tags, and Descriptions with Android's literal normalization
-and ordering. Each response contains `items` (each with only `id`, complete
-`path`, `name`, and `description`), `literalOnlyFallback: true`, and `nextCursor`.
-Conceptual Search is not yet connected to MCP; the complete broader literal
-result set remains available, including queries shorter than three letters or
-digits. Blank normalized queries succeed with no results. Household roots,
-Item Paths, URLs, Photos, and other Attachments do not participate in matching.
+The `search_inventory` tool takes `{"query":"<words or meaning>"}`. Each response
+contains `items` (each with only `id`, complete `path`, `name`, and `description`),
+`literalOnlyFallback`, and `nextCursor`. Search uses synced Item names, Tags, and
+Descriptions. Household roots, Item Paths, URLs, Photos, and other Attachments
+are excluded as Search inputs.
 
-Search trims the same Unicode whitespace as Android, folds case using
-uppercase then lowercase, decomposes accents with NFD, and removes combining
-marks. Results rank by name, Tag, then Description; within each field, exact
-matches precede prefixes and then substrings. Ties retain Firestore's ascending
-document-ID snapshot order, independently of Child Item display order.
+Queries with at least three Unicode letters or decimal digits request conceptual
+retrieval using the existing Gemini embedding model and Household-scoped
+Firestore vector index. Eligibility counts the original query's code points,
+before case folding or accent removal, matching Android. Shorter queries make no
+provider request. Blank normalized queries succeed with no results.
+
+On conceptual success (`literalOnlyFallback: false`), every exact Item-name match
+ranks first, then Item-name prefixes, then exact Tags. Up to ten conceptual
+candidates follow in vector retrieval order, deduplicated by stable Item ID;
+missing Items and the root are ignored. Broad name/Tag substrings and
+Description-only matches remain only if conceptual retrieval includes them.
+An empty conceptual success still uses this precise merge, rather than fallback.
+
+Ineligible queries, provider failures, and unavailable conceptual indexes return
+the broader literal results with `literalOnlyFallback: true`. These rank by name,
+Tag, then Description; within each field, exact matches precede prefixes and
+then substrings. Both modes trim the same Unicode whitespace as Android, fold
+case using uppercase then lowercase, decompose accents with NFD, and remove
+combining marks. Ties retain Firestore's ascending document-ID snapshot order,
+independently of Child Item display order.
 
 Search returns at most 20 Items. Continue with the same `query` and
 `{"cursor":"<nextCursor>"}` until `nextCursor` is `null`. Opaque markers in
 `mcpSearchCursors` bind an offset to the App Connection, approved Household,
-and normalized-query hash. They cannot be used for a different Search context
-or for Child Item listing. Every page revalidates authorization and reads the
-Inventory and its deletion state in one Firestore transaction. Unavailable or
-incomplete Inventory and authorization failures are errors, including for blank
-queries; they never appear as a successful empty literal fallback.
+normalized-query hash, and first page's conceptual candidates or fallback state.
+Later pages never call the provider or fetch additional conceptual batches. The
+candidate limit remains ten for the entire Search; precise literal matches can
+make the combined result exceed 20 Items. Markers cannot be used for a different
+Search context or for Child Item listing. Older literal-only markers continue
+using literal fallback.
 
-The service reads the full approved Household tree on each Search page to
-preserve Android's complete matching, tie order, and ancestry validation. A
-fixed Inventory can be read completely; restart Search after concurrent Item
-changes. No Search query-length cap, application rate limit, daily quota, or
-spending cap is added.
+Every page revalidates authorization and reads the full Inventory and its
+deletion state in one Firestore transaction. The first page also validates these
+before inference and rechecks them afterward. Provider calls run outside
+retryable transactions. Unavailable or incomplete Inventory and authorization
+failures remain errors, including for blank queries or simultaneous provider
+failure. Conceptual candidate IDs are resolved only against the approved
+Household's current Inventory; they cannot supply another Household's content.
+A fixed Inventory can be read completely; restart Search after concurrent Item
+changes. No query-length cap, application rate limit, daily quota, or spending
+cap is added. Android Search behavior and operational limits are unchanged.
 
 The `list_children` tool starts at the approved Household root with `{}`. It
 returns `parentItemId`, `items` (each containing only `id` and `name`), and
@@ -94,8 +113,9 @@ is in Authentication's authorized domains. The sign-in helper uses
 `mystuff-ai-app.firebaseapp.com`. Keep any browser API-key restrictions compatible
 with the new Hosting origin.
 
-Install dependencies with Node 22 and deploy only the new HTTP function and
-Hosting configuration:
+The MCP function now also requires the existing `GEMINI_API_KEY` secret for
+conceptual Search. Install dependencies with Node 22 and deploy the HTTP function
+and Hosting configuration after approval:
 
 ```bash
 npm ci --prefix functions
@@ -327,6 +347,51 @@ Kotlin compilation (`./gradlew test`, up-to-date). Standards and Spec reviews
 against starting commit `24dca877760b7bd0ae4df20a90298b7445fd5daa` found no
 actionable issues on either axis.
 
+
+### 18 October 2026 — conceptual Search
+
+The authenticated MCP HTTP and Android `ConceptualSearchParityTest` consumers
+pass the same 16 fixtures in `app/src/test/resources/conceptual-search-queries.tsv`,
+using the existing shared literal Inventory. They cover Unicode eligibility,
+precise ranking, conceptual ordering, deduplication, root/absent candidates,
+empty success, provider fallback, and combined/fallback results across pages.
+Additional HTTP checks cover the ten-candidate limit across three pages,
+connection/query/Household marker isolation, conceptual-index failure, and
+access loss or unavailable Inventory during successful or failed inference.
+
+All 160 backend tests pass with the full emulators and installed CLI checks
+enabled, with no skips. All 247 Android tests and all 50 rules tests pass.
+Kotlin compilation and
+changed-JavaScript syntax checks pass; no JavaScript typechecking task is
+configured. After the ranking cleanup, all 103 MCP HTTP tests pass again with
+Firestore and installed CLI checks enabled, with no skips. Standards review has zero findings; Spec review identifies only
+the pending live-provider acceptance check.
+
+The installed Gemini CLI uses real Firestore-emulator vector retrieval and a
+deterministic provider fake to demonstrate `watch` finding `Clock`, combined
+pages of 20/20/2 Items, and a controlled provider failure returning authorized
+literal fallback in pages of 20/20/1. Foreign content and access-loss checks pass.
+This uses synthetic Inventory, isolated temporary CLI credentials, and no
+production data or deployment. Real Gemini embedding verification is a separate
+opt-in check; the deterministic check does not establish live provider relevance
+or production index readiness.
+
+Reproduce with Node 22 and the active installed CLI bundle exporting
+`createTransport` and `MCPOAuthTokenStorage`:
+
+```bash
+GEMINI_CLI_BUNDLE=/path/to/gemini-cli/bundle/chunk-exporting-createTransport.js \
+  firebase emulators:exec --only firestore --project demo-mystuff-search \
+  'node --test --test-name-pattern="installed Gemini CLI finds" functions/test/mcp-http.test.js'
+./gradlew :app:testDebugUnitTest --tests com.azhidkov.mystuff.ConceptualSearchParityTest
+```
+
+After explicit authorization, the same smoke can use real Gemini embeddings by
+setting `MCP_SEARCH_LIVE_SMOKE=1` and supplying `GEMINI_API_KEY` securely in the
+environment. It embeds only synthetic Clock text and the `watch`/`duplicate`
+queries; Firestore stays local. Never put the credential in the command text or
+committed files. The Functions emulator continues using its deterministic
+embedder regardless of this separate test option.
 
 ### 18 October 2026 — literal Search
 

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-const CONCEPTUAL_RESULT_LIMIT = 10;
+export const CONCEPTUAL_RESULT_LIMIT = 10;
 const EMBEDDING_MODEL_VERSION = "gemini-embedding-2:768";
 
 export function createSearchModule({ repository, embedder }) {

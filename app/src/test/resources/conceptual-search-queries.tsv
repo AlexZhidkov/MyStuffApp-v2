@@ -1,0 +1,17 @@
+case	query	eligible	outcome	candidates	expectedIds
+precise ranking and retrieval order	  CÁFÉ  	true	success	g-desc-exact,c-name-substring,i-name-exact,g-desc-exact,missing,home,private,a-desc-substring	i-name-exact,j-name-duplicate,f-name-prefix,c-name-substring,h-tag-exact,g-desc-exact,a-desc-substring
+empty conceptual success removes broad matches	café	true	success	-	i-name-exact,j-name-duplicate,f-name-prefix,c-name-substring,h-tag-exact
+provider failure preserves broader literal order	café	true	failure	-	i-name-exact,j-name-duplicate,f-name-prefix,c-name-substring,h-tag-exact,e-tag-prefix,b-tag-substring,g-desc-exact,d-desc-prefix,a-desc-substring
+conceptual only in retrieval order	unknown	true	success	g-desc-exact,home,missing,private,a-desc-substring,g-desc-exact	g-desc-exact,a-desc-substring
+no conceptual or precise matches	unknown	true	success	-	-
+short query retains literal substring	AX	false	success	g-desc-exact	n-short
+punctuation is ineligible	!	false	success	g-desc-exact	n-short
+blank query is ineligible	   　	false	success	g-desc-exact	-
+case folding does not expand eligibility	ßa	false	success	g-desc-exact	-
+combining marks do not count	áb	false	success	g-desc-exact	-
+Unicode numbers other than digits do not count	½²Ⅲ	false	success	g-desc-exact	-
+Unicode digits count	١٢٣	true	success	g-desc-exact	g-desc-exact
+supplementary letters count	𐐀𐐁𐐂	true	success	g-desc-exact	g-desc-exact
+letters separated by punctuation count	a!b?c	true	success	g-desc-exact	g-desc-exact
+combined results paginate after all precise matches	paged	true	success	g-desc-exact,a-desc-substring,z00	z00,z01,z02,z03,z04,z05,z06,z07,z08,z09,z10,z11,z12,z13,z14,z15,z16,z17,z18,z19,z20,g-desc-exact,a-desc-substring
+fallback results paginate	paged	true	failure	-	z00,z01,z02,z03,z04,z05,z06,z07,z08,z09,z10,z11,z12,z13,z14,z15,z16,z17,z18,z19,z20

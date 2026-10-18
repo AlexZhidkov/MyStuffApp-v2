@@ -9,7 +9,7 @@ import { createMcpOAuth, INVENTORY_READ_SCOPE } from "./mcp-oauth.js";
 import { listMcpChildren, readMcpItem } from "./mcp-inventory.js";
 import { searchMcpInventory } from "./mcp-search.js";
 
-export function createMcpApp({ database, authentication, origin, firebaseConfig, now, logger = console }) {
+export function createMcpApp({ database, authentication, origin, firebaseConfig, now, embedder, logger = console }) {
   const canonicalOrigin = new URL(origin);
   if (canonicalOrigin.origin !== origin ||
       (canonicalOrigin.protocol !== "https:" &&
@@ -105,12 +105,12 @@ export function createMcpApp({ database, authentication, origin, firebaseConfig,
     });
     server.registerTool("search_inventory", {
       title: "Search Inventory",
-      description: "Search synced Item names, Tags, and Descriptions in the approved Household. Returns complete Item Paths, names, Descriptions, and stable IDs. Literal-only fallback is marked while conceptual Search is unavailable. Returns up to 20 Items; pass nextCursor as cursor with the same query to continue; null means complete.",
+      description: "Search synced Item names, Tags, and Descriptions in the approved Household. Returns complete Item Paths, names, Descriptions, and stable IDs. Eligible queries combine precise literal matches with up to ten conceptual candidates. Ineligible queries or unavailable conceptual Search return broader literal results with literalOnlyFallback: true. Returns up to 20 Items; pass nextCursor as cursor with the same query to continue; null means complete.",
       inputSchema: { query: z.string(), cursor: z.string().optional() },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     }, async (arguments_) => {
       try {
-        const page = await searchMcpInventory(database, request.auth.extra.connectionId, arguments_, now);
+        const page = await searchMcpInventory(database, request.auth.extra.connectionId, arguments_, now, embedder);
         return { content: [{ type: "text", text: JSON.stringify(page) }], structuredContent: page };
       } catch {
         return { isError: true, content: [{ type: "text", text: "Search or Inventory data is unavailable. Check the query, continuation marker, and current Household Access." }] };

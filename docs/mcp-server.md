@@ -1,7 +1,7 @@
 # MyStuff MCP: Inventory reads
 
 The shared server URL is `https://mystuff-ai-app.web.app/mcp`.
-Issue 05's browsing changes and the issue 03/04 lifecycle changes have passed
+Issue 06's literal Search, issue 05's browsing, and the issue 03/04 lifecycle changes have passed
 local verification and require deployment. The live-client acceptance records
 below describe the earlier issue 01/02 deployment.
 It serves synced Firestore Inventory independently of Android. Unsynced phone
@@ -9,6 +9,36 @@ changes are unavailable. The `get_item` tool takes the input
 `{"itemId":"<stable Item ID>"}`. It returns `id`, `path` (the ordered names from
 Household root through the Item), `name`, and `description`. A deliberately empty
 Description is `null`; missing or corrupt Item/ancestor data is a tool error.
+
+The `search_inventory` tool takes `{"query":"<literal text>"}`. It searches
+synced Item names, Tags, and Descriptions with Android's literal normalization
+and ordering. Each response contains `items` (each with only `id`, complete
+`path`, `name`, and `description`), `literalOnlyFallback: true`, and `nextCursor`.
+Conceptual Search is not yet connected to MCP; the complete broader literal
+result set remains available, including queries shorter than three letters or
+digits. Blank normalized queries succeed with no results. Household roots,
+Item Paths, URLs, Photos, and other Attachments do not participate in matching.
+
+Search trims the same Unicode whitespace as Android, folds case using
+uppercase then lowercase, decomposes accents with NFD, and removes combining
+marks. Results rank by name, Tag, then Description; within each field, exact
+matches precede prefixes and then substrings. Ties retain Firestore's ascending
+document-ID snapshot order, independently of Child Item display order.
+
+Search returns at most 20 Items. Continue with the same `query` and
+`{"cursor":"<nextCursor>"}` until `nextCursor` is `null`. Opaque markers in
+`mcpSearchCursors` bind an offset to the App Connection, approved Household,
+and normalized-query hash. They cannot be used for a different Search context
+or for Child Item listing. Every page revalidates authorization and reads the
+Inventory and its deletion state in one Firestore transaction. Unavailable or
+incomplete Inventory and authorization failures are errors, including for blank
+queries; they never appear as a successful empty literal fallback.
+
+The service reads the full approved Household tree on each Search page to
+preserve Android's complete matching, tie order, and ancestry validation. A
+fixed Inventory can be read completely; restart Search after concurrent Item
+changes. No Search query-length cap, application rate limit, daily quota, or
+spending cap is added.
 
 The `list_children` tool starts at the approved Household root with `{}`. It
 returns `parentItemId`, `items` (each containing only `id` and `name`), and
@@ -297,6 +327,38 @@ Kotlin compilation (`./gradlew test`, up-to-date). Standards and Spec reviews
 against starting commit `24dca877760b7bd0ae4df20a90298b7445fd5daa` found no
 actionable issues on either axis.
 
+
+### 18 October 2026 — literal Search
+
+The active installed Gemini CLI 0.64.0 executable discovered `search_inventory`
+against an isolated local HTTP server. Its installed OAuth provider and HTTP
+transport read all 41 matching Items from synced Firestore-emulator Inventory
+in pages of **20, 20, and 1**, in Android's literal tie order, without duplicates.
+Every response marked `literalOnlyFallback: true` and contained only the agreed
+Item fields and continuation metadata. Query, App Connection, and Household
+marker isolation, unavailable Inventory, and access loss between pages passed.
+This used synthetic Inventory, temporary isolated CLI settings and credentials,
+and no production deployment or live Member Inventory.
+
+The HTTP suite also exercises shared literal Search fixtures under
+`app/src/test/resources/literal-search-*.tsv`: field/match ranking, duplicate
+names, Unicode whitespace, composed/decomposed accents, case-fold expansion,
+Greek/Turkish/supplementary letters, short and punctuation queries, blank/no
+matches, excluded root/path/URL/Photo/Attachment inputs, and complete results
+beyond one page. Error cases cover missing/corrupt data and current revocation,
+Household Access, account/Owner deletion, and Household deletion on every page.
+
+Reproduce with Node 22, setting `GEMINI_CLI_BUNDLE` to the active installed
+bundle exporting `createTransport` and `MCPOAuthTokenStorage`, as in the root
+browsing check above. Resolve the active `gemini` executable before selecting
+its bundle when multiple CLI installations exist. All **130 backend tests**
+passed with Auth, Firestore, Storage, Functions, and installed CLI checks enabled,
+with no skips. Changed JavaScript files pass syntax checks; no JavaScript
+type-checking task is configured. All **50 rules tests**, the existing **210
+Android unit tests**, and Kotlin compilation passed. Standards review found no
+actionable issues. Spec review found no implementation defects and one pending
+acceptance gap: an Android test consumer for the shared TSV fixtures is awaiting
+the additional test-seam confirmation required by the TDD skill.
 
 ### 17 October 2026 — individual connection management
 

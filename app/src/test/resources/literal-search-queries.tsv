@@ -1,0 +1,22 @@
+case	query	expectedIds
+field then match ranking	café	i-name-exact,j-name-duplicate,f-name-prefix,c-name-substring,h-tag-exact,e-tag-prefix,b-tag-substring,g-desc-exact,d-desc-prefix,a-desc-substring
+Unicode whitespace and accents	  CÁFÉ 　	i-name-exact,j-name-duplicate,f-name-prefix,c-name-substring,h-tag-exact,e-tag-prefix,b-tag-substring,g-desc-exact,d-desc-prefix,a-desc-substring
+blank Unicode whitespace	   　	-
+empty query		-
+short single letter	X	d-desc-prefix,e-tag-prefix,g-desc-exact,h-tag-exact,n-short
+short two letters	AX	n-short
+punctuation	!	n-short
+case fold expansion	STRASSE	k-german
+Greek final sigma	οσ	l-greek
+Turkish dotted and dotless I	II	m-turkish
+supplementary letters	𐐨𐐩	r-deseret
+internal spaces preserved	two  spaces	o-internal-space
+internal spaces not collapsed	two spaces	-
+Household root excluded	HouseholdOnly	-
+root Tags excluded	rootOnly	-
+root Description excluded	rootDescription	-
+path excluded	AncestorOnly	p-ancestor
+web URL excluded	urlOnly	-
+Photo excluded	photoOnly	-
+no match	unknown	-
+complete paginated results	paged	z00,z01,z02,z03,z04,z05,z06,z07,z08,z09,z10,z11,z12,z13,z14,z15,z16,z17,z18,z19,z20

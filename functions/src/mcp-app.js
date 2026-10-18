@@ -7,6 +7,7 @@ import { OAuthError, ServerError } from "@modelcontextprotocol/sdk/server/auth/e
 import { z } from "zod";
 import { createMcpOAuth, INVENTORY_READ_SCOPE } from "./mcp-oauth.js";
 import { listMcpChildren, readMcpItem } from "./mcp-inventory.js";
+import { searchMcpInventory } from "./mcp-search.js";
 
 export function createMcpApp({ database, authentication, origin, firebaseConfig, now, logger = console }) {
   const canonicalOrigin = new URL(origin);
@@ -100,6 +101,19 @@ export function createMcpApp({ database, authentication, origin, firebaseConfig,
         return { content: [{ type: "text", text: JSON.stringify(page) }], structuredContent: page };
       } catch {
         return { isError: true, content: [{ type: "text", text: "Child Items or Inventory data is unavailable. Check the Parent Item ID, continuation marker, and current Household Access." }] };
+      }
+    });
+    server.registerTool("search_inventory", {
+      title: "Search Inventory",
+      description: "Search synced Item names, Tags, and Descriptions in the approved Household. Returns complete Item Paths, names, Descriptions, and stable IDs. Literal-only fallback is marked while conceptual Search is unavailable. Returns up to 20 Items; pass nextCursor as cursor with the same query to continue; null means complete.",
+      inputSchema: { query: z.string(), cursor: z.string().optional() },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    }, async (arguments_) => {
+      try {
+        const page = await searchMcpInventory(database, request.auth.extra.connectionId, arguments_, now);
+        return { content: [{ type: "text", text: JSON.stringify(page) }], structuredContent: page };
+      } catch {
+        return { isError: true, content: [{ type: "text", text: "Search or Inventory data is unavailable. Check the query, continuation marker, and current Household Access." }] };
       }
     });
     // Stateless JSON responses work across cold starts and instances, and fit

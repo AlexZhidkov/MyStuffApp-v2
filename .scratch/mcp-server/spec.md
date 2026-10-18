@@ -10,8 +10,11 @@ with the real installed Gemini CLI; its lifecycle changes have not been deployed
 Issue 04 adds Connected apps management and has passed the local real Gemini CLI
 revocation check; its changes have not been deployed. Issue 05 adds root-based
 Child Item browsing and has passed local Firestore and real installed Gemini CLI
-pagination checks; its changes have not been deployed. Issues 06–08 have not been
-implemented.
+pagination checks; its changes have not been deployed. Issue 06 adds literal
+Search and has passed local Firestore and installed Gemini CLI pagination
+checks; automated Android consumption of its shared parity fixtures is pending,
+and its changes have not been deployed. Issues 07–08 have
+not been implemented.
 
 ## Purpose and scope
 

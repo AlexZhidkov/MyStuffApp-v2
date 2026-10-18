@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { createServer } from "node:http";
+import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { initializeApp } from "firebase-admin/app";
@@ -14,6 +15,170 @@ import { createDeletionRepository } from "../src/deletion-repository.js";
 const verifier = "a".repeat(64);
 const challenge = createHash("sha256").update(verifier).digest("base64url");
 const callback = "http://localhost:32145/oauth/callback";
+
+test("literal Search returns Android's broad fallback with complete Item Paths and content fields only", async (t) => {
+  const api = await fixture(t);
+  const token = await api.connect();
+  const response = await api.search({ query: "  DRÍLL  " }, token);
+  assert.equal(response.body.result.isError, undefined);
+  assert.deepEqual(response.body.result.structuredContent, {
+    literalOnlyFallback: true,
+    items: [
+      { id: "drill-1", path: ["Our Home", "Garage", "Cabinet", "Drill"], name: "Drill", description: "Cordless drill" },
+      { id: "drill-2", path: ["Our Home", "Garage", "Cabinet", "Drill"], name: "Drill", description: null },
+    ],
+    nextCursor: null,
+  });
+  assert.deepEqual(JSON.parse(response.body.result.content[0].text), response.body.result.structuredContent);
+});
+
+test("literal Search agrees with the shared Android normalization, ranking, short-query, and excluded-input fixtures", async (t) => {
+  const api = await fixture(t);
+  for (const path of [...api.documents.keys()]) {
+    if (path.startsWith("households/home/items/")) api.documents.delete(path);
+  }
+  const readRows = async (name) => (await readFile(new URL(`../../app/src/test/resources/literal-search-${name}.tsv`, import.meta.url), "utf8"))
+    .trimEnd().split("\n").slice(1).map((line) => line.split("\t"));
+  for (const [id, parentItemId, name, tags, description, webUrl, photoUrl] of await readRows("items")) {
+    await api.seed(`households/home/items/${id}`, {
+      householdId: "home", parentItemId: parentItemId === "-" ? null : parentItemId, name,
+      tags: tags === "-" ? [] : tags.split("|"), description: description === "-" ? null : description,
+      webUrl: webUrl === "-" ? null : webUrl, photoUrl: photoUrl === "-" ? null : photoUrl,
+      attachments: [{ name: "attachmentOnly", text: "attachmentTextOnly" }],
+    });
+  }
+  const token = await api.connect();
+  for (const [name, query, expectedIds] of await readRows("queries")) {
+    const ids = [];
+    let cursor;
+    do {
+      const response = await api.search({ query, ...(cursor ? { cursor } : {}) }, token);
+      assert.equal(response.body.result.isError, undefined, name);
+      const page = response.body.result.structuredContent;
+      ids.push(...page.items.map((item) => item.id));
+      assert.equal(page.literalOnlyFallback, true);
+      assert.ok(page.items.length <= 20);
+      assert.ok(page.items.every((item) => Object.keys(item).sort().join(",") === "description,id,name,path"));
+      cursor = page.nextCursor;
+      assert.ok(ids.length <= 40, "fixture Search must terminate");
+    } while (cursor !== null);
+    assert.deepEqual(ids, expectedIds === "-" ? [] : expectedIds.split(","), name);
+  }
+  for (const query of ["attachmentOnly", "attachmentTextOnly"]) {
+    assert.deepEqual((await api.search({ query }, token)).body.result.structuredContent.items, []);
+  }
+});
+
+test("a fixed Inventory searches every literal match once in Android order across pages of at most 20", async (t) => {
+  const api = await fixture(t);
+  await seedChildren(api, 41);
+  const token = await api.connect();
+  const ids = [];
+  const sizes = [];
+  let cursor;
+  do {
+    const response = await api.search({ query: "duplicate", ...(cursor ? { cursor } : {}) }, token);
+    assert.equal(response.body.result.isError, undefined);
+    const page = response.body.result.structuredContent;
+    assert.equal(page.literalOnlyFallback, true);
+    sizes.push(page.items.length);
+    ids.push(...page.items.map((item) => item.id));
+    cursor = page.nextCursor;
+    assert.ok(sizes.length <= 3, "Search must terminate");
+  } while (cursor !== null);
+  assert.deepEqual(sizes, [20, 20, 1]);
+  // Equal Search ranks retain Android's document-ID snapshot order, ignoring displayOrder.
+  assert.deepEqual(ids, ["child-0", "child-1", "child-10", "child-11", "child-12", "child-13", "child-14",
+    "child-15", "child-16", "child-17", "child-18", "child-19", "child-2", "child-20", "child-21", "child-22",
+    "child-23", "child-24", "child-25", "child-26", "child-27", "child-28", "child-29", "child-3", "child-30",
+    "child-31", "child-32", "child-33", "child-34", "child-35", "child-36", "child-37", "child-38", "child-39",
+    "child-4", "child-40", "child-5", "child-6", "child-7", "child-8", "child-9"]);
+});
+
+test("Search markers cannot change query, connection, Household, or page limit", async (t) => {
+  const api = await fixture(t);
+  await seedChildren(api, 41);
+  await seedChildren(api, 21, "foreign", "foreign");
+  const token = await api.connect();
+  const otherConnection = await api.connect();
+  const foreignToken = (await api.credentials(undefined, "other", "foreign")).access_token;
+  const first = (await api.search({ query: "duplicate" }, token)).body.result.structuredContent;
+  const foreign = (await api.search({ query: "duplicate" }, foreignToken)).body.result.structuredContent;
+  const cursor = first.nextCursor;
+  const altered = `${cursor[0] === "a" ? "b" : "a"}${cursor.slice(1)}`;
+  const listing = (await api.children({ parentItemId: "drill-1" }, token)).body.result.structuredContent;
+  for (const [arguments_, credential] of [
+    [{ query: "drill", cursor }, token], [{ query: "", cursor }, token],
+    [{ query: "duplicate", cursor: altered }, token], [{ query: "duplicate", cursor: "../foreign" }, token],
+    [{ query: "duplicate", cursor: "" }, token], [{ query: "duplicate", cursor }, otherConnection],
+    [{ query: "duplicate", cursor }, foreignToken], [{ query: "duplicate", cursor: foreign.nextCursor }, token],
+    [{ query: "duplicate", cursor: listing.nextCursor }, token], [{ query: null }, token], [{}, token],
+  ]) {
+    const response = await api.search(arguments_, credential);
+    assert.equal(response.body.result.isError, true);
+    assert.equal(response.body.result.structuredContent, undefined);
+    assert.doesNotMatch(JSON.stringify(response.body), /Private Item|Other Home/);
+  }
+  const continued = (await api.search({ query: "duplicate", cursor, householdId: "foreign", itemId: "private",
+    parentItemId: "foreign", pageSize: 1000, limit: 1000, offset: 0 }, token)).body.result.structuredContent;
+  assert.equal(continued.items.length, 20);
+  assert.ok(continued.items.every((item) => item.path[0] === "Our Home"));
+  assert.deepEqual((await api.search({ query: "duplicate", cursor }, token)).body.result.structuredContent.items, continued.items);
+  assert.equal((await api.children({ parentItemId: "drill-1", cursor }, token)).body.result.isError, true);
+  assert.deepEqual((await api.search({ query: "Private Item", householdId: "foreign" }, token)).body.result.structuredContent.items, []);
+});
+
+test("Search continuation checks current authorization and never treats unavailable Inventory as empty fallback", async (t) => {
+  for (const change of ["revocation", "access", "different Household", "account deletion", "owner deletion", "Household deletion",
+    "missing root", "missing ancestor", "cycle", "foreign Item", "missing tags", "corrupt tags", "missing description",
+    "deleted Item", "storage failure"]) {
+    await t.test(change, async (t) => {
+      const api = await fixture(t);
+      await seedChildren(api, 21);
+      const token = await api.connect();
+      const first = (await api.search({ query: "duplicate" }, token)).body.result.structuredContent;
+      const unauthorized = ["revocation", "access", "different Household", "account deletion", "owner deletion", "Household deletion"].includes(change);
+      if (change === "revocation") [...api.documents].find(([path]) => path.startsWith("appConnections/"))[1].revokedAt = Date.now();
+      if (change === "access") api.documents.delete("memberships/member");
+      if (change === "different Household") api.documents.set("memberships/member", { householdId: "foreign" });
+      const deletion = { "account deletion": "accountDeletionJobs/member", "owner deletion": "accountDeletionJobs/owner",
+        "Household deletion": "householdDeletionJobs/home", "deleted Item": "households/home/itemDeletionJobs/child-9" }[change];
+      if (deletion) api.documents.set(deletion, { status: "pending" });
+      if (change === "missing root") api.documents.delete("households/home/items/home");
+      if (change === "missing ancestor") api.documents.delete("households/home/items/cabinet");
+      if (change === "cycle") api.documents.get("households/home/items/cabinet").parentItemId = "drill-1";
+      if (change === "foreign Item") api.documents.get("households/home/items/child-9").householdId = "foreign";
+      if (change === "missing tags") delete api.documents.get("households/home/items/child-9").tags;
+      if (change === "corrupt tags") api.documents.get("households/home/items/child-9").tags = [123];
+      if (change === "missing description") delete api.documents.get("households/home/items/child-9").description;
+      if (change === "storage failure") api.database.collection = () => { throw new Error("Storage unavailable"); };
+      for (const arguments_ of [{ query: "duplicate", cursor: first.nextCursor }, { query: "" }, { query: "no match" }]) {
+        const response = await api.search(arguments_, token);
+        if (unauthorized) assert.equal(response.status, 401);
+        else assert.equal(response.body.result.isError, true);
+        assert.equal(response.body.result?.structuredContent, undefined);
+      }
+    });
+  }
+});
+
+test("Search page boundaries expose a continuation marker only when more results remain", async (t) => {
+  for (const count of [0, 1, 19, 20, 21, 40]) {
+    await t.test(`${count} matches`, async (t) => {
+      const api = await fixture(t);
+      await seedChildren(api, count);
+      const token = await api.connect();
+      const first = (await api.search({ query: "duplicate" }, token)).body.result.structuredContent;
+      assert.equal(first.items.length, Math.min(count, 20));
+      assert.equal(first.nextCursor === null, count <= 20);
+      if (count > 20) {
+        const second = (await api.search({ query: "duplicate", cursor: first.nextCursor }, token)).body.result.structuredContent;
+        assert.equal(second.items.length, count - 20);
+        assert.equal(second.nextCursor, null);
+      }
+    });
+  }
+});
 
 test("clients browse from the approved Household root into direct Child Items with stable IDs", async (t) => {
   const api = await fixture(t);
@@ -184,7 +349,7 @@ test("a Member approves one named Household and reads only its synced Item field
   });
   const token = await api.connect(flow);
   const tools = await api.call("tools/list", {}, token);
-  assert.deepEqual(tools.body.result.tools.map((tool) => tool.name), ["get_item", "list_children"]);
+  assert.deepEqual(tools.body.result.tools.map((tool) => tool.name), ["get_item", "list_children", "search_inventory"]);
   assert.equal(tools.body.result.tools[0].annotations.readOnlyHint, true);
   const item = await api.item("drill-1", token);
   assert.deepEqual(item.body.result.structuredContent, {
@@ -314,7 +479,7 @@ test("the installed Gemini CLI transport automatically renews and reads an Item"
   t.after(() => client.close());
   await client.connect(transport);
   const tools = await client.listTools();
-  assert.deepEqual(tools.tools.map((tool) => tool.name), ["get_item", "list_children"]);
+  assert.deepEqual(tools.tools.map((tool) => tool.name), ["get_item", "list_children", "search_inventory"]);
   const item = await client.callTool({ name: "get_item", arguments: { itemId: "drill-1" } });
   assert.equal(item.structuredContent.id, "drill-1");
   const saved = await storage.getCredentials("mystuff-renewal");
@@ -627,6 +792,69 @@ test("the installed Gemini CLI browses all 41 synced root children through Fires
   t.diagnostic("Gemini CLI discovered list_children and read 41 synced root children in pages of 20, 20, 1; nested browsing and access-loss rejection passed.");
 });
 
+test("the installed Gemini CLI searches all 41 synced literal matches through Firestore-backed pages", {
+  skip: process.env.FIRESTORE_EMULATOR_HOST === undefined || process.env.GEMINI_CLI_BUNDLE === undefined,
+}, async (t) => {
+  const database = getFirestore(initializeApp({ projectId: "demo-mystuff-search" }, "mcp-search"), "mcp-search-tests");
+  t.after(async () => {
+    for (const collection of ["mcpClients", "mcpApprovals", "mcpCodes", "mcpAccessTokens", "mcpRefreshTokens",
+      "appConnections", "mcpSearchCursors"]) {
+      await database.recursiveDelete(database.collection(collection));
+    }
+  });
+  const api = await fixture(t, database);
+  await seedChildren(api, 41);
+  const flow = await api.begin();
+  const credentials = await api.credentials(flow);
+  const gemini = await isolatedGeminiCli(t);
+  await gemini.storage.saveToken("mystuff-search", {
+    accessToken: credentials.access_token, refreshToken: credentials.refresh_token,
+    tokenType: "Bearer", scope: "inventory:read", expiresAt: Date.now() + 3600000,
+  }, flow.clientId, `${api.origin}/token`, `${api.origin}/mcp`);
+  await gemini.configure({ "mystuff-search": { httpUrl: `${api.origin}/mcp` } });
+  assert.match(await gemini.list(), /mystuff-search[^\n]*Connected/);
+  const transport = await gemini.createTransport("mystuff-search", { httpUrl: `${api.origin}/mcp` }, false, {
+    emitMcpDiagnostic() {}, sanitizationConfig: {},
+  });
+  const client = new Client({ name: "mystuff-search-verification", version: "1.0.0" });
+  t.after(() => client.close());
+  await client.connect(transport);
+  assert.equal((await client.listTools()).tools.find((tool) => tool.name === "search_inventory")?.annotations.readOnlyHint, true);
+  const ids = [];
+  const sizes = [];
+  let cursor;
+  do {
+    const result = await client.callTool({ name: "search_inventory", arguments: { query: "duplicate", ...(cursor ? { cursor } : {}) } });
+    assert.equal(result.isError, undefined);
+    const page = result.structuredContent;
+    assert.deepEqual(JSON.parse(result.content[0].text), page);
+    assert.equal(page.literalOnlyFallback, true);
+    assert.ok(page.items.every((item) => Object.keys(item).sort().join(",") === "description,id,name,path" &&
+      item.path.join("/") === "Our Home/Garage/Cabinet/Drill/Duplicate"));
+    sizes.push(page.items.length);
+    ids.push(...page.items.map((item) => item.id));
+    cursor = page.nextCursor;
+    assert.ok(sizes.length <= 3);
+  } while (cursor !== null);
+  assert.deepEqual(sizes, [20, 20, 1]);
+  assert.equal(new Set(ids).size, 41);
+  assert.deepEqual(ids, Array.from({ length: 41 }, (_, index) => `child-${index}`).sort());
+  const first = await client.callTool({ name: "search_inventory", arguments: { query: "duplicate" } });
+  const marker = first.structuredContent.nextCursor;
+  assert.equal((await client.callTool({ name: "search_inventory", arguments: { query: "drill", cursor: marker } })).isError, true);
+  const other = await api.connect();
+  assert.equal((await api.search({ query: "duplicate", cursor: marker }, other)).body.result.isError, true);
+  const foreign = (await api.credentials(undefined, "other", "foreign")).access_token;
+  assert.equal((await api.search({ query: "duplicate", cursor: marker }, foreign)).body.result.isError, true);
+  assert.deepEqual((await api.search({ query: "Private Item", householdId: "foreign" }, credentials.access_token)).body.result.structuredContent.items, []);
+  await database.doc("households/home/items/cabinet").delete();
+  assert.equal((await client.callTool({ name: "search_inventory", arguments: { query: "duplicate", cursor: marker } })).isError, true);
+  await database.doc("households/home/items/cabinet").set(api.documents.get("households/home/items/cabinet"));
+  await database.doc("memberships/member").delete();
+  await assert.rejects(client.callTool({ name: "search_inventory", arguments: { query: "duplicate", cursor: marker } }));
+  t.diagnostic("Gemini CLI discovered search_inventory and read all 41 synced literal matches in pages of 20, 20, 1 with fallback marked; query/connection/Household isolation, unavailable Inventory, and access-loss rejection passed.");
+});
+
 async function fixture(t, firestore) {
   const documents = new Map(Object.entries({
     "memberships/member": { householdId: "home" },
@@ -647,6 +875,9 @@ async function fixture(t, firestore) {
     "households/home/items/drill-2": { householdId: "home", name: "Drill", parentItemId: "cabinet", description: null },
     "households/foreign/items/private": { householdId: "foreign", name: "Private Item", parentItemId: "foreign", description: "Private" },
   }));
+  for (const [path, data] of documents) {
+    if (/^households\/[^/]+\/items\/[^/]+$/.test(path)) data.tags ??= [];
+  }
   const database = firestore ?? fakeFirestore(documents);
   if (firestore) {
     await Promise.all([...documents].map(([path, value]) => firestore.doc(path).set(value)));
@@ -741,6 +972,7 @@ async function fixture(t, firestore) {
       documents.set(path, data);
       if (firestore) await firestore.doc(path).set(data);
     },
+    search: (arguments_, token) => call("tools/call", { name: "search_inventory", arguments: arguments_ }, token),
     children: (arguments_, token) => call("tools/call", { name: "list_children", arguments: arguments_ }, token),
     item: (itemId, token, extra = {}) => call("tools/call", { name: "get_item", arguments: { itemId, ...extra } }, token),
     documents, advance: (milliseconds) => { time += milliseconds; }, database, origin };
@@ -750,6 +982,7 @@ async function seedChildren(api, count, parentItemId = "drill-1", householdId = 
   for (let index = count - 1; index >= 0; index--) {
     await api.seed(`households/${householdId}/items/child-${index}`, {
       householdId, parentItemId, name: "Duplicate", description: null, displayOrder: index,
+      tags: [],
     });
   }
 }
@@ -783,9 +1016,9 @@ function fakeFirestore(documents) {
       const next = queue.then(async () => {
         const writes = [];
         const result = await operation({
-          get: async (ref) => ref.field ? {
+          get: async (ref) => ref.field || ref.where ? {
             docs: [...documents.keys()].filter((path) => path.startsWith(`${ref.path}/`) &&
-              !path.slice(ref.path.length + 1).includes("/") && documents.get(path)[ref.field] === ref.value)
+              !path.slice(ref.path.length + 1).includes("/") && (!ref.field || documents.get(path)[ref.field] === ref.value))
               .sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b))).map(snapshot),
           } : snapshot(ref.path),
           create: (ref, value) => writes.push(() => {

@@ -1,0 +1,41 @@
+id	parentItemId	name	tags	description	webUrl	photoUrl
+home	-	HouseholdOnly	rootOnly	rootDescription	-	-
+a-desc-substring	home	Description substring	-	A café nearby	-	-
+b-tag-substring	home	Tag substring	decafé	-	-	-
+c-name-substring	home	Decafé	café	-	-	-
+d-desc-prefix	home	Description prefix	-	Café beans	-	-
+e-tag-prefix	home	Tag prefix	café beans	-	-	-
+f-name-prefix	home	Café beans	-	-	-	-
+g-desc-exact	home	Description exact	-	Café	-	-
+h-tag-exact	home	Tag exact	café beans|CAFÉ	-	-	-
+i-name-exact	home	CAFÉ	-	-	-	-
+j-name-duplicate	home	Café	-	-	-	-
+k-german	home	Straße	-	-	-	-
+l-greek	home	ΟΣ	-	-	-	-
+m-turkish	home	İı	-	-	-	-
+n-short	home	Ax	!	-	-	-
+o-internal-space	home	Two  spaces	-	-	-	-
+p-ancestor	home	AncestorOnly	-	-	-	-
+q-excluded	p-ancestor	Plain	-	-	https://urlOnly.example	photoOnly.webp
+r-deseret	home	𐐀𐐁	-	-	-	-
+z00	home	Paged	-	-	-	-
+z01	home	Paged	-	-	-	-
+z02	home	Paged	-	-	-	-
+z03	home	Paged	-	-	-	-
+z04	home	Paged	-	-	-	-
+z05	home	Paged	-	-	-	-
+z06	home	Paged	-	-	-	-
+z07	home	Paged	-	-	-	-
+z08	home	Paged	-	-	-	-
+z09	home	Paged	-	-	-	-
+z10	home	Paged	-	-	-	-
+z11	home	Paged	-	-	-	-
+z12	home	Paged	-	-	-	-
+z13	home	Paged	-	-	-	-
+z14	home	Paged	-	-	-	-
+z15	home	Paged	-	-	-	-
+z16	home	Paged	-	-	-	-
+z17	home	Paged	-	-	-	-
+z18	home	Paged	-	-	-	-
+z19	home	Paged	-	-	-	-
+z20	home	Paged	-	-	-	-

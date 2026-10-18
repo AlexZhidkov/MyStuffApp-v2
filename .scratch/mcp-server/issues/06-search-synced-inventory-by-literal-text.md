@@ -4,7 +4,7 @@
 
 **Blocked by:** 01: Connect Gemini CLI and read Item details.
 
-**Status:** ready-for-agent
+**Status:** implemented
 
 - [x] Literal Search follows Android's query normalization, case- and diacritic-insensitive matching, blank-query behavior, and field/match ordering. Nonblank queries that are ineligible for conceptual Search still receive their literal results.
 - [x] Names, Tags, and Descriptions participate in matching. Household root, Item Paths, web URLs, Photos, and other Item Attachments are not Search inputs.
@@ -12,7 +12,7 @@
 - [x] Literal-only fallback is explicitly marked in the MCP response. Conceptual unavailability leaves the broader literal result set available; authorization failure or unavailable Inventory is an error rather than a successful empty result or conceptual-only failure.
 - [x] Search returns at most 20 Items per page and an explicit continuation marker when more remain. A fixed Inventory with more than 20 matching Items can be read completely in the agreed order without silent truncation or duplicate results.
 - [x] Every page validates current App Connection authorization and the approved Household. Altered requests, foreign-Household identifiers, and continuation markers reused with a different Search context cannot cross the Household boundary or bypass the page limit.
-- [ ] Automated parity fixtures compare representative literal results with Android, including normalization, short queries, ordering, excluded inputs, duplicate names, pagination, and errors. Demonstrate paginated literal Search through Gemini CLI.
+- [x] Automated parity fixtures compare representative literal results with Android, including normalization, short queries, ordering, excluded inputs, duplicate names, pagination, and errors. Demonstrate paginated literal Search through Gemini CLI.
 - [x] Existing Android Search behavior and operational limits remain unchanged; this MCP capability adds no application rate limits, per-Member daily quotas, or application spending caps.
 
 ## Comments
@@ -50,3 +50,19 @@ seam. The TDD skill requires confirmation before writing a test at an additional
 seam; that confirmation has been requested and remains pending. Keep this issue
 open until the Android consumer runs successfully. Reproduction details are in
 [`docs/mcp-server.md`](../../../docs/mcp-server.md).
+
+### 18 October 2026 — Android parity confirmed; issue completed
+
+The user confirmed the additional Android `InventoryUiState.searchResults`
+test seam. `LiteralSearchParityTest` now runs all 21 shared TSV cases against
+Android's existing Search implementation. Both Android and authenticated MCP
+HTTP pass the same expected results, including the complete 21-result paginated
+case. Android application code and Search behavior remain unchanged.
+
+The full Android suite now passes all 231 tests, with no failures or skips;
+Kotlin compilation and the repeated MCP HTTP fixture check also pass. The full
+backend suite's 130 tests, 50 rules tests, and installed Gemini CLI demonstration
+remain valid: this follow-up adds only the Android test and completion records.
+
+The final independent Standards and Spec reviews both report zero findings;
+the original Android parity coverage gap is closed.

@@ -340,7 +340,8 @@ marker isolation, unavailable Inventory, and access loss between pages passed.
 This used synthetic Inventory, temporary isolated CLI settings and credentials,
 and no production deployment or live Member Inventory.
 
-The HTTP suite also exercises shared literal Search fixtures under
+The authenticated MCP HTTP suite and Android's `LiteralSearchParityTest` both
+exercise the same 21 shared literal Search fixtures under
 `app/src/test/resources/literal-search-*.tsv`: field/match ranking, duplicate
 names, Unicode whitespace, composed/decomposed accents, case-fold expansion,
 Greek/Turkish/supplementary letters, short and punctuation queries, blank/no
@@ -354,11 +355,12 @@ browsing check above. Resolve the active `gemini` executable before selecting
 its bundle when multiple CLI installations exist. All **130 backend tests**
 passed with Auth, Firestore, Storage, Functions, and installed CLI checks enabled,
 with no skips. Changed JavaScript files pass syntax checks; no JavaScript
-type-checking task is configured. All **50 rules tests**, the existing **210
-Android unit tests**, and Kotlin compilation passed. Standards review found no
-actionable issues. Spec review found no implementation defects and one pending
-acceptance gap: an Android test consumer for the shared TSV fixtures is awaiting
-the additional test-seam confirmation required by the TDD skill.
+type-checking task is configured. All **50 rules tests**, **231 Android unit
+tests**, and Kotlin compilation passed. The shared fixtures pass through both
+Android's existing `InventoryUiState.searchResults` seam and authenticated MCP
+HTTP. The user confirmed all test seams, including the Android fixture consumer.
+The initial review's Android fixture coverage gap is now closed. Final independent
+Standards and Spec reviews both found zero actionable issues.
 
 ### 17 October 2026 — individual connection management
 

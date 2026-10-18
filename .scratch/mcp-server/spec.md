@@ -13,8 +13,9 @@ Child Item browsing and has passed local Firestore and real installed Gemini CLI
 pagination checks; its changes have not been deployed. Issue 06 is implemented:
 literal Search passes shared Android/MCP parity fixtures, local Firestore checks,
 and installed Gemini CLI pagination checks; its changes have not been deployed.
-Issue 07 adds conceptual Search and passes local verification; live provider
-verification awaits explicit authorization. Issue 08 is pending.
+Issue 07 is implemented: conceptual Search passes shared Android/MCP fixtures
+and the approved live Gemini smoke through the installed CLI with synthetic
+local Firestore Inventory; its changes have not been deployed. Issue 08 is pending.
 
 ## Purpose and scope
 

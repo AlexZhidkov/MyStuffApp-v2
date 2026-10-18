@@ -361,11 +361,11 @@ access loss or unavailable Inventory during successful or failed inference.
 
 All 160 backend tests pass with the full emulators and installed CLI checks
 enabled, with no skips. All 247 Android tests and all 50 rules tests pass.
-Kotlin compilation and
-changed-JavaScript syntax checks pass; no JavaScript typechecking task is
+Kotlin compilation and changed-JavaScript syntax checks pass; no JavaScript typechecking task is
 configured. After the ranking cleanup, all 103 MCP HTTP tests pass again with
-Firestore and installed CLI checks enabled, with no skips. Standards review has zero findings; Spec review identifies only
-the pending live-provider acceptance check.
+Firestore and installed CLI checks enabled, with no skips. Standards review
+has zero findings; the initial Spec review identified only the live-provider
+acceptance check, completed below.
 
 The installed Gemini CLI uses real Firestore-emulator vector retrieval and a
 deterministic provider fake to demonstrate `watch` finding `Clock`, combined
@@ -385,6 +385,18 @@ GEMINI_CLI_BUNDLE=/path/to/gemini-cli/bundle/chunk-exporting-createTransport.js 
   'node --test --test-name-pattern="installed Gemini CLI finds" functions/test/mcp-http.test.js'
 ./gradlew :app:testDebugUnitTest --tests com.azhidkov.mystuff.ConceptualSearchParityTest
 ```
+
+With the user's subsequent approval, the same smoke passed with live
+`gemini-embedding-2` embeddings. The installed Gemini CLI found Clock for `watch`,
+read combined results in pages of 20/20/2, and received authorized literal
+fallback in pages of 20/20/1 after a controlled provider failure. Household
+content isolation and access-loss rejection passed. The focused live smoke
+passed with no failures or skips. Three paid embedding calls processed only
+synthetic Clock text and the `watch`/`duplicate` queries. The existing project
+credential stayed in memory; no deployment or production Inventory access
+occurred. This closes issue 07's remaining acceptance item. Final independent Standards
+and Spec reviews both report zero findings. It does not establish
+production index readiness, which remains part of deployment verification.
 
 After explicit authorization, the same smoke can use real Gemini embeddings by
 setting `MCP_SEARCH_LIVE_SMOKE=1` and supplying `GEMINI_API_KEY` securely in the
